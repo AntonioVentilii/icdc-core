@@ -1,0 +1,32 @@
+{
+	"canisters": {
+		"clearing": {
+			"type": "rust",
+			"package": "clearing",
+			"candid": "src/clearing/clearing.did"
+		},
+		"registry": {
+			"type": "rust",
+			"package": "registry",
+			"candid": "src/registry/registry.did"
+		}
+	},
+	"defaults": {
+		"build": {
+			"args": "",
+			"packtool": ""
+		}
+	},
+	"output_env_file": ".env",
+	"version": 1,
+	"networks": {
+		"staging": {
+			"providers": ["https://icp0.io"],
+			"type": "persistent"
+		},
+		"local": {
+			"bind": "127.0.0.1:4943",
+			"type": "ephemeral"
+		}
+	}
+}

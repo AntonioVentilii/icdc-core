@@ -1,0 +1,41 @@
+name: Prepare
+
+description: Checkout and install dependencies
+
+runs:
+  using: composite
+  steps:
+    - name: Setup node
+      uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e # v4.3.0
+      with:
+        node-version-file: '.node-version'
+        registry-url: 'https://registry.npmjs.org'
+        cache: 'npm'
+
+    - name: Install dependencies
+      shell: bash
+      run: npm ci
+
+    - name: Install rust
+      shell: bash
+      run: scripts/setup rust
+
+    - name: Install shfmt
+      shell: bash
+      run: scripts/setup shfmt
+
+    - name: Install binstall
+      shell: bash
+      run: scripts/setup cargo-binstall
+
+    - name: Install cargo dependency sorter
+      shell: bash
+      run: cargo binstall --no-confirm cargo-sort@1.0.9
+
+    - name: Install zizmor
+      shell: bash
+      run: scripts/setup zizmor
+
+    - name: Install yq
+      shell: bash
+      run: scripts/setup yq

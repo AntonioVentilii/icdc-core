@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+
+# Needs env vars:
+POCKET_IC_SERVER_VERSION="${POCKET_IC_SERVER_VERSION:-6.0.0}"
+POCKET_IC_SERVER_PATH="${POCKET_IC_SERVER_PATH:-./target/pocket-ic}"
+
+if [[ $OSTYPE == "linux-gnu"* ]] || [[ $RUNNER_OS == "Linux" ]]; then
+  PLATFORM=linux
+elif [[ $OSTYPE == "darwin"* ]] || [[ $RUNNER_OS == "macOS" ]]; then
+  PLATFORM=darwin
+else
+  echo "OS not supported: ${OSTYPE:-$RUNNER_OS}"
+  exit 1
+fi
+
+if "$POCKET_IC_SERVER_PATH" --version 2>/dev/null | grep -wq "$POCKET_IC_SERVER_VERSION"; then
+  echo "PocketIC server already exists at: $POCKET_IC_SERVER_PATH"
+  echo "Skipping download."
+else
+  # Detect architecture
+  ARCH=$(uname -m)
+  if [ "$PLATFORM" == "darwin" ]; then
+    if [ "$ARCH" == "arm64" ]; then
+      ARCH="arm64"
+    fi
+  fi
+  # Platform-specific naming in releases can vary, but usually it's pocket-ic-<arch>-<os>.gz
+
+  echo "Downloading PocketIC version ${POCKET_IC_SERVER_VERSION} for ${PLATFORM} (${ARCH})."
+  # Ensure the directory exists
+  mkdir -p "$(dirname "$POCKET_IC_SERVER_PATH")"
+
+  URL="https://github.com/dfinity/pocketic/releases/download/${POCKET_IC_SERVER_VERSION}/pocket-ic-${ARCH}-${PLATFORM}.gz"
+  echo "Attempting to download: $URL"
+
+  HTTP_STATUS=$(curl -sSL -w "%{http_code}" "$URL" -o "${POCKET_IC_SERVER_PATH}.gz")
+
+  if [ "$HTTP_STATUS" -ne 200 ]; then
+    if [ "$PLATFORM" == "darwin" ] && [ "$ARCH" == "arm64" ]; then
+      echo "Native arm64 binary not found (HTTP $HTTP_STATUS). Falling back to x86_64 (Rosetta)."
+      ARCH="x86_64"
+      URL="https://github.com/dfinity/pocketic/releases/download/${POCKET_IC_SERVER_VERSION}/pocket-ic-${ARCH}-${PLATFORM}.gz"
+      echo "Attempting to download: $URL"
+      HTTP_STATUS=$(curl -sSL -w "%{http_code}" "$URL" -o "${POCKET_IC_SERVER_PATH}.gz")
+    fi
+  fi
+
+  if [ "$HTTP_STATUS" -ne 200 ]; then
+    echo "Download failed with status $HTTP_STATUS!"
+    rm -f "${POCKET_IC_SERVER_PATH}.gz"
+    exit 1
+  fi
+
+  gunzip -f "${POCKET_IC_SERVER_PATH}.gz"
+  chmod +x "$POCKET_IC_SERVER_PATH"
+  echo "PocketIC installed to $POCKET_IC_SERVER_PATH"
+fi

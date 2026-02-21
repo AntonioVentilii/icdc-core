@@ -1,0 +1,18 @@
+{
+	"name": "valut-core",
+	"version": "0.0.1",
+	"scripts": {
+		"build": "./scripts/build.sh",
+		"test": "./scripts/test-integration.sh",
+		"format": "prettier --write . && ./scripts/format.sh",
+		"lint": "prettier --check . && ./scripts/lint.sh",
+		"deploy:prod": "dfx deploy --ic --upgrade-unchanged",
+		"deploy:staging": "dfx deploy --network staging --upgrade-unchanged"
+	},
+	"devDependencies": {
+		"@icp-sdk/bindgen": "^0.2.1",
+		"prettier": "^3.8.0",
+		"prettier-plugin-motoko": "^0.12.5",
+		"prettier-plugin-organize-imports": "^4.3.0"
+	}
+}
