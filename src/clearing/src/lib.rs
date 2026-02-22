@@ -1,7 +1,8 @@
 pub mod api;
 pub mod error;
 pub mod memory;
-mod params;
+pub mod params;
+pub mod results;
 pub mod types;
 
 use candid::{Nat, Principal};
@@ -11,11 +12,11 @@ use shared::{MarginAccount, Position};
 use types::PositionProof;
 
 use crate::{
-    error::ClearingError,
     params::{
         FreezePositionForTransferParams, GetPositionParams, SettleSeriesParams,
         SubmitMatchedTradeParams,
     },
+    results::{SettleSeriesResult, SubmitMatchedTradeResult, WithdrawCollateralResult},
 };
 
 #[pre_upgrade]

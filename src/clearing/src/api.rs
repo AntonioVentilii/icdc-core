@@ -10,6 +10,7 @@ use crate::{
         FreezePositionForTransferParams, GetPositionParams, SettleSeriesParams,
         SubmitMatchedTradeParams,
     },
+    results::{SettleSeriesResult, SubmitMatchedTradeResult, WithdrawCollateralResult},
     types::PositionProof,
 };
 
@@ -30,109 +31,117 @@ pub fn deposit_collateral(amount: Nat) {
 }
 
 #[update]
-pub fn withdraw_collateral(amount: Nat) -> Result<(), ClearingError> {
-    let caller = ic_cdk::caller();
-    let amount_u128: u128 = amount.0.try_into().unwrap_or(0);
+pub fn withdraw_collateral(amount: Nat) -> WithdrawCollateralResult {
+    let result: Result<(), ClearingError> = {
+        let caller = ic_cdk::caller();
+        let amount_u128: u128 = amount.0.try_into().unwrap_or(0);
 
-    MARGIN_ACCOUNTS.with(|accounts| {
-        let mut accounts = accounts.borrow_mut();
-        if let Some(account) = accounts.get_mut(&caller) {
-            if account.collateral_balance >= amount_u128 + account.required_margin {
-                account.collateral_balance -= amount_u128;
-                Ok(())
+        MARGIN_ACCOUNTS.with(|accounts| {
+            let mut accounts = accounts.borrow_mut();
+            if let Some(account) = accounts.get_mut(&caller) {
+                if account.collateral_balance >= amount_u128 + account.required_margin {
+                    account.collateral_balance -= amount_u128;
+                    Ok(())
+                } else {
+                    Err(ClearingError::InsufficientExcessMargin)
+                }
             } else {
-                Err(ClearingError::InsufficientExcessMargin)
+                Err(ClearingError::NoMarginAccountFound)
             }
-        } else {
-            Err(ClearingError::NoMarginAccountFound)
-        }
-    })
+        })
+    };
+
+    result.into()
 }
 
 #[update]
-pub fn submit_matched_trade(params: SubmitMatchedTradeParams) -> Result<bool, ClearingError> {
-    let SubmitMatchedTradeParams {
-        series_id,
-        buyer,
-        seller,
-        qty,
-        price,
-    } = params;
-
-    let required_margin = qty.unsigned_abs() * (price as u128) / 1000000;
-
-    MARGIN_ACCOUNTS.with(|accounts| {
-        let mut accounts = accounts.borrow_mut();
-
-        let buyer_account = accounts.entry(buyer).or_insert(MarginAccount {
-            user: buyer,
-            collateral_balance: 0,
-            required_margin: 0,
-        });
-
-        let new_buyer_required = buyer_account.required_margin + required_margin;
-        if new_buyer_required > buyer_account.collateral_balance {
-            return Err(ClearingError::BuyerInsufficientMargin);
-        }
-        buyer_account.required_margin = new_buyer_required;
-
-        let seller_account = accounts.entry(seller).or_insert(MarginAccount {
-            user: seller,
-            collateral_balance: 0,
-            required_margin: 0,
-        });
-
-        let new_seller_required = seller_account.required_margin + required_margin;
-        if new_seller_required > seller_account.collateral_balance {
-            return Err(ClearingError::SellerInsufficientMargin);
-        }
-        seller_account.required_margin = new_seller_required;
-        Ok(())
-    })?;
-
-    POSITIONS.with(|positions| {
-        let mut positions = positions.borrow_mut();
-
-        let buyer_pos = positions
-            .entry((buyer, series_id.clone()))
-            .or_insert(Position {
-                user: buyer,
-                series_id: series_id.clone(),
-                net_qty: 0,
-            });
-        buyer_pos.net_qty += qty;
-
-        let seller_pos = positions
-            .entry((seller, series_id.clone()))
-            .or_insert(Position {
-                user: seller,
-                series_id: series_id.clone(),
-                net_qty: 0,
-            });
-        seller_pos.net_qty -= qty;
-    });
-
-    let event_id = NEXT_EVENT_ID.with(|id| {
-        let mut id = id.borrow_mut();
-        let current = *id;
-        *id += 1;
-        current
-    });
-
-    EVENTS.with(|events| {
-        events.borrow_mut().push(Event {
-            event_id,
-            clearing_id: ic_cdk::id(),
+pub fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMatchedTradeResult {
+    let result: Result<bool, ClearingError> = (|| {
+        let SubmitMatchedTradeParams {
             series_id,
-            user: buyer,
+            buyer,
+            seller,
             qty,
             price,
-            event_type: EventType::Executed,
-            timestamp: time(),
-        });
-    });
+        } = params;
 
-    Ok(true)
+        let required_margin = qty.unsigned_abs() * (price as u128) / 1000000;
+
+        MARGIN_ACCOUNTS.with(|accounts| {
+            let mut accounts = accounts.borrow_mut();
+
+            let buyer_account = accounts.entry(buyer).or_insert(MarginAccount {
+                user: buyer,
+                collateral_balance: 0,
+                required_margin: 0,
+            });
+
+            let new_buyer_required = buyer_account.required_margin + required_margin;
+            if new_buyer_required > buyer_account.collateral_balance {
+                return Err(ClearingError::BuyerInsufficientMargin);
+            }
+            buyer_account.required_margin = new_buyer_required;
+
+            let seller_account = accounts.entry(seller).or_insert(MarginAccount {
+                user: seller,
+                collateral_balance: 0,
+                required_margin: 0,
+            });
+
+            let new_seller_required = seller_account.required_margin + required_margin;
+            if new_seller_required > seller_account.collateral_balance {
+                return Err(ClearingError::SellerInsufficientMargin);
+            }
+            seller_account.required_margin = new_seller_required;
+            Ok(())
+        })?;
+
+        POSITIONS.with(|positions| {
+            let mut positions = positions.borrow_mut();
+
+            let buyer_pos = positions
+                .entry((buyer, series_id.clone()))
+                .or_insert(Position {
+                    user: buyer,
+                    series_id: series_id.clone(),
+                    net_qty: 0,
+                });
+            buyer_pos.net_qty += qty;
+
+            let seller_pos = positions
+                .entry((seller, series_id.clone()))
+                .or_insert(Position {
+                    user: seller,
+                    series_id: series_id.clone(),
+                    net_qty: 0,
+                });
+            seller_pos.net_qty -= qty;
+        });
+
+        let event_id = NEXT_EVENT_ID.with(|id| {
+            let mut id = id.borrow_mut();
+            let current = *id;
+            *id += 1;
+            current
+        });
+
+        EVENTS.with(|events| {
+            events.borrow_mut().push(Event {
+                event_id,
+                clearing_id: ic_cdk::id(),
+                series_id,
+                user: buyer,
+                qty,
+                price,
+                event_type: EventType::Executed,
+                timestamp: time(),
+            });
+        });
+
+        Ok(true)
+    })();
+
+    result.into()
 }
 
 #[query]
@@ -151,40 +160,44 @@ pub fn get_margin_account(user: Principal) -> Option<MarginAccount> {
 }
 
 #[update]
-pub fn settle_series(params: SettleSeriesParams) -> Result<(), ClearingError> {
-    let SettleSeriesParams {
-        series_id,
-        settlement_price,
-    } = params;
+pub fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
+    let result: Result<(), ClearingError> = {
+        let SettleSeriesParams {
+            series_id,
+            settlement_price,
+        } = params;
 
-    POSITIONS.with(|positions| {
-        let mut positions = positions.borrow_mut();
-        let users: Vec<Principal> = positions
-            .keys()
-            .filter(|(_, sid)| *sid == series_id)
-            .map(|(u, _)| *u)
-            .collect();
+        POSITIONS.with(|positions| {
+            let mut positions = positions.borrow_mut();
+            let users: Vec<Principal> = positions
+                .keys()
+                .filter(|(_, sid)| *sid == series_id)
+                .map(|(u, _)| *u)
+                .collect();
 
-        for user in users {
-            if let Some(pos) = positions.remove(&(user, series_id.clone())) {
-                let payoff = (pos.net_qty as f64) * (settlement_price as f64);
+            for user in users {
+                if let Some(pos) = positions.remove(&(user, series_id.clone())) {
+                    let payoff = (pos.net_qty as f64) * (settlement_price as f64);
 
-                MARGIN_ACCOUNTS.with(|accounts| {
-                    let mut accounts = accounts.borrow_mut();
-                    if let Some(account) = accounts.get_mut(&user) {
-                        if payoff >= 0.0 {
-                            account.collateral_balance += payoff as u128;
-                        } else {
-                            account.collateral_balance -= payoff.abs() as u128;
+                    MARGIN_ACCOUNTS.with(|accounts| {
+                        let mut accounts = accounts.borrow_mut();
+                        if let Some(account) = accounts.get_mut(&user) {
+                            if payoff >= 0.0 {
+                                account.collateral_balance += payoff as u128;
+                            } else {
+                                account.collateral_balance -= payoff.abs() as u128;
+                            }
+                            account.required_margin = 0;
                         }
-                        account.required_margin = 0;
-                    }
-                });
+                    });
+                }
             }
-        }
-    });
+        });
 
-    Ok(())
+        Ok(())
+    };
+
+    result.into()
 }
 
 #[update]

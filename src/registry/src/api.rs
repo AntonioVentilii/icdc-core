@@ -2,54 +2,59 @@ use ic_cdk_macros::{query, update};
 use shared::Series;
 
 use crate::{
-    error::RegistryError, memory::SERIES_STORE, params::AddSeriesParams, utils::canonical_id_part,
+    error::RegistryError, memory::SERIES_STORE, params::AddSeriesParams, results::AddSeriesResult,
+    utils::canonical_id_part,
 };
 
 #[update]
-pub fn add_series(params: AddSeriesParams) -> Result<String, RegistryError> {
-    let AddSeriesParams {
-        underlying,
-        expiry,
-        payoff_type,
-        strike,
-        settlement_asset,
-        oracle_source,
-    } = params;
+pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
+    let result: Result<String, RegistryError> = {
+        let AddSeriesParams {
+            underlying,
+            expiry,
+            payoff_type,
+            strike,
+            settlement_asset,
+            oracle_source,
+        } = params;
 
-    let underlying = canonical_id_part(&underlying);
-    let settlement_asset = canonical_id_part(&settlement_asset);
-    let oracle_source = canonical_id_part(&oracle_source);
+        let underlying = canonical_id_part(&underlying);
+        let settlement_asset = canonical_id_part(&settlement_asset);
+        let oracle_source = canonical_id_part(&oracle_source);
 
-    let series_id = Series::generate_id(
-        &underlying,
-        expiry,
-        &payoff_type,
-        strike,
-        &settlement_asset,
-        &oracle_source,
-    );
+        let series_id = Series::generate_id(
+            &underlying,
+            expiry,
+            &payoff_type,
+            strike,
+            &settlement_asset,
+            &oracle_source,
+        );
 
-    let series = Series {
-        series_id: series_id.clone(),
-        underlying,
-        expiry,
-        payoff_type,
-        strike,
-        settlement_asset,
-        oracle_source,
+        let series = Series {
+            series_id: series_id.clone(),
+            underlying,
+            expiry,
+            payoff_type,
+            strike,
+            settlement_asset,
+            oracle_source,
+        };
+
+        SERIES_STORE.with(|store| {
+            let mut store = store.borrow_mut();
+
+            if store.contains_key(&series_id) {
+                return Err(RegistryError::SeriesAlreadyExists);
+            }
+
+            store.insert(series_id.clone(), series);
+
+            Ok(series_id)
+        })
     };
 
-    SERIES_STORE.with(|store| {
-        let mut store = store.borrow_mut();
-
-        if store.contains_key(&series_id) {
-            return Err(RegistryError::SeriesAlreadyExists);
-        }
-
-        store.insert(series_id.clone(), series);
-        
-        Ok(series_id)
-    })
+    result.into()
 }
 
 #[query]

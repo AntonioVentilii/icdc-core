@@ -6,7 +6,9 @@ type AddSeriesParams = record {
 	expiry : nat64;
 	oracle_source : text
 };
+type AddSeriesResult = variant { Ok : text; Err : RegistryError };
 type PayoffType = variant { Put; Binary; Call };
+type RegistryError = variant { SeriesAlreadyExists };
 type Series = record {
 	strike : opt nat64;
 	payoff_type : PayoffType;
@@ -17,7 +19,7 @@ type Series = record {
 	oracle_source : text
 };
 service : {
-	add_series : (AddSeriesParams) -> (text);
+	add_series : (AddSeriesParams) -> (AddSeriesResult);
 	get_series : (text) -> (opt Series) query;
 	list_series : () -> (vec Series) query
 }
