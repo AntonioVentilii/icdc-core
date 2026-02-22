@@ -10,4 +10,8 @@ pub enum ClearingError {
     TransferFailed(String),
     UnsupportedLedger,
     Unauthorized,
+    RegistryNotSet,
+    SeriesNotFound,
+    UnsupportedSettlementAsset,
+    GettingRegistrySeriesFailed(String),
 }

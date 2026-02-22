@@ -9,6 +9,20 @@
 			"type": "rust",
 			"package": "registry",
 			"candid": "src/registry/registry.did"
+		},
+		"icp_ledger": {
+			"type": "custom",
+			"build": "scripts/build.icp_ledger.sh",
+			"candid": "target/ic/icp_ledger.did",
+			"wasm": "target/ic/icp_ledger.wasm",
+			"init_arg_file": "target/ic/icp_ledger.args.did",
+			"specified_id": "ryjl3-tyaaa-aaaaa-aaaba-cai",
+			"remote": {
+				"id": {
+					"ic": "ryjl3-tyaaa-aaaaa-aaaba-cai",
+					"staging": "ryjl3-tyaaa-aaaaa-aaaba-cai"
+				}
+			}
 		}
 	},
 	"defaults": {

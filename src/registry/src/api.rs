@@ -19,7 +19,6 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
         } = params;
 
         let underlying = canonical_id_part(&underlying);
-        let settlement_asset = canonical_id_part(&settlement_asset);
         let oracle_source = canonical_id_part(&oracle_source);
 
         let series_id = Series::generate_id(

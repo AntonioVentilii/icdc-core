@@ -1,16 +1,19 @@
+type AcceptPositionTransferResult = variant { Ok : bool; Err : ClearingError };
+type Asset = variant { Icrc : principal };
 type ClearingError = variant {
 	BuyerInsufficientMargin;
 	InsufficientExcessMargin;
 	NoMarginAccountFound;
+	GettingRegistrySeriesFailed : text;
+	UnsupportedSettlementAsset;
 	SellerInsufficientMargin;
 	Unauthorized;
+	RegistryNotSet;
+	SeriesNotFound;
 	TransferFailed : text;
 	UnsupportedLedger
 };
-type DepositCollateralParams = record {
-	amount : nat;
-	token_ledger : principal
-};
+type DepositCollateralParams = record { asset : Asset; amount : nat };
 type DepositCollateralResult = variant { Ok; Err : ClearingError };
 type FreezePositionForTransferParams = record {
 	series_id : text;
@@ -20,8 +23,9 @@ type GetPositionParams = record { series_id : text; user : principal };
 type MarginAccount = record {
 	required_margin : nat;
 	user : principal;
-	collateral_balance : nat
+	balances : vec record { Asset; nat }
 };
+type PayoffType = variant { Put; Binary; Call };
 type Position = record { series_id : text; net_qty : int; user : principal };
 type PositionProof = record {
 	qty : int;
@@ -30,8 +34,18 @@ type PositionProof = record {
 	user : principal;
 	clearing_id : principal
 };
+type Series = record {
+	strike : opt nat64;
+	payoff_type : PayoffType;
+	series_id : text;
+	settlement_asset : SettlementAsset;
+	underlying : text;
+	expiry : nat64;
+	oracle_source : text
+};
 type SettleSeriesParams = record { series_id : text; settlement_price : nat64 };
 type SettleSeriesResult = variant { Ok; Err : ClearingError };
+type SettlementAsset = variant { Icp; CkUsdc };
 type SubmitMatchedTradeParams = record {
 	qty : int;
 	series_id : text;
@@ -41,13 +55,15 @@ type SubmitMatchedTradeParams = record {
 };
 type SubmitMatchedTradeResult = variant { Ok : bool; Err : ClearingError };
 service : {
-	accept_position_transfer : (PositionProof) -> (bool);
+	accept_position_transfer : (PositionProof) -> (AcceptPositionTransferResult);
 	deposit_collateral : (DepositCollateralParams) -> (DepositCollateralResult);
 	freeze_position_for_transfer : (FreezePositionForTransferParams) -> (
 		opt PositionProof
 	);
 	get_margin_account : (principal) -> (opt MarginAccount) query;
 	get_position : (GetPositionParams) -> (opt Position) query;
+	list_series : () -> (vec Series) query;
+	set_registry_canister : (principal) -> ();
 	settle_series : (SettleSeriesParams) -> (SettleSeriesResult);
 	submit_matched_trade : (SubmitMatchedTradeParams) -> (
 		SubmitMatchedTradeResult

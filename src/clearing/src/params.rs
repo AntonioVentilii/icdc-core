@@ -1,16 +1,17 @@
 use candid::{CandidType, Deserialize, Principal};
 use serde::Serialize;
+use shared::types::Asset;
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct DepositCollateralParams {
     pub amount: candid::Nat,
-    pub token_ledger: Principal,
+    pub asset: Asset,
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct WithdrawCollateralParams {
     pub amount: candid::Nat,
-    pub token_ledger: Principal,
+    pub asset: Asset,
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]

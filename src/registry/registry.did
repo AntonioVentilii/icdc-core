@@ -1,7 +1,7 @@
 type AddSeriesParams = record {
 	strike : opt nat64;
 	payoff_type : PayoffType;
-	settlement_asset : text;
+	settlement_asset : SettlementAsset;
 	underlying : text;
 	expiry : nat64;
 	oracle_source : text
@@ -13,11 +13,12 @@ type Series = record {
 	strike : opt nat64;
 	payoff_type : PayoffType;
 	series_id : text;
-	settlement_asset : text;
+	settlement_asset : SettlementAsset;
 	underlying : text;
 	expiry : nat64;
 	oracle_source : text
 };
+type SettlementAsset = variant { Icp; CkUsdc };
 service : {
 	add_series : (AddSeriesParams) -> (AddSeriesResult);
 	get_series : (text) -> (opt Series) query;

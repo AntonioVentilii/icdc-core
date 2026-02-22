@@ -58,3 +58,17 @@ impl From<Result<(), ClearingError>> for SettleSeriesResult {
         }
     }
 }
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub enum AcceptPositionTransferResult {
+    Ok(bool),
+    Err(ClearingError),
+}
+impl From<Result<bool, ClearingError>> for AcceptPositionTransferResult {
+    fn from(value: Result<bool, ClearingError>) -> Self {
+        match value {
+            Ok(v) => AcceptPositionTransferResult::Ok(v),
+            Err(e) => AcceptPositionTransferResult::Err(e),
+        }
+    }
+}

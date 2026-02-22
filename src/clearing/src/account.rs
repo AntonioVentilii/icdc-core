@@ -1,10 +1,20 @@
 use candid::Principal;
 use sha2::{Digest, Sha256};
+use shared::types::{Asset, SettlementAsset};
 
 use crate::memory::{ckusdc_ledger, icp_ledger};
 
-pub fn is_supported_ledger(ledger_id: &Principal) -> bool {
-    ledger_id == &icp_ledger() || ledger_id == &ckusdc_ledger()
+pub fn get_ledger_for_asset(asset: &SettlementAsset) -> Principal {
+    match asset {
+        SettlementAsset::Icp => icp_ledger(),
+        SettlementAsset::CkUsdc => ckusdc_ledger(),
+    }
+}
+
+pub fn is_supported_asset(asset: &Asset) -> bool {
+    match asset {
+        Asset::Icrc(ledger_id) => ledger_id == &icp_ledger() || ledger_id == &ckusdc_ledger(),
+    }
 }
 
 pub fn derive_user_subaccount(user: Principal) -> [u8; 32] {
