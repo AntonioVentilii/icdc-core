@@ -18,7 +18,14 @@ pub fn add_series(params: AddSeriesParams) -> String {
     let settlement_asset = canonical_id_part(&settlement_asset);
     let oracle_source = canonical_id_part(&oracle_source);
 
-    let series_id = Series::generate_id(&underlying, expiry, &payoff_type, strike);
+    let series_id = Series::generate_id(
+        &underlying,
+        expiry,
+        &payoff_type,
+        strike,
+        &settlement_asset,
+        &oracle_source,
+    );
 
     let series = Series {
         series_id: series_id.clone(),
@@ -31,7 +38,13 @@ pub fn add_series(params: AddSeriesParams) -> String {
     };
 
     SERIES_STORE.with(|store| {
-        store.borrow_mut().insert(series_id.clone(), series);
+        let mut store = store.borrow_mut();
+
+        if store.contains_key(&series_id) {
+            ic_cdk::trap("Series already exists");
+        }
+
+        store.insert(series_id.clone(), series);
     });
 
     series_id

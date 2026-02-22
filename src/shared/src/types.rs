@@ -16,6 +16,15 @@ pub enum PayoffType {
     Call,
     Put,
 }
+impl PayoffType {
+    pub fn as_id_bytes(&self) -> &'static [u8] {
+        match self {
+            PayoffType::Binary => b"BINARY",
+            PayoffType::Call => b"CALL",
+            PayoffType::Put => b"PUT",
+        }
+    }
+}
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct Series {
@@ -33,18 +42,36 @@ impl Series {
         expiry: u64,
         payoff_type: &PayoffType,
         strike: Option<u64>,
+        settlement_asset: &str,
+        oracle_source: &str,
     ) -> String {
         let mut hasher = Sha256::new();
+
+        // 🔐 Domain separator (versioned for future upgrades)
+        hasher.update(b"DERIV_SERIES_V1");
+
+        // Explicit field separators to avoid ambiguity
+        hasher.update(b"|UNDERLYING|");
         hasher.update(underlying.as_bytes());
+
+        hasher.update(b"|EXPIRY|");
         hasher.update(expiry.to_be_bytes());
-        hasher.update(match payoff_type {
-            PayoffType::Binary => b"binary" as &[u8],
-            PayoffType::Call => b"call" as &[u8],
-            PayoffType::Put => b"put" as &[u8],
-        });
-        if let Some(s) = strike {
-            hasher.update(s.to_be_bytes());
+
+        hasher.update(b"|PAYOFF|");
+        hasher.update(payoff_type.as_id_bytes());
+
+        hasher.update(b"|STRIKE|");
+        match strike {
+            Some(s) => hasher.update(s.to_be_bytes()),
+            None => hasher.update(b"NONE"),
         }
+
+        hasher.update(b"|SETTLEMENT|");
+        hasher.update(settlement_asset.as_bytes());
+
+        hasher.update(b"|ORACLE|");
+        hasher.update(oracle_source.as_bytes());
+
         hex::encode(hasher.finalize())
     }
 }
