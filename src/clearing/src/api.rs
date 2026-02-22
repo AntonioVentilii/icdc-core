@@ -13,6 +13,7 @@ use shared::types::{Asset, Event, EventType, MarginAccount, Position, Series};
 use crate::{
     account::{derive_user_subaccount, is_supported_asset},
     error::ClearingError,
+    guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{EVENTS, MARGIN_ACCOUNTS, NEXT_EVENT_ID, POSITIONS, REGISTRY_CANISTER, SERIES},
     params::{
         DepositCollateralParams, FreezePositionForTransferParams, GetPositionParams,
@@ -26,7 +27,7 @@ use crate::{
     types::PositionProof,
 };
 
-#[update]
+#[update(guard = "caller_is_not_anonymous")]
 pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositCollateralResult {
     let result: Result<(), ClearingError> = (async {
         let caller = ic_cdk::caller();
@@ -88,7 +89,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
     result.into()
 }
 
-#[update]
+#[update(guard = "caller_is_not_anonymous")]
 pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCollateralResult {
     let result: Result<(), ClearingError> = (async {
         let caller = ic_cdk::caller();
@@ -157,15 +158,14 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
     result.into()
 }
 
-#[update]
+#[update(guard = "caller_is_controller")]
 pub fn set_registry_canister(registry: Principal) {
-    // TODO: add authentication
     REGISTRY_CANISTER.with(|r| {
         *r.borrow_mut() = registry;
     });
 }
 
-#[update]
+#[update(guard = "caller_is_not_anonymous")]
 pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMatchedTradeResult {
     let result: Result<bool, ClearingError> = (async {
         let SubmitMatchedTradeParams {
@@ -284,7 +284,7 @@ pub fn list_series() -> Vec<Series> {
     SERIES.with(|s| s.borrow().values().cloned().collect())
 }
 
-#[update]
+#[update(guard = "caller_is_controller")]
 pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
     let result: Result<(), ClearingError> = (async {
         let SettleSeriesParams {
@@ -392,7 +392,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
     result.into()
 }
 
-#[update]
+#[update(guard = "caller_is_controller")]
 pub fn freeze_position_for_transfer(
     params: FreezePositionForTransferParams,
 ) -> Option<PositionProof> {
@@ -414,7 +414,7 @@ pub fn freeze_position_for_transfer(
     })
 }
 
-#[update]
+#[update(guard = "caller_is_controller")]
 pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTransferResult {
     let result: Result<bool, ClearingError> = (async {
         ensure_series_registered(&proof.series_id).await?;
