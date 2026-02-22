@@ -11,7 +11,11 @@ permissions:
 
 jobs:
   integration:
+    name: Integration Tests
     runs-on: ubuntu-latest
+    concurrency:
+      group: tests-integration-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -28,9 +32,13 @@ jobs:
         run: npm run test
 
   tests-pass:
+    name: Tests Pass
     needs: ['integration']
     if: ${{ always() }}
     runs-on: ubuntu-24.04
+    concurrency:
+      group: tests-pass-${{ github.ref }}
+      cancel-in-progress: true
     permissions:
       contents: read
     steps:

@@ -2,8 +2,16 @@ type ClearingError = variant {
 	BuyerInsufficientMargin;
 	InsufficientExcessMargin;
 	NoMarginAccountFound;
-	SellerInsufficientMargin
+	SellerInsufficientMargin;
+	Unauthorized;
+	TransferFailed : text;
+	UnsupportedLedger
 };
+type DepositCollateralParams = record {
+	amount : nat;
+	token_ledger : principal
+};
+type DepositCollateralResult = variant { Ok; Err : ClearingError };
 type FreezePositionForTransferParams = record {
 	series_id : text;
 	user : principal
@@ -34,7 +42,7 @@ type SubmitMatchedTradeParams = record {
 type SubmitMatchedTradeResult = variant { Ok : bool; Err : ClearingError };
 service : {
 	accept_position_transfer : (PositionProof) -> (bool);
-	deposit_collateral : (nat) -> ();
+	deposit_collateral : (DepositCollateralParams) -> (DepositCollateralResult);
 	freeze_position_for_transfer : (FreezePositionForTransferParams) -> (
 		opt PositionProof
 	);
@@ -44,5 +52,5 @@ service : {
 	submit_matched_trade : (SubmitMatchedTradeParams) -> (
 		SubmitMatchedTradeResult
 	);
-	withdraw_collateral : (nat) -> (SettleSeriesResult)
+	withdraw_collateral : (DepositCollateralParams) -> (SettleSeriesResult)
 }
