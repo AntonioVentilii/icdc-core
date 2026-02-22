@@ -14,9 +14,10 @@ print_help() {
   exit 0
 }
 
-mapfile -t CANDID_FILES < <(
-  jq -r '.canisters | to_entries[] | .value.candid? // empty' dfx.json
-)
+CANDID_FILES=()
+while IFS= read -r candid; do
+  [[ -n "$candid" ]] && CANDID_FILES+=("$candid")
+done < <(jq -r '.canisters | to_entries[] | .value.candid? // empty' dfx.json)
 
 ((${#CANDID_FILES[@]})) || {
   echo "ERROR: No candid files found in dfx.json (.canisters[].candid)."

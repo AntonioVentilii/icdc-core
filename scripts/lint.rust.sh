@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mapfile -t CANISTERS < <(jq -r '.canisters | keys[]' dfx.json)
+CANISTERS=()
+while IFS= read -r canister; do
+  [[ -n "$canister" ]] && CANISTERS+=("$canister")
+done < <(jq -r '.canisters | keys[]' dfx.json)
 
 ((${#CANISTERS[@]})) || {
   echo "ERROR: No canisters found in dfx.json."
