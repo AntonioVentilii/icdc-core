@@ -1,3 +1,8 @@
+type FreezePositionForTransferParams = record {
+	series_id : text;
+	user : principal
+};
+type GetPositionParams = record { series_id : text; user : principal };
 type MarginAccount = record {
 	required_margin : nat;
 	user : principal;
@@ -11,13 +16,23 @@ type PositionProof = record {
 	user : principal;
 	clearing_id : principal
 };
+type SettleSeriesParams = record { series_id : text; settlement_price : nat64 };
+type SubmitMatchedTradeParams = record {
+	qty : int;
+	series_id : text;
+	seller : principal;
+	buyer : principal;
+	price : nat64
+};
 service : {
 	accept_position_transfer : (PositionProof) -> (bool);
 	deposit_collateral : (nat) -> ();
-	freeze_position_for_transfer : (principal, text) -> (opt PositionProof);
+	freeze_position_for_transfer : (FreezePositionForTransferParams) -> (
+		opt PositionProof
+	);
 	get_margin_account : (principal) -> (opt MarginAccount) query;
-	get_position : (principal, text) -> (opt Position) query;
-	settle_series : (text, nat64) -> ();
-	submit_matched_trade : (text, principal, principal, int, nat64) -> (bool);
+	get_position : (GetPositionParams) -> (opt Position) query;
+	settle_series : (SettleSeriesParams) -> ();
+	submit_matched_trade : (SubmitMatchedTradeParams) -> (bool);
 	withdraw_collateral : (nat) -> ()
 }

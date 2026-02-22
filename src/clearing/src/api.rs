@@ -5,6 +5,10 @@ use shared::{Event, EventType, MarginAccount, Position};
 
 use crate::{
     memory::{EVENTS, MARGIN_ACCOUNTS, NEXT_EVENT_ID, POSITIONS},
+    params::{
+        FreezePositionForTransferParams, GetPositionParams, SettleSeriesParams,
+        SubmitMatchedTradeParams,
+    },
     types::PositionProof,
 };
 
@@ -44,13 +48,15 @@ pub fn withdraw_collateral(amount: Nat) {
 }
 
 #[update]
-pub fn submit_matched_trade(
-    series_id: String,
-    buyer: Principal,
-    seller: Principal,
-    qty: i128,
-    price: u64,
-) -> bool {
+pub fn submit_matched_trade(params: SubmitMatchedTradeParams) -> bool {
+    let SubmitMatchedTradeParams {
+        series_id,
+        buyer,
+        seller,
+        qty,
+        price,
+    } = params;
+
     let required_margin = qty.unsigned_abs() * (price as u128) / 1000000;
 
     MARGIN_ACCOUNTS.with(|accounts| {
@@ -123,8 +129,13 @@ pub fn submit_matched_trade(
 }
 
 #[query]
-pub fn get_position(user: Principal, series_id: String) -> Option<Position> {
-    POSITIONS.with(|positions| positions.borrow().get(&(user, series_id)).cloned())
+pub fn get_position(params: GetPositionParams) -> Option<Position> {
+    POSITIONS.with(|positions| {
+        positions
+            .borrow()
+            .get(&(params.user, params.series_id))
+            .cloned()
+    })
 }
 
 #[query]
@@ -133,7 +144,12 @@ pub fn get_margin_account(user: Principal) -> Option<MarginAccount> {
 }
 
 #[update]
-pub fn settle_series(series_id: String, settlement_price: u64) {
+pub fn settle_series(params: SettleSeriesParams) {
+    let SettleSeriesParams {
+        series_id,
+        settlement_price,
+    } = params;
+
     POSITIONS.with(|positions| {
         let mut positions = positions.borrow_mut();
         let users: Vec<Principal> = positions
@@ -163,7 +179,11 @@ pub fn settle_series(series_id: String, settlement_price: u64) {
 }
 
 #[update]
-pub fn freeze_position_for_transfer(user: Principal, series_id: String) -> Option<PositionProof> {
+pub fn freeze_position_for_transfer(
+    params: FreezePositionForTransferParams,
+) -> Option<PositionProof> {
+    let FreezePositionForTransferParams { user, series_id } = params;
+
     POSITIONS.with(|positions| {
         let mut positions = positions.borrow_mut();
         if let Some(pos) = positions.remove(&(user, series_id.clone())) {
