@@ -2,11 +2,11 @@ Yes. I understand perfectly.
 
 You want:
 
-* ✅ You can be a clearing house
-* ✅ Others can also be clearing houses
-* ✅ Exchanges just match trades
-* ✅ Positions can move between clearings
-* ✅ No monopoly lock-in
+- ✅ You can be a clearing house
+- ✅ Others can also be clearing houses
+- ✅ Exchanges just match trades
+- ✅ Positions can move between clearings
+- ✅ No monopoly lock-in
 
 That’s exactly how mature fiat derivatives infrastructure works.
 
@@ -37,9 +37,9 @@ Series {
 
 Important:
 
-* Registry is neutral.
-* Anyone can read it.
-* Multiple clearings use the same registry.
+- Registry is neutral.
+- Anyone can read it.
+- Multiple clearings use the same registry.
 
 This avoids fragmentation.
 
@@ -65,10 +65,10 @@ MarginAccount {
 
 This is the CCP logic:
 
-* Netting
-* Margin
-* Liquidation
-* Settlement
+- Netting
+- Margin
+- Liquidation
+- Settlement
 
 Binary markets = just a special payoff type.
 
@@ -122,9 +122,9 @@ Nothing changes in clearing core.
 
 Only:
 
-* payoff engine changes
-* margin model changes
-* risk engine gets smarter
+- payoff engine changes
+- margin model changes
+- risk engine gets smarter
 
 The architecture survives.
 
@@ -157,16 +157,14 @@ Portable across ecosystem.
 If a user wants to move from Clearing A to Clearing B:
 
 1. Clearing A:
-
-   * freezes position
-   * computes final margin state
-   * emits signed position proof
+   - freezes position
+   - computes final margin state
+   - emits signed position proof
 
 2. Clearing B:
-
-   * verifies proof
-   * accepts position
-   * releases collateral
+   - verifies proof
+   - accepts position
+   - releases collateral
 
 This is novation.
 
@@ -180,8 +178,8 @@ No tokens required.
 
 Exchange only does:
 
-* Order matching
-* Sends matched trade to chosen clearing
+- Order matching
+- Sends matched trade to chosen clearing
 
 It does NOT manage margin.
 
@@ -211,8 +209,8 @@ Positions are NOT freely transferable.
 
 Transfer requires:
 
-* Clearing A approval
-* Clearing B acceptance
+- Clearing A approval
+- Clearing B acceptance
 
 This keeps risk safe.
 
@@ -224,7 +222,7 @@ Most realistic CCP design.
 
 You allow minting:
 
-* Fully-collateralised long position tokens
+- Fully-collateralised long position tokens
 
 Those can move freely.
 
@@ -271,9 +269,9 @@ OTC Desk -------- > Clearing B
 
 User can:
 
-* choose clearing
-* move positions via novation
-* collateral remains inside clearing
+- choose clearing
+- move positions via novation
+- collateral remains inside clearing
 
 Exactly like real derivatives world.
 
@@ -302,26 +300,24 @@ If your ambition is:
 
 Then:
 
-* Do not tie clearing to UI
-* Do not tie clearing to exchange
-* Do not tie clearing to token logic
-* Make clearing a risk engine with standardised interfaces
+- Do not tie clearing to UI
+- Do not tie clearing to exchange
+- Do not tie clearing to token logic
+- Make clearing a risk engine with standardised interfaces
 
 You can dominate by quality, not by monopoly lock-in.
-
-
 
 Perfect.
 Now we design this properly — like real infrastructure.
 
 You want:
 
-* ✅ Start with binary “forecast” markets
-* ✅ Evolve into vanilla options
-* ✅ Be a clearing house
-* ✅ Allow competing clearings
-* ✅ Allow position portability
-* ✅ Keep exchanges margin-free
+- ✅ Start with binary “forecast” markets
+- ✅ Evolve into vanilla options
+- ✅ Be a clearing house
+- ✅ Allow competing clearings
+- ✅ Allow position portability
+- ✅ Keep exchanges margin-free
 
 So here is both:
 
@@ -331,10 +327,10 @@ So here is both:
 
 This is the smallest structure that is:
 
-* scalable
-* CCP-ready
-* non-monopolistic
-* future-proof
+- scalable
+- CCP-ready
+- non-monopolistic
+- future-proof
 
 ---
 
@@ -358,10 +354,10 @@ Series {
 
 Important rules:
 
-* Anyone can read.
-* Series ID = deterministic hash.
-* Multiple clearings use same registry.
-* Registry has no margin, no balances.
+- Anyone can read.
+- Series ID = deterministic hash.
+- Multiple clearings use same registry.
+- Registry has no margin, no balances.
 
 This prevents fragmentation.
 
@@ -394,12 +390,12 @@ ClearingState {
 
 Responsibilities:
 
-* Accept matched trades
-* Net positions
-* Recalculate margin
-* Freeze collateral
-* Liquidate if needed
-* Settle at expiry
+- Accept matched trades
+- Net positions
+- Recalculate margin
+- Freeze collateral
+- Liquidate if needed
+- Settle at expiry
 
 Binary markets = just a payoff type.
 
@@ -432,7 +428,7 @@ Archive-sharded automatically.
 
 Clearing stores only:
 
-* last_event_pointer
+- last_event_pointer
 
 This solves 10-year compliance.
 
@@ -450,9 +446,9 @@ submitMatchedTrade(clearing_id, series_id, buyer, seller, qty, price)
 
 Clearing:
 
-* Validates margin
-* Accepts or rejects
-* Updates positions
+- Validates margin
+- Accepts or rejects
+- Updates positions
 
 Exchange remains liquidity-only.
 
@@ -499,9 +495,9 @@ submit_matched_trade(
 
 Must:
 
-* Be atomic
-* Validate margin
-* Emit event
+- Be atomic
+- Validate margin
+- Emit event
 
 ---
 
@@ -523,9 +519,9 @@ get_margin_account(user)
 
 Returns:
 
-* collateral_balance
-* required_margin
-* excess_margin
+- collateral_balance
+- required_margin
+- excess_margin
 
 ---
 
@@ -537,9 +533,9 @@ freeze_position_for_transfer(user, series_id)
 
 Returns:
 
-* signed position proof
-* collateral state
-* clearing signature
+- signed position proof
+- collateral state
+- clearing signature
 
 This prevents movement while in transfer.
 
@@ -553,15 +549,15 @@ accept_position_transfer(position_proof)
 
 New clearing verifies:
 
-* signature
-* series_id validity
-* risk parameters
-* collateral state
+- signature
+- series_id validity
+- risk parameters
+- collateral state
 
 Then:
 
-* imports position
-* releases from old clearing
+- imports position
+- releases from old clearing
 
 ---
 
@@ -573,8 +569,8 @@ settle_series(series_id)
 
 Must:
 
-* Use registry oracle reference
-* Emit settlement events
+- Use registry oracle reference
+- Emit settlement events
 
 ---
 
@@ -616,10 +612,10 @@ Users choose clearing.
 
 Clearings compete on:
 
-* margin efficiency
-* fees
-* capital efficiency
-* risk engine quality
+- margin efficiency
+- fees
+- capital efficiency
+- risk engine quality
 
 Not on lock-in.
 
@@ -629,13 +625,13 @@ Not on lock-in.
 
 Later you can add:
 
-* Portfolio margin across series
-* Cross-asset margin
-* Options + futures
-* OTC submission API
-* Liquidity providers
-* Risk waterfall fund
-* Insurance pool
+- Portfolio margin across series
+- Cross-asset margin
+- Options + futures
+- OTC submission API
+- Liquidity providers
+- Risk waterfall fund
+- Insurance pool
 
 No structural rewrite needed.
 
@@ -645,11 +641,11 @@ No structural rewrite needed.
 
 If you tokenise:
 
-* Margin detaches from position
-* Netting becomes harder
-* Portfolio margin breaks
-* Regulatory classification worsens
-* Clearing control weakens
+- Margin detaches from position
+- Netting becomes harder
+- Portfolio margin breaks
+- Regulatory classification worsens
+- Clearing control weakens
 
 Fiat markets do not tokenise positions.
 
@@ -663,18 +659,18 @@ You are building a CCP, not a DeFi AMM.
 
 With this design:
 
-* You can start with simple digitals.
-* Internally it is already a derivatives clearing engine.
-* You don’t monopolise clearing.
-* Exchanges are independent.
-* Position transfer is possible.
-* 10-year trade history is safe.
-* Memory does not explode.
-* Vanilla options fit naturally.
+- You can start with simple digitals.
+- Internally it is already a derivatives clearing engine.
+- You don’t monopolise clearing.
+- Exchanges are independent.
+- Position transfer is possible.
+- 10-year trade history is safe.
+- Memory does not explode.
+- Vanilla options fit naturally.
 
 ---
 
 If you want next step, we can:
 
-* Design the exact data structs optimised for IC stable memory
-* Or design the risk/margin engine v1 for binary markets that upgrades cleanly to calls/puts.
+- Design the exact data structs optimised for IC stable memory
+- Or design the risk/margin engine v1 for binary markets that upgrades cleanly to calls/puts.

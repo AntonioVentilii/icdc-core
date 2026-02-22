@@ -4,9 +4,9 @@ Here’s a sharding scheme that stays sane from **digitals → vanilla options �
 
 Keep each clearing canister’s **live state bounded** by:
 
-* number of active series it serves
-* number of (user, series) position entries
-* peak trading load
+- number of active series it serves
+- number of (user, series) position entries
+- peak trading load
 
 …and make routing deterministic so any exchange/OTC desk can submit trades to the right clearing automatically.
 
@@ -16,10 +16,10 @@ Keep each clearing canister’s **live state bounded** by:
 
 ### 1) Canonical identifiers
 
-* `underlying_id`: small integer (from Registry), not text
+- `underlying_id`: small integer (from Registry), not text
+  - examples: `BTC_USD`, `ETH_USD`, `ICP_USD`, “EU CPI YoY”, etc.
 
-  * examples: `BTC_USD`, `ETH_USD`, `ICP_USD`, “EU CPI YoY”, etc.
-* `expiry_month`: `YYYYMM` (e.g. `202606`)
+- `expiry_month`: `YYYYMM` (e.g. `202606`)
 
 ### 2) Clearing shard key
 
@@ -39,9 +39,9 @@ If missing, it can spawn/register a new shard (or you can pre-create them).
 
 **Why this works**
 
-* Vanilla options naturally cluster by expiry
-* Position netting and margin mostly benefits within the same underlying + expiry bucket
-* Old expiries become “cold” quickly and can be settled + archived
+- Vanilla options naturally cluster by expiry
+- Position netting and margin mostly benefits within the same underlying + expiry bucket
+- Old expiries become “cold” quickly and can be settled + archived
 
 ---
 
@@ -49,18 +49,18 @@ If missing, it can spawn/register a new shard (or you can pre-create them).
 
 A shard owns:
 
-* series metadata *for that bucket* (or references Registry)
-* positions for users trading those series
-* margin accounts (or per-user subaccounts scoped to that shard)
-* settlement for series in that bucket
-* local pointers into TradeLog
+- series metadata _for that bucket_ (or references Registry)
+- positions for users trading those series
+- margin accounts (or per-user subaccounts scoped to that shard)
+- settlement for series in that bucket
+- local pointers into TradeLog
 
 **Example**
 All of these land in the same shard:
 
-* ETH call 2500 exp 30 Jun 2026
-* ETH put 2000 exp 30 Jun 2026
-* ETH binary “ETH > 3k?” exp 30 Jun 2026
+- ETH call 2500 exp 30 Jun 2026
+- ETH put 2000 exp 30 Jun 2026
+- ETH binary “ETH > 3k?” exp 30 Jun 2026
 
 All go to:
 `(ETH_USD, 202606)`
@@ -71,9 +71,9 @@ All go to:
 
 Digitals are just series where:
 
-* `payoff_type = Binary`
-* `strike` optional / encoded (e.g. threshold)
-* same expiry_month routing
+- `payoff_type = Binary`
+- `strike` optional / encoded (e.g. threshold)
+- same expiry_month routing
 
 So you’re not building a “separate product”.
 You’re building series with one payoff model first.
@@ -109,9 +109,9 @@ You can start monthly and only add weekly for specific underlyings later.
 
 Shard TradeLog by **time** (e.g. monthly) or by **clearing shard_key**:
 
-* `TradeLog_2026_06` (time-based)
+- `TradeLog_2026_06` (time-based)
   or
-* `TradeLog_ETH_202606` (instrument-bucket-based)
+- `TradeLog_ETH_202606` (instrument-bucket-based)
 
 Time-based is simpler for archiving and retention policies.
 
@@ -119,11 +119,11 @@ Time-based is simpler for archiving and retention policies.
 
 Shard by user hash prefix:
 
-* `Index_00..0F`, `Index_10..1F`, etc.
+- `Index_00..0F`, `Index_10..1F`, etc.
 
 Each stores pointers:
 
-* `(user) -> list of (event_id ranges / TradeLog shard ids)`
+- `(user) -> list of (event_id ranges / TradeLog shard ids)`
 
 ---
 
@@ -142,10 +142,10 @@ Because both clearings use the same shard_key derivation, they both know exactly
 
 ## Operational benefits
 
-* **Upgrades are easier**: you can roll upgrades shard-by-shard.
-* **Hot underlyings don’t DOS everything**: ETH June doesn’t impact BTC March.
-* **Natural lifecycle**: once a bucket is fully settled, it becomes mostly read-only.
-* **Growth is linear**: you add shards, not complexity.
+- **Upgrades are easier**: you can roll upgrades shard-by-shard.
+- **Hot underlyings don’t DOS everything**: ETH June doesn’t impact BTC March.
+- **Natural lifecycle**: once a bucket is fully settled, it becomes mostly read-only.
+- **Growth is linear**: you add shards, not complexity.
 
 ---
 
@@ -153,12 +153,12 @@ Because both clearings use the same shard_key derivation, they both know exactly
 
 Exchanges/OTC desks should never guess canister IDs. They call:
 
-* `resolve_clearing(shard_key) -> clearing_id`
-* then `submit_matched_trade(clearing_id, ...)`
+- `resolve_clearing(shard_key) -> clearing_id`
+- then `submit_matched_trade(clearing_id, ...)`
 
 Or even:
 
-* `route_and_submit_trade(series_id, ...)` (router forwards)
+- `route_and_submit_trade(series_id, ...)` (router forwards)
 
 If you want maximum neutrality, keep routing public and deterministic.
 
