@@ -1,23 +1,23 @@
 type MarginAccount = record {
-  required_margin : nat;
-  user : principal;
-  collateral_balance : nat;
+	required_margin : nat;
+	user : principal;
+	collateral_balance : nat
 };
 type Position = record { series_id : text; net_qty : int; user : principal };
 type PositionProof = record {
-  qty : int;
-  signature : blob;
-  series_id : text;
-  user : principal;
-  clearing_id : principal;
+	qty : int;
+	signature : blob;
+	series_id : text;
+	user : principal;
+	clearing_id : principal
 };
 service : {
-  accept_position_transfer : (PositionProof) -> (bool);
-  deposit_collateral : (nat) -> ();
-  freeze_position_for_transfer : (principal, text) -> (opt PositionProof);
-  get_margin_account : (principal) -> (opt MarginAccount) query;
-  get_position : (principal, text) -> (opt Position) query;
-  settle_series : (text, nat64) -> ();
-  submit_matched_trade : (text, principal, principal, int, nat64) -> (bool);
-  withdraw_collateral : (nat) -> ();
+	accept_position_transfer : (PositionProof) -> (bool);
+	deposit_collateral : (nat) -> ();
+	freeze_position_for_transfer : (principal, text) -> (opt PositionProof);
+	get_margin_account : (principal) -> (opt MarginAccount) query;
+	get_position : (principal, text) -> (opt Position) query;
+	settle_series : (text, nat64) -> ();
+	submit_matched_trade : (text, principal, principal, int, nat64) -> (bool);
+	withdraw_collateral : (nat) -> ()
 }

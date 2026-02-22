@@ -1,15 +1,23 @@
+type AddSeriesParams = record {
+	strike : opt nat64;
+	payoff_type : PayoffType;
+	settlement_asset : text;
+	underlying : text;
+	expiry : nat64;
+	oracle_source : text
+};
 type PayoffType = variant { Put; Binary; Call };
 type Series = record {
-  strike : opt nat64;
-  payoff_type : PayoffType;
-  series_id : text;
-  settlement_asset : text;
-  underlying : text;
-  expiry : nat64;
-  oracle_source : text;
+	strike : opt nat64;
+	payoff_type : PayoffType;
+	series_id : text;
+	settlement_asset : text;
+	underlying : text;
+	expiry : nat64;
+	oracle_source : text
 };
 service : {
-  add_series : (text, nat64, PayoffType, opt nat64, text, text) -> (text);
-  get_series : (text) -> (opt Series) query;
-  list_series : () -> (vec Series) query;
+	add_series : (AddSeriesParams) -> (text);
+	get_series : (text) -> (opt Series) query;
+	list_series : () -> (vec Series) query
 }

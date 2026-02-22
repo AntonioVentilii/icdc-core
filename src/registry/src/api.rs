@@ -1,17 +1,23 @@
 use ic_cdk_macros::{query, update};
-use shared::{PayoffType, Series};
+use shared::Series;
 
-use crate::memory::SERIES_STORE;
+use crate::{memory::SERIES_STORE, params::AddSeriesParams, utils::canonical_id_part};
 
 #[update]
-pub fn add_series(
-    underlying: String,
-    expiry: u64,
-    payoff_type: PayoffType,
-    strike: Option<u64>,
-    settlement_asset: String,
-    oracle_source: String,
-) -> String {
+pub fn add_series(params: AddSeriesParams) -> String {
+    let AddSeriesParams {
+        underlying,
+        expiry,
+        payoff_type,
+        strike,
+        settlement_asset,
+        oracle_source,
+    } = params;
+
+    let underlying = canonical_id_part(&underlying);
+    let settlement_asset = canonical_id_part(&settlement_asset);
+    let oracle_source = canonical_id_part(&oracle_source);
+
     let series_id = Series::generate_id(&underlying, expiry, &payoff_type, strike);
 
     let series = Series {
