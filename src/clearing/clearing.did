@@ -1,6 +1,7 @@
 type AcceptPositionTransferResult = variant { Ok : bool; Err : ClearingError };
 type Asset = variant { Icrc : principal };
 type ClearingError = variant {
+	PayoffMathOverflow;
 	BuyerInsufficientMargin;
 	InsufficientExcessMargin;
 	NoMarginAccountFound;

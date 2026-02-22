@@ -286,51 +286,72 @@ pub fn list_series() -> Vec<Series> {
 
 #[update(guard = "caller_is_controller")]
 pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
-    let result: Result<(), ClearingError> = (async {
-        let SettleSeriesParams {
-            series_id,
-            settlement_price,
-        } = params;
+    let result: Result<(), ClearingError> =
+        (async {
+            let SettleSeriesParams {
+                series_id,
+                settlement_price,
+            } = params;
 
-        let settlement_asset_val = SERIES
-            .with(|s| {
-                s.borrow()
-                    .get(&series_id)
-                    .map(|ser| ser.settlement_asset.to_asset())
-            })
-            .ok_or(ClearingError::UnsupportedLedger)?;
+            let settlement_asset_val = SERIES
+                .with(|s| {
+                    s.borrow()
+                        .get(&series_id)
+                        .map(|ser| ser.settlement_asset.to_asset())
+                })
+                .ok_or(ClearingError::UnsupportedLedger)?;
 
-        let Asset::Icrc(ledger_id) = settlement_asset_val;
+            let Asset::Icrc(ledger_id) = settlement_asset_val;
 
-        let positions_to_settle: Vec<(Principal, i128)> = POSITIONS.with(|positions| {
-            let mut positions = positions.borrow_mut();
-            let users: Vec<Principal> = positions
-                .keys()
-                .filter(|(_, sid)| *sid == series_id)
-                .map(|(u, _)| *u)
-                .collect();
+            let positions_to_settle: Vec<(Principal, i128)> = POSITIONS.with(|positions| {
+                let mut positions = positions.borrow_mut();
+                let users: Vec<Principal> = positions
+                    .keys()
+                    .filter(|(_, sid)| *sid == series_id)
+                    .map(|(u, _)| *u)
+                    .collect();
 
-            let mut settlement_data = Vec::new();
-            for user in users {
-                if let Some(pos) = positions.remove(&(user, series_id.clone())) {
-                    settlement_data.push((user, pos.net_qty));
+                let mut settlement_data = Vec::new();
+                for user in users {
+                    if let Some(pos) = positions.remove(&(user, series_id.clone())) {
+                        settlement_data.push((user, pos.net_qty));
+                    }
+                }
+                settlement_data
+            });
+
+            // Split into payers and receivers (using integer arithmetic avoids f64 surprises)
+            let mut payers: Vec<(Principal, u128)> = Vec::new();
+            let mut receivers: Vec<(Principal, u128)> = Vec::new();
+            let mut accounting_updates: Vec<(Principal, i128, u128)> = Vec::new();
+
+            for (user, net_qty) in positions_to_settle {
+                let payoff_i128: i128 = net_qty
+                    .checked_mul(settlement_price as i128)
+                    .ok_or(ClearingError::PayoffMathOverflow)?;
+                let amount_u128: u128 = payoff_i128.unsigned_abs();
+
+                if payoff_i128 < 0 {
+                    payers.push((user, amount_u128));
+                    accounting_updates.push((user, -1, amount_u128));
+                } else if payoff_i128 > 0 {
+                    receivers.push((user, amount_u128));
+                    accounting_updates.push((user, 1, amount_u128));
+                } else {
+                    // no transfer, but still clear required margin
+                    accounting_updates.push((user, 0, 0));
                 }
             }
-            settlement_data
-        });
 
-        for (user, net_qty) in positions_to_settle {
-            let payoff = (net_qty as f64) * (settlement_price as f64);
-            let amount_u128 = payoff.abs() as u128;
-            let amount_nat = candid::Nat::from(amount_u128);
+            for (user, amount_u128) in payers.iter().copied() {
+                let amount_nat = candid::Nat::from(amount_u128);
 
-            if payoff > 0.0 {
-                // Canister pays user: Pool -> User Subaccount
+                // Payer pays canister: User Subaccount -> Pool
                 let args = TransferArg {
-                    from_subaccount: None, // From Canister main account pool
+                    from_subaccount: Some(derive_user_subaccount(user)),
                     to: Account {
                         owner: ic_cdk::id(),
-                        subaccount: Some(derive_user_subaccount(user)),
+                        subaccount: None, // Canister main account pool
                     },
                     amount: amount_nat,
                     fee: None,
@@ -346,13 +367,17 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                         })?;
 
                 res.map_err(|e| ClearingError::TransferFailed(format!("{:?}", e)))?;
-            } else if payoff < 0.0 {
-                // User pays canister: User Subaccount -> Pool
+            }
+
+            for (user, amount_u128) in receivers.iter().copied() {
+                let amount_nat = candid::Nat::from(amount_u128);
+
+                // Canister pays receiver: Pool -> User Subaccount
                 let args = TransferArg {
-                    from_subaccount: Some(derive_user_subaccount(user)),
+                    from_subaccount: None, // Canister main account pool
                     to: Account {
                         owner: ic_cdk::id(),
-                        subaccount: None, // To Canister main account
+                        subaccount: Some(derive_user_subaccount(user)),
                     },
                     amount: amount_nat,
                     fee: None,
@@ -373,21 +398,27 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             // Update internal accounting
             MARGIN_ACCOUNTS.with(|accounts| {
                 let mut accounts = accounts.borrow_mut();
-                if let Some(account) = accounts.get_mut(&user) {
-                    let current = account.get_balance(&settlement_asset_val);
-                    if payoff >= 0.0 {
-                        account.set_balance(settlement_asset_val.clone(), current + amount_u128);
-                    } else {
-                        account.set_balance(settlement_asset_val.clone(), current - amount_u128);
+
+                for (user, sign, amount_u128) in accounting_updates {
+                    if let Some(account) = accounts.get_mut(&user) {
+                        let current = account.get_balance(&settlement_asset_val);
+
+                        match sign {
+                            1 => account
+                                .set_balance(settlement_asset_val.clone(), current + amount_u128),
+                            -1 => account
+                                .set_balance(settlement_asset_val.clone(), current - amount_u128),
+                            _ => {} // sign == 0 => no balance change
+                        }
+
+                        account.required_margin = 0;
                     }
-                    account.required_margin = 0;
                 }
             });
-        }
 
-        Ok(())
-    })
-    .await;
+            Ok(())
+        })
+        .await;
 
     result.into()
 }

@@ -14,4 +14,5 @@ pub enum ClearingError {
     SeriesNotFound,
     UnsupportedSettlementAsset,
     GettingRegistrySeriesFailed(String),
+    PayoffMathOverflow,
 }
