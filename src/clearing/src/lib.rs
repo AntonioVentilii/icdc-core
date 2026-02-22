@@ -1,3 +1,4 @@
+pub mod account;
 pub mod api;
 pub mod error;
 pub mod memory;
@@ -5,18 +6,21 @@ pub mod params;
 pub mod results;
 pub mod types;
 
-use candid::{Nat, Principal};
+use candid::Principal;
 use ic_cdk::export_candid;
 use ic_cdk_macros::{post_upgrade, pre_upgrade};
-use shared::{MarginAccount, Position};
+use shared::types::{MarginAccount, Position};
 use types::PositionProof;
 
 use crate::{
     params::{
-        FreezePositionForTransferParams, GetPositionParams, SettleSeriesParams,
-        SubmitMatchedTradeParams,
+        DepositCollateralParams, FreezePositionForTransferParams, GetPositionParams,
+        SettleSeriesParams, SubmitMatchedTradeParams, WithdrawCollateralParams,
     },
-    results::{SettleSeriesResult, SubmitMatchedTradeResult, WithdrawCollateralResult},
+    results::{
+        DepositCollateralResult, SettleSeriesResult, SubmitMatchedTradeResult,
+        WithdrawCollateralResult,
+    },
 };
 
 #[pre_upgrade]

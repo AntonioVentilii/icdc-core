@@ -1,5 +1,5 @@
 use ic_cdk_macros::{query, update};
-use shared::Series;
+use shared::types::Series;
 
 use crate::{
     error::RegistryError, memory::SERIES_STORE, params::AddSeriesParams, results::AddSeriesResult,

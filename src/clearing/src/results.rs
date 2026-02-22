@@ -4,6 +4,20 @@ use serde::Serialize;
 use crate::error::ClearingError;
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub enum DepositCollateralResult {
+    Ok,
+    Err(ClearingError),
+}
+impl From<Result<(), ClearingError>> for DepositCollateralResult {
+    fn from(value: Result<(), ClearingError>) -> Self {
+        match value {
+            Ok(_) => DepositCollateralResult::Ok,
+            Err(e) => DepositCollateralResult::Err(e),
+        }
+    }
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum WithdrawCollateralResult {
     Ok,
     Err(ClearingError),

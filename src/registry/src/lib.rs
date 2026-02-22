@@ -7,7 +7,7 @@ pub mod utils;
 
 use ic_cdk::export_candid;
 use ic_cdk_macros::{post_upgrade, pre_upgrade};
-use shared::Series;
+use shared::types::Series;
 
 use crate::{params::AddSeriesParams, results::AddSeriesResult};
 

@@ -1,46 +1,112 @@
-use candid::{Nat, Principal};
+use candid::Principal;
 use ic_cdk::api::time;
 use ic_cdk_macros::{query, update};
-use shared::{Event, EventType, MarginAccount, Position};
+use icrc_ledger_types::{
+    icrc1::{
+        account::Account,
+        transfer::{TransferArg, TransferError},
+    },
+    icrc2::transfer_from::{TransferFromArgs, TransferFromError},
+};
+use shared::types::{Event, EventType, MarginAccount, Position};
 
 use crate::{
+    account::{derive_user_subaccount, is_supported_ledger},
     error::ClearingError,
     memory::{EVENTS, MARGIN_ACCOUNTS, NEXT_EVENT_ID, POSITIONS},
     params::{
-        FreezePositionForTransferParams, GetPositionParams, SettleSeriesParams,
-        SubmitMatchedTradeParams,
+        DepositCollateralParams, FreezePositionForTransferParams, GetPositionParams,
+        SettleSeriesParams, SubmitMatchedTradeParams, WithdrawCollateralParams,
     },
-    results::{SettleSeriesResult, SubmitMatchedTradeResult, WithdrawCollateralResult},
+    results::{
+        DepositCollateralResult, SettleSeriesResult, SubmitMatchedTradeResult,
+        WithdrawCollateralResult,
+    },
     types::PositionProof,
 };
 
 #[update]
-pub fn deposit_collateral(amount: Nat) {
-    let caller = ic_cdk::caller();
-    let amount_u128: u128 = amount.0.try_into().unwrap_or(0);
+pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositCollateralResult {
+    let result: Result<(), ClearingError> = (async {
+        let caller = ic_cdk::caller();
 
-    MARGIN_ACCOUNTS.with(|accounts| {
-        let mut accounts = accounts.borrow_mut();
-        let account = accounts.entry(caller).or_insert(MarginAccount {
-            user: caller,
-            collateral_balance: 0,
-            required_margin: 0,
+        let DepositCollateralParams {
+            amount,
+            token_ledger,
+        } = params;
+
+        if !is_supported_ledger(&token_ledger) {
+            return Err(ClearingError::UnsupportedLedger);
+        }
+
+        let amount_u128: u128 = amount.clone().0.try_into().unwrap_or(0);
+
+        let subaccount = derive_user_subaccount(caller);
+
+        let to_account = Account {
+            owner: ic_cdk::id(),
+            subaccount: Some(subaccount),
+        };
+
+        let args = TransferFromArgs {
+            spender_subaccount: None,
+            from: Account {
+                owner: caller,
+                subaccount: None,
+            },
+            to: to_account,
+            amount: amount.clone(),
+            fee: None,
+            memo: None,
+            created_at_time: None,
+        };
+
+        let (res,): (Result<candid::Nat, TransferFromError>,) =
+            ic_cdk::call(token_ledger, "icrc2_transfer_from", (args,))
+                .await
+                .map_err(|(code, msg)| {
+                    ClearingError::TransferFailed(format!("RB: {:?}: {}", code, msg))
+                })?;
+
+        res.map_err(|e| ClearingError::TransferFailed(format!("{:?}", e)))?;
+
+        MARGIN_ACCOUNTS.with(|accounts| {
+            let mut accounts = accounts.borrow_mut();
+            let account = accounts.entry(caller).or_insert(MarginAccount {
+                user: caller,
+                collateral_balance: 0,
+                required_margin: 0,
+            });
+            account.collateral_balance += amount_u128;
         });
-        account.collateral_balance += amount_u128;
-    });
+
+        Ok(())
+    })
+    .await;
+
+    result.into()
 }
 
 #[update]
-pub fn withdraw_collateral(amount: Nat) -> WithdrawCollateralResult {
-    let result: Result<(), ClearingError> = {
+pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCollateralResult {
+    let result: Result<(), ClearingError> = (async {
         let caller = ic_cdk::caller();
-        let amount_u128: u128 = amount.0.try_into().unwrap_or(0);
+
+        let WithdrawCollateralParams {
+            amount,
+            token_ledger,
+        } = params;
+
+        if !is_supported_ledger(&token_ledger) {
+            return Err(ClearingError::UnsupportedLedger);
+        }
+
+        let amount_u128: u128 = amount.clone().0.try_into().unwrap_or(0);
 
         MARGIN_ACCOUNTS.with(|accounts| {
             let mut accounts = accounts.borrow_mut();
             if let Some(account) = accounts.get_mut(&caller) {
                 if account.collateral_balance >= amount_u128 + account.required_margin {
-                    account.collateral_balance -= amount_u128;
                     Ok(())
                 } else {
                     Err(ClearingError::InsufficientExcessMargin)
@@ -48,8 +114,41 @@ pub fn withdraw_collateral(amount: Nat) -> WithdrawCollateralResult {
             } else {
                 Err(ClearingError::NoMarginAccountFound)
             }
-        })
-    };
+        })?;
+
+        let from_subaccount = derive_user_subaccount(caller);
+
+        let args = TransferArg {
+            from_subaccount: Some(from_subaccount),
+            to: Account {
+                owner: caller,
+                subaccount: None,
+            },
+            amount: amount.clone(),
+            fee: None,
+            memo: None,
+            created_at_time: None,
+        };
+
+        let (res,): (Result<candid::Nat, TransferError>,) =
+            ic_cdk::call(token_ledger, "icrc1_transfer", (args,))
+                .await
+                .map_err(|(code, msg)| {
+                    ClearingError::TransferFailed(format!("RB: {:?}: {}", code, msg))
+                })?;
+
+        res.map_err(|e| ClearingError::TransferFailed(format!("{:?}", e)))?;
+
+        MARGIN_ACCOUNTS.with(|accounts| {
+            let mut accounts = accounts.borrow_mut();
+            if let Some(account) = accounts.get_mut(&caller) {
+                account.collateral_balance -= amount_u128;
+            }
+        });
+
+        Ok(())
+    })
+    .await;
 
     result.into()
 }

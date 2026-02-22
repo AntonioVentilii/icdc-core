@@ -1,6 +1,6 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
-use shared::PayoffType;
+use shared::types::PayoffType;
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct AddSeriesParams {

@@ -2,6 +2,18 @@ use candid::{CandidType, Deserialize, Principal};
 use serde::Serialize;
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct DepositCollateralParams {
+    pub amount: candid::Nat,
+    pub token_ledger: Principal,
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct WithdrawCollateralParams {
+    pub amount: candid::Nat,
+    pub token_ledger: Principal,
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct SubmitMatchedTradeParams {
     pub series_id: String,
     pub buyer: Principal,

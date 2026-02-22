@@ -2,7 +2,10 @@ use std::{cell::RefCell, collections::HashMap};
 
 use candid::Principal;
 use ic_cdk::storage;
-use shared::{Event, MarginAccount, Position};
+use shared::{
+    constants::{CKUSDC_LEDGER, ICP_LEDGER},
+    types::{Event, MarginAccount, Position},
+};
 
 thread_local! {
     pub static POSITIONS: RefCell<HashMap<(Principal, String), Position>> = RefCell::new(HashMap::new());
@@ -45,4 +48,12 @@ pub fn restore_state() {
 
     EVENTS.with(|e| *e.borrow_mut() = events);
     NEXT_EVENT_ID.with(|id| *id.borrow_mut() = next_id);
+}
+
+pub fn icp_ledger() -> Principal {
+    Principal::from_text(ICP_LEDGER).expect("invalid ICP_LEDGER")
+}
+
+pub fn ckusdc_ledger() -> Principal {
+    Principal::from_text(CKUSDC_LEDGER).expect("invalid CKUSDC_LEDGER")
 }

@@ -7,4 +7,7 @@ pub enum ClearingError {
     NoMarginAccountFound,
     BuyerInsufficientMargin,
     SellerInsufficientMargin,
+    TransferFailed(String),
+    UnsupportedLedger,
+    Unauthorized,
 }

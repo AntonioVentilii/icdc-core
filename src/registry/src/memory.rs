@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::HashMap};
 
 use ic_cdk::storage;
-use shared::Series;
+use shared::types::Series;
 
 thread_local! {
     pub static SERIES_STORE: RefCell<HashMap<String, Series>> = RefCell::new(HashMap::new());
