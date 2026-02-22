@@ -1,10 +1,12 @@
 use ic_cdk_macros::{query, update};
 use shared::Series;
 
-use crate::{memory::SERIES_STORE, params::AddSeriesParams, utils::canonical_id_part};
+use crate::{
+    error::RegistryError, memory::SERIES_STORE, params::AddSeriesParams, utils::canonical_id_part,
+};
 
 #[update]
-pub fn add_series(params: AddSeriesParams) -> String {
+pub fn add_series(params: AddSeriesParams) -> Result<String, RegistryError> {
     let AddSeriesParams {
         underlying,
         expiry,
@@ -41,13 +43,13 @@ pub fn add_series(params: AddSeriesParams) -> String {
         let mut store = store.borrow_mut();
 
         if store.contains_key(&series_id) {
-            ic_cdk::trap("Series already exists");
+            return Err(RegistryError::SeriesAlreadyExists);
         }
 
         store.insert(series_id.clone(), series);
-    });
-
-    series_id
+        
+        Ok(series_id)
+    })
 }
 
 #[query]

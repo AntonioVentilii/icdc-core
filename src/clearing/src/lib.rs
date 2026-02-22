@@ -1,4 +1,5 @@
 pub mod api;
+pub mod error;
 pub mod memory;
 mod params;
 pub mod types;
@@ -9,9 +10,12 @@ use ic_cdk_macros::{post_upgrade, pre_upgrade};
 use shared::{MarginAccount, Position};
 use types::PositionProof;
 
-use crate::params::{
-    FreezePositionForTransferParams, GetPositionParams, SettleSeriesParams,
-    SubmitMatchedTradeParams,
+use crate::{
+    error::ClearingError,
+    params::{
+        FreezePositionForTransferParams, GetPositionParams, SettleSeriesParams,
+        SubmitMatchedTradeParams,
+    },
 };
 
 #[pre_upgrade]

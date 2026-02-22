@@ -4,6 +4,7 @@ use ic_cdk_macros::{query, update};
 use shared::{Event, EventType, MarginAccount, Position};
 
 use crate::{
+    error::ClearingError,
     memory::{EVENTS, MARGIN_ACCOUNTS, NEXT_EVENT_ID, POSITIONS},
     params::{
         FreezePositionForTransferParams, GetPositionParams, SettleSeriesParams,
@@ -29,7 +30,7 @@ pub fn deposit_collateral(amount: Nat) {
 }
 
 #[update]
-pub fn withdraw_collateral(amount: Nat) {
+pub fn withdraw_collateral(amount: Nat) -> Result<(), ClearingError> {
     let caller = ic_cdk::caller();
     let amount_u128: u128 = amount.0.try_into().unwrap_or(0);
 
@@ -38,17 +39,18 @@ pub fn withdraw_collateral(amount: Nat) {
         if let Some(account) = accounts.get_mut(&caller) {
             if account.collateral_balance >= amount_u128 + account.required_margin {
                 account.collateral_balance -= amount_u128;
+                Ok(())
             } else {
-                ic_cdk::trap("Insufficient excess margin");
+                Err(ClearingError::InsufficientExcessMargin)
             }
         } else {
-            ic_cdk::trap("No margin account found");
+            Err(ClearingError::NoMarginAccountFound)
         }
-    });
+    })
 }
 
 #[update]
-pub fn submit_matched_trade(params: SubmitMatchedTradeParams) -> bool {
+pub fn submit_matched_trade(params: SubmitMatchedTradeParams) -> Result<bool, ClearingError> {
     let SubmitMatchedTradeParams {
         series_id,
         buyer,
@@ -67,21 +69,26 @@ pub fn submit_matched_trade(params: SubmitMatchedTradeParams) -> bool {
             collateral_balance: 0,
             required_margin: 0,
         });
-        buyer_account.required_margin += required_margin;
-        if buyer_account.required_margin > buyer_account.collateral_balance {
-            ic_cdk::trap("Buyer insufficient margin");
+
+        let new_buyer_required = buyer_account.required_margin + required_margin;
+        if new_buyer_required > buyer_account.collateral_balance {
+            return Err(ClearingError::BuyerInsufficientMargin);
         }
+        buyer_account.required_margin = new_buyer_required;
 
         let seller_account = accounts.entry(seller).or_insert(MarginAccount {
             user: seller,
             collateral_balance: 0,
             required_margin: 0,
         });
-        seller_account.required_margin += required_margin;
-        if seller_account.required_margin > seller_account.collateral_balance {
-            ic_cdk::trap("Seller insufficient margin");
+
+        let new_seller_required = seller_account.required_margin + required_margin;
+        if new_seller_required > seller_account.collateral_balance {
+            return Err(ClearingError::SellerInsufficientMargin);
         }
-    });
+        seller_account.required_margin = new_seller_required;
+        Ok(())
+    })?;
 
     POSITIONS.with(|positions| {
         let mut positions = positions.borrow_mut();
@@ -125,7 +132,7 @@ pub fn submit_matched_trade(params: SubmitMatchedTradeParams) -> bool {
         });
     });
 
-    true
+    Ok(true)
 }
 
 #[query]
@@ -144,7 +151,7 @@ pub fn get_margin_account(user: Principal) -> Option<MarginAccount> {
 }
 
 #[update]
-pub fn settle_series(params: SettleSeriesParams) {
+pub fn settle_series(params: SettleSeriesParams) -> Result<(), ClearingError> {
     let SettleSeriesParams {
         series_id,
         settlement_price,
@@ -176,6 +183,8 @@ pub fn settle_series(params: SettleSeriesParams) {
             }
         }
     });
+
+    Ok(())
 }
 
 #[update]
