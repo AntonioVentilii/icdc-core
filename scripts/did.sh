@@ -15,5 +15,5 @@ function generate_did() {
   candid-extractor "target/wasm32-unknown-unknown/release/$crate_name.wasm" >"$canister_root/$canister.did"
 }
 
-generate_did bucket
-generate_did directory
+generate_did clearing
+generate_did registry

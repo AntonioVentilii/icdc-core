@@ -4,3 +4,11 @@ resolver = "2"
 
 [workspace.dependencies]
 candid = "0.10"
+clearing = { path = "src/clearing" }
+registry = { path = "src/registry" }
+shared = { path = "src/shared" }
+serde = { version = "1.0", features = ["derive"] }
+sha2 = "0.10"
+hex = "0.4"
+ic-cdk = "0.13"
+ic-cdk-macros = "0.13"
