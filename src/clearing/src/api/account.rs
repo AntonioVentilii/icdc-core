@@ -9,7 +9,7 @@ use crate::{
     memory::{MARGIN_ACCOUNTS, POSITIONS},
     traits::ClearingAccountExt,
     types::{
-        errors::ClearingError,
+        errors::{LedgerError, MarginAccountError},
         margin::{MarginAccount, Position},
         params::GetPositionParams,
         results::GetMarginAccountResult,
@@ -19,7 +19,7 @@ use crate::{
 
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn get_margin_account(user: Principal) -> GetMarginAccountResult {
-    let result: Result<MarginAccount, ClearingError> = (async {
+    let result: Result<MarginAccount, MarginAccountError> = (async {
         let user: User = user.into();
         let from_account = user.clearing_account();
 
@@ -40,16 +40,16 @@ pub async fn get_margin_account(user: Principal) -> GetMarginAccountResult {
                 ic_cdk::call(ledger_id, "icrc1_balance_of", (from_account,))
                     .await
                     .map_err(|(code, msg)| {
-                        ClearingError::FetchingBalanceFailed(format!(
+                        MarginAccountError::Ledger(LedgerError::FetchingBalanceFailed(format!(
                             "icrc1_balance_of {:?}: {}",
                             code, msg
-                        ))
+                        )))
                     })?;
 
             let bal_u128: u128 = ledger_balance
                 .0
                 .try_into()
-                .map_err(|_| ClearingError::BalanceMathOverflow)?;
+                .map_err(|_| MarginAccountError::BalanceMathOverflow)?;
 
             balances.insert(asset, bal_u128);
         }
@@ -70,7 +70,7 @@ pub async fn get_margin_account(user: Principal) -> GetMarginAccountResult {
                 .borrow()
                 .get(&user)
                 .cloned()
-                .ok_or(ClearingError::NoMarginAccountFound)
+                .ok_or(MarginAccountError::NoMarginAccountFound)
         })
     })
     .await;
@@ -80,7 +80,7 @@ pub async fn get_margin_account(user: Principal) -> GetMarginAccountResult {
 
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn get_margin_account_fresh(user: Principal) -> GetMarginAccountResult {
-    let result: Result<MarginAccount, ClearingError> = (async {
+    let result: Result<MarginAccount, MarginAccountError> = (async {
         let user: User = user.into();
         let from_account = user.clearing_account();
 
@@ -109,16 +109,16 @@ pub async fn get_margin_account_fresh(user: Principal) -> GetMarginAccountResult
                 ic_cdk::call(ledger_id, "icrc1_balance_of", (from_account,))
                     .await
                     .map_err(|(code, msg)| {
-                        ClearingError::FetchingBalanceFailed(format!(
+                        MarginAccountError::Ledger(LedgerError::FetchingBalanceFailed(format!(
                             "icrc1_balance_of {:?}: {}",
                             code, msg
-                        ))
+                        )))
                     })?;
 
             let bal_u128: u128 = ledger_balance
                 .0
                 .try_into()
-                .map_err(|_| ClearingError::BalanceMathOverflow)?;
+                .map_err(|_| MarginAccountError::BalanceMathOverflow)?;
 
             balances.insert(asset, bal_u128);
         }

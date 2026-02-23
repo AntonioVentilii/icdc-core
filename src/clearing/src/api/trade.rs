@@ -10,7 +10,7 @@ use crate::{
         NEXT_EVENT_ID, POSITIONS,
     },
     types::{
-        errors::ClearingError,
+        errors::TradeError,
         event::{Event, EventType},
         margin::{MarginAccount, Position},
         params::{FreezePositionForTransferParams, SubmitMatchedTradeParams},
@@ -22,7 +22,7 @@ use crate::{
 
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMatchedTradeResult {
-    let result: Result<bool, ClearingError> = (async {
+    let result: Result<bool, TradeError> = (async {
         let SubmitMatchedTradeParams {
             trade_id,
             series_id,
@@ -68,7 +68,7 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
                 let new_required = acc.required_margin + required_margin;
 
                 if new_required > collateral {
-                    return Err(ClearingError::BuyerInsufficientMargin);
+                    return Err(TradeError::BuyerInsufficientMargin);
                 }
 
                 acc.required_margin = new_required;
@@ -93,12 +93,12 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
 
             let new_buyer_required = buyer_required_now + required_margin;
             if new_buyer_required > buyer_collateral {
-                return Err(ClearingError::BuyerInsufficientMargin);
+                return Err(TradeError::BuyerInsufficientMargin);
             }
 
             let new_seller_required = seller_required_now + required_margin;
             if new_seller_required > seller_collateral {
-                return Err(ClearingError::SellerInsufficientMargin);
+                return Err(TradeError::SellerInsufficientMargin);
             }
 
             {
@@ -218,7 +218,7 @@ pub fn freeze_position_for_transfer(
 
 #[update(guard = "caller_is_controller")]
 pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTransferResult {
-    let result: Result<bool, ClearingError> = (async {
+    let result: Result<bool, TradeError> = (async {
         if ACCEPTED_TRANSFERS.with(|m| m.borrow().contains_key(&proof.transfer_id)) {
             return Ok(true);
         }

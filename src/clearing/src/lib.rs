@@ -11,7 +11,6 @@ use ic_cdk_macros::{post_upgrade, pre_upgrade};
 use shared::types::{Series, SeriesId};
 
 use crate::types::{
-    errors::ClearingError,
     margin::Position,
     params::{
         DepositCollateralParams, FreezePositionForTransferParams, GetPositionParams,

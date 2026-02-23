@@ -1,47 +1,41 @@
-type AcceptPositionTransferResult = variant { Ok : bool; Err : ClearingError };
+type AcceptPositionTransferResult = variant { Ok : bool; Err : TradeError };
 type Asset = variant { Icrc : principal };
-type ClearingError = variant {
-	PayoffMathOverflow;
-	FetchingBalanceFailed : text;
-	BuyerInsufficientMargin;
-	InsufficientExcessMargin : record {
-		requested : nat;
-		required : nat;
-		current : nat
-	};
-	NoMarginAccountFound;
-	BalanceMathOverflow;
-	GettingRegistrySeriesFailed : text;
-	WithdrawCollateralMathOverflow;
-	UnsupportedSettlementAsset;
-	SellerInsufficientMargin;
-	Unauthorized;
-	FeeMathOverflow;
-	RegistryNotSet;
-	SeriesNotFound;
-	TransferFailed : text;
-	UnsupportedLedger;
-	FetchingFeeFailed : text
+type CommonError = variant { Internal : text; Unauthorized; RegistryNotSet };
+type DepositCollateralError = variant {
+	DepositCollateralMathOverflow;
+	Ledger : LedgerError
 };
 type DepositCollateralParams = record {
 	deposit_id : text;
 	asset : Asset;
 	amount : nat
 };
-type DepositCollateralResult = variant { Ok; Err : ClearingError };
+type DepositCollateralResult = variant { Ok; Err : DepositCollateralError };
 type FreezePositionForTransferParams = record {
 	series_id : text;
-	user : principal
+	user : principal;
+	transfer_id : text
 };
 type GetMarginAccountResult = variant {
 	Ok : MarginAccount;
-	Err : ClearingError
+	Err : MarginAccountError
 };
 type GetPositionParams = record { series_id : text; user : principal };
+type LedgerError = variant {
+	FetchingBalanceFailed : text;
+	TransferFailed : text;
+	UnsupportedLedger;
+	FetchingFeeFailed : text
+};
 type MarginAccount = record {
 	required_margin : nat;
 	user : principal;
 	balances : vec record { Asset; nat }
+};
+type MarginAccountError = variant {
+	NoMarginAccountFound;
+	BalanceMathOverflow;
+	Ledger : LedgerError
 };
 type PayoffType = variant { Put; Binary; Call };
 type Position = record { series_id : text; net_qty : int; user : principal };
@@ -50,6 +44,7 @@ type PositionProof = record {
 	signature : blob;
 	series_id : text;
 	user : principal;
+	transfer_id : text;
 	clearing_id : principal
 };
 type Series = record {
@@ -62,21 +57,46 @@ type Series = record {
 	oracle_source : text
 };
 type SettleSeriesParams = record { series_id : text; settlement_price : nat64 };
-type SettleSeriesResult = variant { Ok; Err : ClearingError };
+type SettleSeriesResult = variant { Ok; Err : SettlementError };
 type SettlementAsset = variant { Icp; CkUsdc };
+type SettlementError = variant {
+	PayoffMathOverflow;
+	UnsupportedSettlementAsset;
+	FeeMathOverflow;
+	Ledger : LedgerError;
+	Common : CommonError
+};
 type SubmitMatchedTradeParams = record {
 	qty : int;
+	trade_id : text;
 	series_id : text;
 	seller : principal;
 	buyer : principal;
 	price : nat64
 };
-type SubmitMatchedTradeResult = variant { Ok : bool; Err : ClearingError };
+type SubmitMatchedTradeResult = variant { Ok : bool; Err : TradeError };
+type TradeError = variant {
+	BuyerInsufficientMargin;
+	GettingRegistrySeriesFailed : text;
+	SellerInsufficientMargin;
+	SeriesNotFound;
+	Common : CommonError
+};
+type WithdrawCollateralError = variant {
+	InsufficientExcessMargin : record {
+		requested : nat;
+		required : nat;
+		current : nat
+	};
+	WithdrawCollateralMathOverflow;
+	Ledger : LedgerError
+};
 type WithdrawCollateralParams = record {
 	asset : Asset;
 	withdrawal_id : text;
 	amount : nat
 };
+type WithdrawCollateralResult = variant { Ok; Err : WithdrawCollateralError };
 service : {
 	accept_position_transfer : (PositionProof) -> (AcceptPositionTransferResult);
 	deposit_collateral : (DepositCollateralParams) -> (DepositCollateralResult);
@@ -93,5 +113,7 @@ service : {
 	submit_matched_trade : (SubmitMatchedTradeParams) -> (
 		SubmitMatchedTradeResult
 	);
-	withdraw_collateral : (WithdrawCollateralParams) -> (SettleSeriesResult)
+	withdraw_collateral : (WithdrawCollateralParams) -> (
+		WithdrawCollateralResult
+	)
 }

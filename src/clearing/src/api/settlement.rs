@@ -11,7 +11,7 @@ use crate::{
     memory::{MARGIN_ACCOUNTS, POSITIONS, SERIES, SETTLEMENT_PLANS},
     traits::ClearingAccountExt,
     types::{
-        errors::ClearingError,
+        errors::{LedgerError, SettlementError},
         params::SettleSeriesParams,
         plan::{PlanStatus, SettlementPlan},
         results::SettleSeriesResult,
@@ -21,7 +21,7 @@ use crate::{
 
 #[update(guard = "caller_is_controller")]
 pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
-    let result: Result<(), ClearingError> = (async {
+    let result: Result<(), SettlementError> = (async {
         let SettleSeriesParams {
             series_id,
             settlement_price,
@@ -37,9 +37,9 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
             if existing.settlement_price != settlement_price {
                 // TODO: specific error variant for this case
-                return Err(ClearingError::TransferFailed(
+                return Err(SettlementError::Ledger(LedgerError::TransferFailed(
                     "settlement already in progress with different settlement_price".to_string(),
-                ));
+                )));
             }
 
             existing
@@ -51,18 +51,24 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                         .get(&series_id)
                         .map(|ser| ser.settlement_asset.to_asset())
                 })
-                .ok_or(ClearingError::UnsupportedLedger)?;
+                .ok_or(SettlementError::Ledger(LedgerError::UnsupportedLedger))?;
 
             let Asset::Icrc(ledger_id) = settlement_asset_val.clone();
 
             let (fee_nat,): (candid::Nat,) = ic_cdk::call(ledger_id, "icrc1_fee", ())
                 .await
                 .map_err(|(code, msg)| {
-                    ClearingError::FetchingFeeFailed(format!("icrc1_fee RB: {:?}: {}", code, msg))
+                    SettlementError::Ledger(LedgerError::FetchingFeeFailed(format!(
+                        "icrc1_fee RB: {:?}: {}",
+                        code, msg
+                    )))
                 })?;
 
             // TODO: consider fee in settlement logic later
-            let _fee_u128: u128 = fee_nat.0.to_u128().ok_or(ClearingError::FeeMathOverflow)?;
+            let _fee_u128: u128 = fee_nat
+                .0
+                .to_u128()
+                .ok_or(SettlementError::FeeMathOverflow)?;
 
             let positions_to_settle: Vec<(User, i128)> = POSITIONS.with(|positions| {
                 let mut positions = positions.borrow_mut();
@@ -92,7 +98,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             for (user, net_qty) in positions_to_settle.iter().copied() {
                 let payoff_i128: i128 = net_qty
                     .checked_mul(settlement_price as i128)
-                    .ok_or(ClearingError::PayoffMathOverflow)?;
+                    .ok_or(SettlementError::PayoffMathOverflow)?;
 
                 let amount_u128: u128 = payoff_i128.unsigned_abs();
 
@@ -162,7 +168,10 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 ic_cdk::call(ledger_id, "icrc1_transfer", (args,))
                     .await
                     .map_err(|(code, msg)| {
-                        ClearingError::TransferFailed(format!("RB: {:?}: {}", code, msg))
+                        SettlementError::Ledger(LedgerError::TransferFailed(format!(
+                            "RB: {:?}: {}",
+                            code, msg
+                        )))
                     })?;
 
             match res {
@@ -173,7 +182,9 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 Err(e) => {
                     SETTLEMENT_PLANS
                         .with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
-                    return Err(ClearingError::TransferFailed(format!("{:?}", e)));
+                    return Err(SettlementError::Ledger(LedgerError::TransferFailed(
+                        format!("{:?}", e),
+                    )));
                 }
             }
 
@@ -212,7 +223,10 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 ic_cdk::call(ledger_id, "icrc1_transfer", (args,))
                     .await
                     .map_err(|(code, msg)| {
-                        ClearingError::TransferFailed(format!("RB: {:?}: {}", code, msg))
+                        SettlementError::Ledger(LedgerError::TransferFailed(format!(
+                            "RB: {:?}: {}",
+                            code, msg
+                        )))
                     })?;
 
             match res {
@@ -223,7 +237,9 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 Err(e) => {
                     SETTLEMENT_PLANS
                         .with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
-                    return Err(ClearingError::TransferFailed(format!("{:?}", e)));
+                    return Err(SettlementError::Ledger(LedgerError::TransferFailed(
+                        format!("{:?}", e),
+                    )));
                 }
             }
 

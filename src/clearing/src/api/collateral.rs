@@ -14,7 +14,7 @@ use crate::{
     guards::caller_is_not_anonymous,
     memory::{DEPOSIT_PLANS, MARGIN_ACCOUNTS, WITHDRAWAL_PLANS},
     types::{
-        errors::ClearingError,
+        errors::{DepositCollateralError, LedgerError, WithdrawCollateralError},
         margin::MarginAccount,
         params::{DepositCollateralParams, WithdrawCollateralParams},
         plan::{DepositPlan, PlanStatus, WithdrawalPlan},
@@ -26,7 +26,7 @@ use crate::{
 
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositCollateralResult {
-    let result: Result<(), ClearingError> = (async {
+    let result: Result<(), DepositCollateralError> = (async {
         let user: User = ic_cdk::caller().into();
 
         let DepositCollateralParams {
@@ -36,7 +36,9 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
         } = params;
 
         if !is_supported_asset(&asset) {
-            return Err(ClearingError::UnsupportedLedger);
+            return Err(DepositCollateralError::Ledger(
+                LedgerError::UnsupportedLedger,
+            ));
         }
 
         let Asset::Icrc(ledger_id) = asset.clone();
@@ -74,7 +76,10 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
                 ic_cdk::call(ledger_id, "icrc2_transfer_from", (args,))
                     .await
                     .map_err(|(code, msg)| {
-                        ClearingError::TransferFailed(format!("RB: {:?}: {}", code, msg))
+                        DepositCollateralError::Ledger(LedgerError::TransferFailed(format!(
+                            "RB: {:?}: {}",
+                            code, msg
+                        )))
                     })?;
 
             match res {
@@ -88,7 +93,9 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
                 Err(e) => {
                     // Keep plan persisted so retry resumes safely.
                     DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(deposit_id.clone(), plan.clone()));
-                    return Err(ClearingError::TransferFailed(format!("{:?}", e)));
+                    return Err(DepositCollateralError::Ledger(LedgerError::TransferFailed(
+                        format!("{:?}", e),
+                    )));
                 }
             }
 
@@ -102,7 +109,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
                 .0
                 .clone()
                 .try_into()
-                .map_err(|_| ClearingError::DepositCollateralMathOverflow)?;
+                .map_err(|_| DepositCollateralError::DepositCollateralMathOverflow)?;
 
             MARGIN_ACCOUNTS.with(|accounts| {
                 let mut accounts = accounts.borrow_mut();
@@ -129,7 +136,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
 
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCollateralResult {
-    let result: Result<(), ClearingError> = (async {
+    let result: Result<(), WithdrawCollateralError> = (async {
         let user: User = ic_cdk::caller().into();
 
         let WithdrawCollateralParams {
@@ -139,7 +146,9 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
         } = params;
 
         if !is_supported_asset(&asset) {
-            return Err(ClearingError::UnsupportedLedger);
+            return Err(WithdrawCollateralError::Ledger(
+                LedgerError::UnsupportedLedger,
+            ));
         }
 
         let Asset::Icrc(ledger_id) = asset.clone();
@@ -148,7 +157,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             .0
             .clone()
             .try_into()
-            .map_err(|_| ClearingError::WithdrawCollateralMathOverflow)?;
+            .map_err(|_| WithdrawCollateralError::WithdrawCollateralMathOverflow)?;
 
         // ---------- Phase A: Build plan (durable, no awaits) ----------
         let mut plan = WithdrawalPlan::get_or_create(
@@ -177,7 +186,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                 let current = account.get_balance(&asset);
 
                 if current < amount_u128 {
-                    return Err(ClearingError::InsufficientExcessMargin {
+                    return Err(WithdrawCollateralError::InsufficientExcessMargin {
                         current: candid::Nat::from(current),
                         requested: amount.clone(),
                         required: amount.clone(), // TODO: replace with true required margin logic
@@ -215,7 +224,10 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                 ic_cdk::call(ledger_id, "icrc1_transfer", (args,))
                     .await
                     .map_err(|(code, msg)| {
-                        ClearingError::TransferFailed(format!("RB: {:?}: {}", code, msg))
+                        WithdrawCollateralError::Ledger(LedgerError::TransferFailed(format!(
+                            "RB: {:?}: {}",
+                            code, msg
+                        )))
                     })?;
 
             match res {
@@ -244,7 +256,9 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                     WITHDRAWAL_PLANS
                         .with(|m| m.borrow_mut().insert(withdrawal_id.clone(), plan.clone()));
 
-                    return Err(ClearingError::TransferFailed(format!("{:?}", e)));
+                    return Err(WithdrawCollateralError::Ledger(
+                        LedgerError::TransferFailed(format!("{:?}", e)),
+                    ));
                 }
             }
 
