@@ -43,7 +43,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
         SERIES_STORE.with(|store| {
             let mut store = store.borrow_mut();
 
-            if store.contains_key((&series_id).into()) {
+            if store.contains_key(&series_id) {
                 return Err(RegistryError::SeriesAlreadyExists);
             }
 

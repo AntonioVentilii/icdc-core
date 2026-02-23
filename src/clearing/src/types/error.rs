@@ -18,6 +18,7 @@ pub enum ClearingError {
     SeriesNotFound,
     UnsupportedSettlementAsset,
     GettingRegistrySeriesFailed(String),
+    DepositCollateralMathOverflow,
     WithdrawCollateralMathOverflow,
     PayoffMathOverflow,
     FeeMathOverflow,

@@ -39,10 +39,9 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
             return Err(ClearingError::UnsupportedLedger);
         }
 
-        let Asset::Icrc(ledger_id) = asset;
+        let Asset::Icrc(ledger_id) = asset.clone();
 
         // ---------- Phase A: Build plan (no awaits) ----------
-        // If plan exists, we resume (or no-op if finalised).
         let mut plan =
             DepositPlan::get_or_create(deposit_id.clone(), user, asset.clone(), amount.clone());
 
@@ -58,7 +57,6 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
 
             DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(deposit_id.clone(), plan.clone()));
 
-            // TODO: is the sender correct? And the receiver?
             let args = TransferFromArgs {
                 spender_subaccount: None,
                 from: Account {
@@ -85,7 +83,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
                 }
                 Err(TransferFromError::Duplicate { duplicate_of }) => {
                     // Treat Duplicate as success
-                    plan.receipt = Some(duplicate_of.into())
+                    plan.receipt = Some(duplicate_of.into());
                 }
                 Err(e) => {
                     // Keep plan persisted so retry resumes safely.
@@ -100,7 +98,11 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
 
         // ---------- Phase C: Finalise (no awaits, idempotent) ----------
         if plan.receipt.is_some() && plan.status != PlanStatus::Finalised {
-            let amount_u128: u128 = amount.clone().0.try_into().unwrap_or(0);
+            let amount_u128: u128 = amount
+                .0
+                .clone()
+                .try_into()
+                .map_err(|_| ClearingError::DepositCollateralMathOverflow)?;
 
             MARGIN_ACCOUNTS.with(|accounts| {
                 let mut accounts = accounts.borrow_mut();
@@ -140,7 +142,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             return Err(ClearingError::UnsupportedLedger);
         }
 
-        let Asset::Icrc(ledger_id) = asset;
+        let Asset::Icrc(ledger_id) = asset.clone();
 
         let amount_u128: u128 = amount
             .0
@@ -148,7 +150,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             .try_into()
             .map_err(|_| ClearingError::WithdrawCollateralMathOverflow)?;
 
-        // Phase A: Build plan (durable, no awaits)
+        // ---------- Phase A: Build plan (durable, no awaits) ----------
         let mut plan = WithdrawalPlan::get_or_create(
             withdrawal_id.clone(),
             user,
@@ -160,7 +162,40 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             return Ok(());
         }
 
-        // Phase B: execute transfer (async, resumable + ledger idempotency)
+        // ---------- Phase B: Reserve/debit INTERNAL balance BEFORE any await ----------
+        // Ensures we never send funds out unless the user is eligible (risk check).
+        if plan.reserved_amount.is_none() {
+            MARGIN_ACCOUNTS.with(|accounts| {
+                let mut accounts = accounts.borrow_mut();
+
+                let account = accounts.entry(user).or_insert(MarginAccount {
+                    user,
+                    balances: BTreeMap::new(),
+                    required_margin: 0,
+                });
+
+                let current = account.get_balance(&asset);
+
+                if current < amount_u128 {
+                    return Err(ClearingError::InsufficientExcessMargin {
+                        current: candid::Nat::from(current),
+                        requested: amount.clone(),
+                        required: amount.clone(), // TODO: replace with true required margin logic
+                    });
+                }
+
+                account.set_balance(asset.clone(), current - amount_u128);
+
+                Ok(())
+            })?;
+
+            plan.reserved_amount = Some(amount_u128);
+
+            // Persist reservation so retries don’t double-debit.
+            WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(withdrawal_id.clone(), plan.clone()));
+        }
+
+        // ---------- Phase C: Execute transfer (async, resumable + ledger idempotency) ----------
         if plan.receipt.is_none() {
             // Persist that we’re executing before the await
             plan.status = PlanStatus::Executing;
@@ -191,9 +226,24 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                     plan.receipt = Some(duplicate_of.into());
                 }
                 Err(e) => {
-                    // Persist plan so retries resume and ledger dedupe can work
+                    // Refund reserved balance on failure (compensation).
+                    if let Some(reserved) = plan.reserved_amount.take() {
+                        MARGIN_ACCOUNTS.with(|accounts| {
+                            let mut accounts = accounts.borrow_mut();
+                            let account = accounts.entry(user).or_insert(MarginAccount {
+                                user,
+                                balances: BTreeMap::new(),
+                                required_margin: 0,
+                            });
+                            let current = account.get_balance(&asset);
+                            account.set_balance(asset.clone(), current + reserved);
+                        });
+                    }
+
+                    // Persist updated plan (reservation cleared) so retries behave correctly.
                     WITHDRAWAL_PLANS
                         .with(|m| m.borrow_mut().insert(withdrawal_id.clone(), plan.clone()));
+
                     return Err(ClearingError::TransferFailed(format!("{:?}", e)));
                 }
             }
@@ -202,34 +252,16 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(withdrawal_id.clone(), plan.clone()));
         }
 
-        // Phase C: finalise (no awaits, idempotent)
+        // ---------- Phase D: Finalise (no awaits, idempotent) ----------
         if plan.receipt.is_some() && plan.status != PlanStatus::Finalised {
-            // IMPORTANT: enforce internal risk/margin check HERE (no awaits)
-            // (Put back your margin eligibility logic, but based on internal balances + required
-            // margin.)
-            MARGIN_ACCOUNTS.with(|accounts| {
-                let mut accounts = accounts.borrow_mut();
-                let account = accounts.entry(user).or_insert(MarginAccount {
-                    user,
-                    balances: BTreeMap::new(),
-                    required_margin: 0,
-                });
-                let current = account.get_balance(&asset);
-                if current < amount_u128 {
-                    return Err(ClearingError::InsufficientExcessMargin {
-                        current: candid::Nat::from(current),
-                        requested: amount.clone(),
-                        required: amount.clone(), // replace later with true required margin logic
-                    });
-                }
-                account.set_balance(asset.clone(), current - amount_u128);
-                Ok(())
-            })?;
-
             plan.status = PlanStatus::Finalised;
 
+            // At this point, funds are already debited internally (reserved_amount is
+            // “consumed”). Keep it as-is for auditability, or set it to None if you
+            // prefer.
+
             WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(withdrawal_id, plan));
-        };
+        }
 
         Ok(())
     })

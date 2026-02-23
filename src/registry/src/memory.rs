@@ -4,7 +4,7 @@ use ic_cdk::storage;
 use shared::types::{Series, SeriesId};
 
 thread_local! {
-    pub static SERIES_STORE: RefCell<BTreeMap<SeriesId, Series>> = RefCell::new(BTreeMap::new());
+    pub static SERIES_STORE: RefCell<BTreeMap<SeriesId, Series>> = const { RefCell::new(BTreeMap::new()) };
 }
 
 pub fn save_state() {

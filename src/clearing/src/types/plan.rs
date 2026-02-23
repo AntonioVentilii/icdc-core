@@ -76,6 +76,7 @@ pub struct WithdrawalPlan {
     pub status: PlanStatus,
     pub idempotency: PaymentIdempotency,
     pub receipt: Option<PaymentReceipt>,
+    pub reserved_amount: Option<u128>,
 }
 impl WithdrawalPlan {
     pub fn get_or_create(
@@ -106,6 +107,7 @@ impl WithdrawalPlan {
                 status: PlanStatus::Planned,
                 idempotency: ic_cdk::api::time().into(),
                 receipt: None,
+                reserved_amount: None,
             };
 
             m.insert(withdrawal_id.clone(), plan.clone());
