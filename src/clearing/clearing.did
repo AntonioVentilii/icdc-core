@@ -16,11 +16,12 @@ type FreezePositionForTransferParams = record {
 	user : principal;
 	transfer_id : text
 };
+type GetMarginAccountParams = record { refresh : opt bool };
 type GetMarginAccountResult = variant {
 	Ok : MarginAccount;
 	Err : MarginAccountError
 };
-type GetPositionParams = record { series_id : text; user : principal };
+type GetPositionParams = record { series_id : text };
 type LedgerError = variant {
 	FetchingBalanceFailed : text;
 	TransferFailed : text;
@@ -103,10 +104,10 @@ service : {
 	freeze_position_for_transfer : (FreezePositionForTransferParams) -> (
 		opt PositionProof
 	);
-	get_margin_account : (principal) -> (GetMarginAccountResult);
-	get_margin_account_fresh : (principal) -> (GetMarginAccountResult);
+	get_margin_account : (GetMarginAccountParams) -> (GetMarginAccountResult);
+	get_margin_account_query : () -> (GetMarginAccountResult) query;
 	get_position : (GetPositionParams) -> (opt Position) query;
-	get_positions : (principal) -> (vec record { text; Position }) query;
+	get_positions : () -> (vec record { text; Position }) query;
 	list_series : () -> (vec Series) query;
 	set_registry_canister : (principal) -> ();
 	settle_series : (SettleSeriesParams) -> (SettleSeriesResult);

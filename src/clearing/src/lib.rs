@@ -13,8 +13,8 @@ use shared::types::{Series, SeriesId};
 use crate::types::{
     margin::Position,
     params::{
-        DepositCollateralParams, FreezePositionForTransferParams, GetPositionParams,
-        SettleSeriesParams, SubmitMatchedTradeParams, WithdrawCollateralParams,
+        DepositCollateralParams, FreezePositionForTransferParams, GetMarginAccountParams,
+        GetPositionParams, SettleSeriesParams, SubmitMatchedTradeParams, WithdrawCollateralParams,
     },
     results::{
         AcceptPositionTransferResult, DepositCollateralResult, GetMarginAccountResult,

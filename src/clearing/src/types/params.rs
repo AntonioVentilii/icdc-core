@@ -32,8 +32,12 @@ pub struct SubmitMatchedTradeParams {
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct GetMarginAccountParams {
+    pub refresh: Option<bool>,
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct GetPositionParams {
-    pub user: User,
     pub series_id: SeriesId,
 }
 
