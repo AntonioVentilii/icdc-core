@@ -2,7 +2,7 @@ use candid::{CandidType, Deserialize};
 use serde::Serialize;
 use shared::types::SeriesId;
 
-use crate::error::RegistryError;
+use crate::errors::RegistryError;
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum AddSeriesResult {

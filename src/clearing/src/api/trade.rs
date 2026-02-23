@@ -10,7 +10,7 @@ use crate::{
         NEXT_EVENT_ID, POSITIONS,
     },
     types::{
-        error::ClearingError,
+        errors::ClearingError,
         event::{Event, EventType},
         margin::{MarginAccount, Position},
         params::{FreezePositionForTransferParams, SubmitMatchedTradeParams},

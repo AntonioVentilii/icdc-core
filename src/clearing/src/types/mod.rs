@@ -1,4 +1,4 @@
-pub mod error;
+pub mod errors;
 pub mod event;
 pub mod margin;
 pub mod params;

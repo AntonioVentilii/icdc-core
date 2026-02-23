@@ -2,7 +2,7 @@ use ic_cdk_macros::{query, update};
 use shared::types::{Series, SeriesId};
 
 use crate::{
-    error::RegistryError, memory::SERIES_STORE, params::AddSeriesParams, results::AddSeriesResult,
+    errors::RegistryError, memory::SERIES_STORE, params::AddSeriesParams, results::AddSeriesResult,
     utils::canonical_id_part,
 };
 

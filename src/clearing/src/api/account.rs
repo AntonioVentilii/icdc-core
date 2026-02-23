@@ -9,7 +9,7 @@ use crate::{
     memory::{MARGIN_ACCOUNTS, POSITIONS},
     traits::ClearingAccountExt,
     types::{
-        error::ClearingError,
+        errors::ClearingError,
         margin::{MarginAccount, Position},
         params::GetPositionParams,
         results::GetMarginAccountResult,

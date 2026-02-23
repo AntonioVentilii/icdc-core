@@ -1,10 +1,10 @@
 use candid::CandidType;
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use serde::{Deserialize, Serialize};
-use shared::types::Asset;
+use shared::types::{Asset, SeriesId};
 
 use crate::{
-    memory::{DEPOSIT_PLANS, WITHDRAWAL_PLANS},
+    memory::{DEPOSIT_PLANS, SETTLEMENT_PLANS, WITHDRAWAL_PLANS},
     traits::ClearingAccountExt,
     types::{
         payment::{PaymentIdempotency, PaymentReceipt},
@@ -111,6 +111,73 @@ impl WithdrawalPlan {
             };
 
             m.insert(withdrawal_id.clone(), plan.clone());
+            plan
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SettlementPlan {
+    pub series_id: SeriesId,
+    pub settlement_price: u64,
+    pub settlement_asset: Asset,
+    pub positions: Vec<(User, i128)>,
+    pub payers: Vec<(User, u128)>,
+    pub receivers: Vec<(User, u128)>,
+    pub accounting_updates: Vec<(User, i8, u128)>, // (user, sign, amount_u128)
+    pub payer_cursor: usize,
+    pub receiver_cursor: usize,
+    pub accounting_applied: bool,
+    pub status: PlanStatus,
+    pub idempotency: PaymentIdempotency,
+    pub payer_receipts: Vec<Option<PaymentReceipt>>,
+    pub receiver_receipts: Vec<Option<PaymentReceipt>>,
+}
+impl SettlementPlan {
+    pub fn payer_step(&self, idx: u32) -> u64 {
+        idx as u64
+    }
+
+    pub fn receiver_step(&self, idx: u32) -> u64 {
+        10_000u64 + (idx as u64)
+    }
+
+    pub fn get_or_create(
+        series_id: SeriesId,
+        settlement_price: u64,
+        settlement_asset: Asset,
+        positions: Vec<(User, i128)>,
+        payers: Vec<(User, u128)>,
+        receivers: Vec<(User, u128)>,
+        accounting_updates: Vec<(User, i8, u128)>,
+    ) -> Self {
+        SETTLEMENT_PLANS.with(|m| {
+            let mut m = m.borrow_mut();
+
+            if let Some(existing) = m.get(&series_id) {
+                return existing.clone();
+            }
+
+            let idempotency = ic_cdk::api::time().into();
+
+            let plan = SettlementPlan {
+                series_id: series_id.clone(),
+                settlement_price,
+                settlement_asset,
+                positions,
+                payers: payers.clone(),
+                receivers: receivers.clone(),
+                accounting_updates,
+                payer_cursor: 0,
+                receiver_cursor: 0,
+                accounting_applied: false,
+                status: PlanStatus::Planned,
+                idempotency,
+                payer_receipts: vec![None; payers.len()],
+                receiver_receipts: vec![None; receivers.len()],
+            };
+
+            m.insert(series_id, plan.clone());
             plan
         })
     }

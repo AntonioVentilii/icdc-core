@@ -1,5 +1,5 @@
 pub mod api;
-pub mod error;
+pub mod errors;
 pub mod memory;
 pub mod params;
 pub mod results;

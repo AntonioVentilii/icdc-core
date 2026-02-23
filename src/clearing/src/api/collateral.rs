@@ -14,7 +14,7 @@ use crate::{
     guards::caller_is_not_anonymous,
     memory::{DEPOSIT_PLANS, MARGIN_ACCOUNTS, WITHDRAWAL_PLANS},
     types::{
-        error::ClearingError,
+        errors::ClearingError,
         margin::MarginAccount,
         params::{DepositCollateralParams, WithdrawCollateralParams},
         plan::{DepositPlan, PlanStatus, WithdrawalPlan},
