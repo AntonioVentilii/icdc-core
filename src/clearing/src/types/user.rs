@@ -19,5 +19,9 @@ impl From<Principal> for User {
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DepositId(pub String);
 
+pub type DepositKey = (User, DepositId);
+
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct WithdrawalId(pub String);
+
+pub type WithdrawalKey = (User, WithdrawalId);

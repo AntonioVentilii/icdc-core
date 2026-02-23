@@ -41,23 +41,22 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
             ));
         }
 
-        let Asset::Icrc(ledger_id) = asset.clone();
-
         // ---------- Phase A: Build plan (no awaits) ----------
         let mut plan =
             DepositPlan::get_or_create(deposit_id.clone(), user, asset.clone(), amount.clone());
 
-        // Already done → idempotent success.
         if plan.status == PlanStatus::Finalised {
             return Ok(());
         }
+
+        let key = (user, deposit_id.clone());
 
         // ---------- Phase B: Execute transfer (async, resumable) ----------
         if plan.receipt.is_none() {
             // Mark executing (durably) before the await.
             plan.status = PlanStatus::Executing;
 
-            DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(deposit_id.clone(), plan.clone()));
+            DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
 
             let args = TransferFromArgs {
                 spender_subaccount: None,
@@ -71,6 +70,8 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
                 memo: None,
                 created_at_time: plan.idempotency.to_created_at_time(),
             };
+
+            let Asset::Icrc(ledger_id) = asset.clone();
 
             let (res,): (Result<candid::Nat, TransferFromError>,) =
                 ic_cdk::call(ledger_id, "icrc2_transfer_from", (args,))
@@ -92,7 +93,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
                 }
                 Err(e) => {
                     // Keep plan persisted so retry resumes safely.
-                    DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(deposit_id.clone(), plan.clone()));
+                    DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
                     return Err(DepositCollateralError::Ledger(LedgerError::TransferFailed(
                         format!("{:?}", e),
                     )));
@@ -100,7 +101,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
             }
 
             // Persist progress AFTER success/duplicate, before doing anything else.
-            DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(deposit_id.clone(), plan.clone()));
+            DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
         }
 
         // ---------- Phase C: Finalise (no awaits, idempotent) ----------
@@ -124,7 +125,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
 
             plan.status = PlanStatus::Finalised;
 
-            DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(deposit_id.clone(), plan));
+            DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan));
         }
 
         Ok(())
@@ -151,14 +152,6 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             ));
         }
 
-        let Asset::Icrc(ledger_id) = asset.clone();
-
-        let amount_u128: u128 = amount
-            .0
-            .clone()
-            .try_into()
-            .map_err(|_| WithdrawCollateralError::WithdrawCollateralMathOverflow)?;
-
         // ---------- Phase A: Build plan (durable, no awaits) ----------
         let mut plan = WithdrawalPlan::get_or_create(
             withdrawal_id.clone(),
@@ -171,9 +164,17 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             return Ok(());
         }
 
+        let key = (user, withdrawal_id.clone());
+
         // ---------- Phase B: Reserve/debit INTERNAL balance BEFORE any await ----------
         // Ensures we never send funds out unless the user is eligible (risk check).
         if plan.reserved_amount.is_none() {
+            let amount_u128: u128 = amount
+                .0
+                .clone()
+                .try_into()
+                .map_err(|_| WithdrawCollateralError::WithdrawCollateralMathOverflow)?;
+
             MARGIN_ACCOUNTS.with(|accounts| {
                 let mut accounts = accounts.borrow_mut();
 
@@ -201,7 +202,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             plan.reserved_amount = Some(amount_u128);
 
             // Persist reservation so retries don’t double-debit.
-            WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(withdrawal_id.clone(), plan.clone()));
+            WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
         }
 
         // ---------- Phase C: Execute transfer (async, resumable + ledger idempotency) ----------
@@ -209,7 +210,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             // Persist that we’re executing before the await
             plan.status = PlanStatus::Executing;
 
-            WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(withdrawal_id.clone(), plan.clone()));
+            WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
 
             let args = TransferArg {
                 from_subaccount: Some(plan.from_subaccount),
@@ -219,6 +220,8 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                 memo: None,
                 created_at_time: plan.idempotency.to_created_at_time(),
             };
+
+            let Asset::Icrc(ledger_id) = asset.clone();
 
             let (res,): (Result<candid::Nat, TransferError>,) =
                 ic_cdk::call(ledger_id, "icrc1_transfer", (args,))
@@ -253,8 +256,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                     }
 
                     // Persist updated plan (reservation cleared) so retries behave correctly.
-                    WITHDRAWAL_PLANS
-                        .with(|m| m.borrow_mut().insert(withdrawal_id.clone(), plan.clone()));
+                    WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
 
                     return Err(WithdrawCollateralError::Ledger(
                         LedgerError::TransferFailed(format!("{:?}", e)),
@@ -263,7 +265,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             }
 
             // Persist after successful transfer / duplicate
-            WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(withdrawal_id.clone(), plan.clone()));
+            WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
         }
 
         // ---------- Phase D: Finalise (no awaits, idempotent) ----------
@@ -274,7 +276,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             // “consumed”). Keep it as-is for auditability, or set it to None if you
             // prefer.
 
-            WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(withdrawal_id, plan));
+            WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(key, plan));
         }
 
         Ok(())

@@ -40,7 +40,9 @@ impl DepositPlan {
         DEPOSIT_PLANS.with(|m| {
             let mut m = m.borrow_mut();
 
-            if let Some(existing) = m.get(&deposit_id) {
+            let key = (user, deposit_id.clone());
+
+            if let Some(existing) = m.get(&key) {
                 return existing.clone();
             }
 
@@ -59,7 +61,7 @@ impl DepositPlan {
                 receipt: None,
             };
 
-            m.insert(deposit_id, plan.clone());
+            m.insert(key, plan.clone());
             plan
         })
     }
@@ -88,7 +90,9 @@ impl WithdrawalPlan {
         WITHDRAWAL_PLANS.with(|m| {
             let mut m = m.borrow_mut();
 
-            if let Some(existing) = m.get(&withdrawal_id) {
+            let key = (user, withdrawal_id.clone());
+
+            if let Some(existing) = m.get(&key) {
                 return existing.clone();
             }
 
@@ -110,13 +114,13 @@ impl WithdrawalPlan {
                 reserved_amount: None,
             };
 
-            m.insert(withdrawal_id.clone(), plan.clone());
+            m.insert(key.clone(), plan.clone());
             plan
         })
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct SettlementPlan {
     pub series_id: SeriesId,
     pub settlement_price: u64,

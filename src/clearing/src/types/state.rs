@@ -7,9 +7,9 @@ use shared::types::{Series, SeriesId};
 use crate::types::{
     event::Event,
     margin::{MarginAccount, Position},
-    plan::{DepositPlan, WithdrawalPlan},
+    plan::{DepositPlan, SettlementPlan, WithdrawalPlan},
     trade::{TradeId, TransferId},
-    user::{DepositId, User, WithdrawalId},
+    user::{DepositKey, User, WithdrawalKey},
 };
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
@@ -30,9 +30,10 @@ pub struct StableState {
     pub events: Vec<Event>,
     pub next_id: u64,
     pub registry: Principal,
-    pub deposit_plans: BTreeMap<DepositId, DepositPlan>,
-    pub withdrawal_plans: BTreeMap<WithdrawalId, WithdrawalPlan>,
+    pub deposit_plans: BTreeMap<DepositKey, DepositPlan>,
+    pub withdrawal_plans: BTreeMap<WithdrawalKey, WithdrawalPlan>,
     pub executed_trades: BTreeMap<TradeId, u64>,
     pub frozen_transfers: BTreeMap<TransferId, PositionProof>,
     pub accepted_transfers: BTreeMap<TransferId, bool>,
+    pub settlement_plans: BTreeMap<SeriesId, SettlementPlan>,
 }

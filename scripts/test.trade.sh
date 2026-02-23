@@ -1,16 +1,21 @@
 #!/bin/bash
 
 print_margin_account() {
-  local principal="$1"
-  dfx canister call clearing get_margin_account "(principal \"$principal\")"
+  dfx canister call clearing get_margin_account "(record { refresh = null })"
 }
 
 print_settlement_snapshot() {
   local when="$1"
   echo "📸 Margin accounts $when:"
-  print_margin_account "$PRINCIPAL"
-  print_margin_account "$SECONDARY"
+  dfx identity use default
+  print_margin_account
+  dfx identity use secondary
+  print_margin_account
+  dfx identity use default
 }
+
+# Init
+TIMESTAMP=$(date +%s)
 
 # Canister IDs
 CLEARING="uxrrr-q7777-77774-qaaaq-cai"
@@ -60,11 +65,12 @@ dfx canister call icp_ledger icrc2_approve "(
 echo "🚀 Depositing collateral for default identity..."
 dfx canister call clearing deposit_collateral "(
   record {
+    deposit_id = \"DEPOSIT_TEST_${TIMESTAMP}\";
     asset = variant { Icrc = principal \"$ICP_LEDGER\" };
     amount = 200_000_000 : nat;
   },
 )"
-dfx canister call clearing get_margin_account "(principal \"$PRINCIPAL\")"
+print_margin_account
 
 # Switch to secondary identity
 dfx identity use secondary
@@ -91,17 +97,17 @@ dfx canister call icp_ledger icrc2_approve "(
 echo "🚀 Depositing collateral for secondary identity..."
 dfx canister call clearing deposit_collateral "(
   record {
+    deposit_id = \"DEPOSIT_TEST_${TIMESTAMP}\";
     asset = variant { Icrc = principal \"$ICP_LEDGER\" };
     amount = 200_000_000 : nat;
   },
 )"
-dfx canister call clearing get_margin_account "(principal \"$SECONDARY\")"
+dfx canister call clearing get_margin_account "(record { refresh = null })"
 
 # Switch back to default identity
 dfx identity use default
 
 # Register series
-TIMESTAMP=$(date +%s)
 RESULT=$(dfx canister call registry add_series "(
   record {
     strike = null;
@@ -125,6 +131,7 @@ echo "Series ID: $SERIES_ID"
 echo "🚀 Submitting a trade from default identity to secondary identity..."
 dfx canister call clearing submit_matched_trade "(
   record {
+    trade_id = \"TRADE_TEST_${TIMESTAMP}\";
     series_id = \"$SERIES_ID\";
     buyer = principal \"$PRINCIPAL\";
     seller = principal \"$SECONDARY\";
@@ -135,18 +142,19 @@ dfx canister call clearing submit_matched_trade "(
 
 # Check positions
 echo "🚀 Checking position for both identities..."
+dfx identity use default
 dfx canister call clearing get_position "(
   record {
     series_id = \"$SERIES_ID\";
-    user = principal \"$PRINCIPAL\";
   },
 )"
+dfx identity use secondary
 dfx canister call clearing get_position "(
   record {
     series_id = \"$SERIES_ID\";
-    user = principal \"$SECONDARY\";
   },
 )"
+dfx identity use default
 
 # Snapshot BEFORE settlement (last step before settle_series)
 print_settlement_snapshot "AFTER"
@@ -165,18 +173,19 @@ print_settlement_snapshot "AFTER"
 
 # Check positions after settlement
 echo "🚀 Checking positions after settlement..."
+dfx identity use default
 dfx canister call clearing get_position "(
   record {
     series_id = \"$SERIES_ID\";
-    user = principal \"$PRINCIPAL\";
   },
 )"
+dfx identity use secondary
 dfx canister call clearing get_position "(
   record {
     series_id = \"$SERIES_ID\";
-    user = principal \"$SECONDARY\";
   },
 )"
+dfx identity use default
 
 # Conclusion
 echo "✅ Test flow completed!"
