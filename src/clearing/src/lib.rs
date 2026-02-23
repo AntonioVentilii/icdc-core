@@ -6,15 +6,17 @@ pub mod memory;
 pub mod params;
 pub mod results;
 pub mod series;
+mod traits;
 pub mod types;
 
 use candid::Principal;
 use ic_cdk::export_candid;
 use ic_cdk_macros::{post_upgrade, pre_upgrade};
-use shared::types::{MarginAccount, Position, Series};
+use shared::types::{Series, SeriesId};
 use types::PositionProof;
 
 use crate::{
+    error::ClearingError,
     params::{
         DepositCollateralParams, FreezePositionForTransferParams, GetPositionParams,
         SettleSeriesParams, SubmitMatchedTradeParams, WithdrawCollateralParams,
@@ -23,6 +25,7 @@ use crate::{
         AcceptPositionTransferResult, DepositCollateralResult, SettleSeriesResult,
         SubmitMatchedTradeResult, WithdrawCollateralResult,
     },
+    types::{MarginAccount, Position},
 };
 
 #[pre_upgrade]

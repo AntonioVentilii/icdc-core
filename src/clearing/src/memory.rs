@@ -1,43 +1,67 @@
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::BTreeMap};
 
 use candid::Principal;
 use ic_cdk::storage;
 use shared::{
     constants::{CKUSDC_LEDGER, ICP_LEDGER},
-    types::{Event, MarginAccount, Position, Series},
+    types::{Series, SeriesId},
+};
+
+use crate::types::{
+    DepositId, DepositPlan, Event, MarginAccount, Position, StableState, User, WithdrawalId,
+    WithdrawalPlan,
 };
 
 thread_local! {
-    pub static POSITIONS: RefCell<HashMap<(Principal, String), Position>> = RefCell::new(HashMap::new());
-    pub static MARGIN_ACCOUNTS: RefCell<HashMap<Principal, MarginAccount>> = RefCell::new(HashMap::new());
-    pub static SERIES: RefCell<HashMap<String, Series>> = RefCell::new(HashMap::new());
+    pub static POSITIONS: RefCell<BTreeMap<(User, SeriesId), Position>> = const { RefCell::new(BTreeMap::new()) };
+    pub static MARGIN_ACCOUNTS: RefCell<BTreeMap<User, MarginAccount>> = const { RefCell::new(BTreeMap::new()) };
+    pub static SERIES: RefCell<BTreeMap<SeriesId, Series>> = const { RefCell::new(BTreeMap::new()) };
     pub static EVENTS: RefCell<Vec<Event>> = const { RefCell::new(Vec::new()) };
     pub static NEXT_EVENT_ID: RefCell<u64> = const { RefCell::new(0) };
     pub static REGISTRY_CANISTER: RefCell<Principal> = const { RefCell::new(Principal::anonymous()) };
+    pub static DEPOSIT_PLANS: RefCell<BTreeMap<DepositId, DepositPlan>> = const { RefCell::new(BTreeMap::new()) };
+    pub static WITHDRAWAL_PLANS: RefCell<BTreeMap<WithdrawalId, WithdrawalPlan>> = const { RefCell::new(BTreeMap::new()) };
 }
 
 pub fn save_state() {
     let positions: Vec<Position> = POSITIONS.with(|p| p.borrow().values().cloned().collect());
-    let accounts: Vec<MarginAccount> =
-        MARGIN_ACCOUNTS.with(|a| a.borrow().values().cloned().collect());
-    let series: Vec<Series> = SERIES.with(|s| s.borrow().values().cloned().collect());
+    let accounts: BTreeMap<User, MarginAccount> = MARGIN_ACCOUNTS.with(|a| a.borrow().clone());
+    let series: BTreeMap<SeriesId, Series> = SERIES.with(|s| s.borrow().clone());
     let events: Vec<Event> = EVENTS.with(|e| e.borrow().clone());
     let next_id: u64 = NEXT_EVENT_ID.with(|id| *id.borrow());
     let registry: Principal = REGISTRY_CANISTER.with(|r| *r.borrow());
+    let deposit_plans: BTreeMap<DepositId, DepositPlan> =
+        DEPOSIT_PLANS.with(|d| d.borrow().clone());
+    let withdrawal_plans: BTreeMap<WithdrawalId, WithdrawalPlan> =
+        WITHDRAWAL_PLANS.with(|w| w.borrow().clone());
 
-    storage::stable_save((positions, accounts, series, events, next_id, registry))
-        .expect("Save failed");
+    let state = StableState {
+        positions,
+        accounts,
+        series,
+        events,
+        next_id,
+        registry,
+        deposit_plans,
+        withdrawal_plans,
+    };
+
+    storage::stable_save((state,)).expect("Save failed");
 }
 
 pub fn restore_state() {
-    let (positions, accounts, series, events, next_id, registry): (
-        Vec<Position>,
-        Vec<MarginAccount>,
-        Vec<Series>,
-        Vec<Event>,
-        u64,
-        Principal,
-    ) = storage::stable_restore().expect("Restore failed");
+    let (state,): (StableState,) = storage::stable_restore().expect("Restore failed");
+
+    let StableState {
+        positions,
+        accounts,
+        series,
+        events,
+        next_id,
+        registry,
+        deposit_plans,
+        withdrawal_plans,
+    } = state;
 
     POSITIONS.with(|p| {
         let mut p = p.borrow_mut();
@@ -46,23 +70,13 @@ pub fn restore_state() {
         }
     });
 
-    MARGIN_ACCOUNTS.with(|a| {
-        let mut a = a.borrow_mut();
-        for acc in accounts {
-            a.insert(acc.user, acc);
-        }
-    });
-
-    SERIES.with(|s| {
-        let mut s = s.borrow_mut();
-        for ser in series {
-            s.insert(ser.series_id.clone(), ser);
-        }
-    });
-
+    MARGIN_ACCOUNTS.with(|w| *w.borrow_mut() = accounts);
+    SERIES.with(|s| *s.borrow_mut() = series);
     EVENTS.with(|e| *e.borrow_mut() = events);
     NEXT_EVENT_ID.with(|id| *id.borrow_mut() = next_id);
     REGISTRY_CANISTER.with(|r| *r.borrow_mut() = registry);
+    DEPOSIT_PLANS.with(|d| *d.borrow_mut() = deposit_plans);
+    WITHDRAWAL_PLANS.with(|w| *w.borrow_mut() = withdrawal_plans);
 }
 
 pub fn icp_ledger() -> Principal {

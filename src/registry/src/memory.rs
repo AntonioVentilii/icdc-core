@@ -1,10 +1,10 @@
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::BTreeMap};
 
 use ic_cdk::storage;
-use shared::types::Series;
+use shared::types::{Series, SeriesId};
 
 thread_local! {
-    pub static SERIES_STORE: RefCell<HashMap<String, Series>> = RefCell::new(HashMap::new());
+    pub static SERIES_STORE: RefCell<BTreeMap<SeriesId, Series>> = RefCell::new(BTreeMap::new());
 }
 
 pub fn save_state() {
@@ -14,9 +14,10 @@ pub fn save_state() {
 }
 
 pub fn restore_state() {
-    let (old_store,): (HashMap<String, Series>,) =
+    let (state,): (BTreeMap<SeriesId, Series>,) =
         storage::stable_restore().expect("Failed to restore from stable storage");
-    SERIES_STORE.with(|store| {
-        *store.borrow_mut() = old_store;
-    });
+
+    let series = state.into_iter().collect();
+
+    SERIES_STORE.with(|w| *w.borrow_mut() = series);
 }

@@ -1,5 +1,5 @@
 use candid::Principal;
-use shared::types::Series;
+use shared::types::{Series, SeriesId};
 
 use crate::{
     account::is_supported_asset,
@@ -7,7 +7,7 @@ use crate::{
     memory::{REGISTRY_CANISTER, SERIES},
 };
 
-pub async fn ensure_series_registered(series_id: &str) -> Result<Series, ClearingError> {
+pub async fn ensure_series_registered(series_id: &SeriesId) -> Result<Series, ClearingError> {
     if let Some(series) = SERIES.with(|s| s.borrow().get(series_id).cloned()) {
         return Ok(series);
     }
@@ -18,15 +18,14 @@ pub async fn ensure_series_registered(series_id: &str) -> Result<Series, Clearin
         return Err(ClearingError::RegistryNotSet);
     }
 
-    let (series_opt,): (Option<Series>,) =
-        ic_cdk::call(registry, "get_series", (series_id.to_string(),))
-            .await
-            .map_err(|(code, msg)| {
-                ClearingError::GettingRegistrySeriesFailed(format!(
-                    "Registry call failed: {:?}: {}",
-                    code, msg
-                ))
-            })?;
+    let (series_opt,): (Option<Series>,) = ic_cdk::call(registry, "get_series", (series_id,))
+        .await
+        .map_err(|(code, msg)| {
+            ClearingError::GettingRegistrySeriesFailed(format!(
+                "Registry call failed: {:?}: {}",
+                code, msg
+            ))
+        })?;
 
     let series = series_opt.ok_or(ClearingError::SeriesNotFound)?;
 

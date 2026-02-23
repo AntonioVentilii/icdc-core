@@ -1,5 +1,5 @@
 use ic_cdk_macros::{query, update};
-use shared::types::Series;
+use shared::types::{Series, SeriesId};
 
 use crate::{
     error::RegistryError, memory::SERIES_STORE, params::AddSeriesParams, results::AddSeriesResult,
@@ -8,7 +8,7 @@ use crate::{
 
 #[update]
 pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
-    let result: Result<String, RegistryError> = {
+    let result: Result<SeriesId, RegistryError> = {
         let AddSeriesParams {
             underlying,
             expiry,
@@ -43,7 +43,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
         SERIES_STORE.with(|store| {
             let mut store = store.borrow_mut();
 
-            if store.contains_key(&series_id) {
+            if store.contains_key((&series_id).into()) {
                 return Err(RegistryError::SeriesAlreadyExists);
             }
 
@@ -57,7 +57,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
 }
 
 #[query]
-pub fn get_series(series_id: String) -> Option<Series> {
+pub fn get_series(series_id: SeriesId) -> Option<Series> {
     SERIES_STORE.with(|store| store.borrow().get(&series_id).cloned())
 }
 

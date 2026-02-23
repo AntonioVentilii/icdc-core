@@ -3,7 +3,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum ClearingError {
-    InsufficientExcessMargin,
+    InsufficientExcessMargin {
+        current: candid::Nat,
+        requested: candid::Nat,
+        required: candid::Nat,
+    },
     NoMarginAccountFound,
     BuyerInsufficientMargin,
     SellerInsufficientMargin,
@@ -14,5 +18,10 @@ pub enum ClearingError {
     SeriesNotFound,
     UnsupportedSettlementAsset,
     GettingRegistrySeriesFailed(String),
+    WithdrawCollateralMathOverflow,
     PayoffMathOverflow,
+    FeeMathOverflow,
+    BalanceMathOverflow,
+    FetchingFeeFailed(String),
+    FetchingBalanceFailed(String),
 }

@@ -133,6 +133,7 @@ dependencies = [
  "ic-cdk",
  "ic-cdk-macros",
  "icrc-ledger-types",
+ "num-traits",
  "serde",
  "sha2",
  "shared",

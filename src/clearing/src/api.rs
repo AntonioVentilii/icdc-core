@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use candid::Principal;
 use ic_cdk::api::time;
 use ic_cdk_macros::{query, update};
@@ -8,13 +10,17 @@ use icrc_ledger_types::{
     },
     icrc2::transfer_from::{TransferFromArgs, TransferFromError},
 };
-use shared::types::{Asset, Event, EventType, MarginAccount, Position, Series};
+use num_traits::ToPrimitive;
+use shared::types::{Asset, Series, SeriesId};
 
 use crate::{
-    account::{derive_user_subaccount, is_supported_asset},
+    account::is_supported_asset,
     error::ClearingError,
     guards::{caller_is_controller, caller_is_not_anonymous},
-    memory::{EVENTS, MARGIN_ACCOUNTS, NEXT_EVENT_ID, POSITIONS, REGISTRY_CANISTER, SERIES},
+    memory::{
+        DEPOSIT_PLANS, EVENTS, MARGIN_ACCOUNTS, NEXT_EVENT_ID, POSITIONS, REGISTRY_CANISTER,
+        SERIES, WITHDRAWAL_PLANS,
+    },
     params::{
         DepositCollateralParams, FreezePositionForTransferParams, GetPositionParams,
         SettleSeriesParams, SubmitMatchedTradeParams, WithdrawCollateralParams,
@@ -24,15 +30,23 @@ use crate::{
         SubmitMatchedTradeResult, WithdrawCollateralResult,
     },
     series::ensure_series_registered,
-    types::PositionProof,
+    traits::ClearingAccountExt,
+    types::{
+        DepositPlan, Event, EventType, MarginAccount, PlanStatus, Position, PositionProof, User,
+        WithdrawalPlan,
+    },
 };
 
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositCollateralResult {
     let result: Result<(), ClearingError> = (async {
-        let caller = ic_cdk::caller();
+        let user: User = ic_cdk::caller().into();
 
-        let DepositCollateralParams { amount, asset } = params;
+        let DepositCollateralParams {
+            amount,
+            asset,
+            deposit_id,
+        } = params;
 
         if !is_supported_asset(&asset) {
             return Err(ClearingError::UnsupportedLedger);
@@ -40,47 +54,82 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
 
         let Asset::Icrc(ledger_id) = asset;
 
-        let amount_u128: u128 = amount.clone().0.try_into().unwrap_or(0);
+        // ---------- Phase A: Build plan (no awaits) ----------
+        // If plan exists, we resume (or no-op if finalised).
+        let mut plan =
+            DepositPlan::get_or_create(deposit_id.clone(), user, asset.clone(), amount.clone());
 
-        let subaccount = derive_user_subaccount(caller);
+        // Already done → idempotent success.
+        if plan.status == PlanStatus::Finalised {
+            return Ok(());
+        }
 
-        let to_account = Account {
-            owner: ic_cdk::id(),
-            subaccount: Some(subaccount),
-        };
+        // ---------- Phase B: Execute transfer (async, resumable) ----------
+        if plan.receipt.is_none() {
+            // Mark executing (durably) before the await.
+            plan.status = PlanStatus::Executing;
 
-        let args = TransferFromArgs {
-            spender_subaccount: None,
-            from: Account {
-                owner: caller,
-                subaccount: None,
-            },
-            to: to_account,
-            amount: amount.clone(),
-            fee: None,
-            memo: None,
-            created_at_time: None,
-        };
+            DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(deposit_id.clone(), plan.clone()));
 
-        let (res,): (Result<candid::Nat, TransferFromError>,) =
-            ic_cdk::call(ledger_id, "icrc2_transfer_from", (args,))
-                .await
-                .map_err(|(code, msg)| {
-                    ClearingError::TransferFailed(format!("RB: {:?}: {}", code, msg))
-                })?;
+            // TODO: is the sender correct? And the receiver?
+            let args = TransferFromArgs {
+                spender_subaccount: None,
+                from: Account {
+                    owner: user.principal(),
+                    subaccount: None,
+                },
+                to: plan.to_account,
+                amount: amount.clone(),
+                fee: None,
+                memo: None,
+                created_at_time: plan.idempotency.to_created_at_time(),
+            };
 
-        res.map_err(|e| ClearingError::TransferFailed(format!("{:?}", e)))?;
+            let (res,): (Result<candid::Nat, TransferFromError>,) =
+                ic_cdk::call(ledger_id, "icrc2_transfer_from", (args,))
+                    .await
+                    .map_err(|(code, msg)| {
+                        ClearingError::TransferFailed(format!("RB: {:?}: {}", code, msg))
+                    })?;
 
-        MARGIN_ACCOUNTS.with(|accounts| {
-            let mut accounts = accounts.borrow_mut();
-            let account = accounts.entry(caller).or_insert(MarginAccount {
-                user: caller,
-                balances: Vec::new(),
-                required_margin: 0,
+            match res {
+                Ok(block_index) => {
+                    plan.receipt = Some(block_index.into());
+                }
+                Err(TransferFromError::Duplicate { duplicate_of }) => {
+                    // Treat Duplicate as success
+                    plan.receipt = Some(duplicate_of.into())
+                }
+                Err(e) => {
+                    // Keep plan persisted so retry resumes safely.
+                    DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(deposit_id.clone(), plan.clone()));
+                    return Err(ClearingError::TransferFailed(format!("{:?}", e)));
+                }
+            }
+
+            // Persist progress AFTER success/duplicate, before doing anything else.
+            DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(deposit_id.clone(), plan.clone()));
+        }
+
+        // ---------- Phase C: Finalise (no awaits, idempotent) ----------
+        if plan.receipt.is_some() && plan.status != PlanStatus::Finalised {
+            let amount_u128: u128 = amount.clone().0.try_into().unwrap_or(0);
+
+            MARGIN_ACCOUNTS.with(|accounts| {
+                let mut accounts = accounts.borrow_mut();
+                let account = accounts.entry(user).or_insert(MarginAccount {
+                    user,
+                    balances: BTreeMap::new(),
+                    required_margin: 0,
+                });
+                let current = account.get_balance(&asset);
+                account.set_balance(asset.clone(), current + amount_u128);
             });
-            let current = account.get_balance(&asset);
-            account.set_balance(asset, current + amount_u128);
-        });
+
+            plan.status = PlanStatus::Finalised;
+
+            DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(deposit_id.clone(), plan));
+        }
 
         Ok(())
     })
@@ -92,9 +141,13 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCollateralResult {
     let result: Result<(), ClearingError> = (async {
-        let caller = ic_cdk::caller();
+        let user: User = ic_cdk::caller().into();
 
-        let WithdrawCollateralParams { amount, asset } = params;
+        let WithdrawCollateralParams {
+            amount,
+            asset,
+            withdrawal_id,
+        } = params;
 
         if !is_supported_asset(&asset) {
             return Err(ClearingError::UnsupportedLedger);
@@ -102,54 +155,94 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
 
         let Asset::Icrc(ledger_id) = asset;
 
-        let amount_u128: u128 = amount.clone().0.try_into().unwrap_or(0);
+        let amount_u128: u128 = amount
+            .0
+            .clone()
+            .try_into()
+            .map_err(|_| ClearingError::WithdrawCollateralMathOverflow)?;
 
-        MARGIN_ACCOUNTS.with(|accounts| {
-            let mut accounts = accounts.borrow_mut();
-            if let Some(account) = accounts.get_mut(&caller) {
-                let current_token_balance = account.get_balance(&asset);
-                // Simple check for now: enough in this specific token
-                // TODO: valuation across all assets with cross-assets collateral/settlements
-                if current_token_balance >= amount_u128 {
-                    Ok(())
-                } else {
-                    Err(ClearingError::InsufficientExcessMargin)
+        // Phase A: Build plan (durable, no awaits)
+        let mut plan = WithdrawalPlan::get_or_create(
+            withdrawal_id.clone(),
+            user,
+            asset.clone(),
+            amount.clone(),
+        );
+
+        if plan.status == PlanStatus::Finalised {
+            return Ok(());
+        }
+
+        // Phase B: execute transfer (async, resumable + ledger idempotency)
+        if plan.receipt.is_none() {
+            // Persist that we’re executing before the await
+            plan.status = PlanStatus::Executing;
+
+            WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(withdrawal_id.clone(), plan.clone()));
+
+            let args = TransferArg {
+                from_subaccount: Some(plan.from_subaccount),
+                to: plan.to_account,
+                amount: plan.amount.clone(),
+                fee: None,
+                memo: None,
+                created_at_time: plan.idempotency.to_created_at_time(),
+            };
+
+            let (res,): (Result<candid::Nat, TransferError>,) =
+                ic_cdk::call(ledger_id, "icrc1_transfer", (args,))
+                    .await
+                    .map_err(|(code, msg)| {
+                        ClearingError::TransferFailed(format!("RB: {:?}: {}", code, msg))
+                    })?;
+
+            match res {
+                Ok(block_index) => {
+                    plan.receipt = Some(block_index.into());
                 }
-            } else {
-                Err(ClearingError::NoMarginAccountFound)
+                Err(TransferError::Duplicate { duplicate_of }) => {
+                    plan.receipt = Some(duplicate_of.into());
+                }
+                Err(e) => {
+                    // Persist plan so retries resume and ledger dedupe can work
+                    WITHDRAWAL_PLANS
+                        .with(|m| m.borrow_mut().insert(withdrawal_id.clone(), plan.clone()));
+                    return Err(ClearingError::TransferFailed(format!("{:?}", e)));
+                }
             }
-        })?;
 
-        let from_subaccount = derive_user_subaccount(caller);
+            // Persist after successful transfer / duplicate
+            WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(withdrawal_id.clone(), plan.clone()));
+        }
 
-        let args = TransferArg {
-            from_subaccount: Some(from_subaccount),
-            to: Account {
-                owner: caller,
-                subaccount: None,
-            },
-            amount: amount.clone(),
-            fee: None,
-            memo: None,
-            created_at_time: None,
-        };
-
-        let (res,): (Result<candid::Nat, TransferError>,) =
-            ic_cdk::call(ledger_id, "icrc1_transfer", (args,))
-                .await
-                .map_err(|(code, msg)| {
-                    ClearingError::TransferFailed(format!("RB: {:?}: {}", code, msg))
-                })?;
-
-        res.map_err(|e| ClearingError::TransferFailed(format!("{:?}", e)))?;
-
-        MARGIN_ACCOUNTS.with(|accounts| {
-            let mut accounts = accounts.borrow_mut();
-            if let Some(account) = accounts.get_mut(&caller) {
+        // Phase C: finalise (no awaits, idempotent)
+        if plan.receipt.is_some() && plan.status != PlanStatus::Finalised {
+            // IMPORTANT: enforce internal risk/margin check HERE (no awaits)
+            // (Put back your margin eligibility logic, but based on internal balances + required
+            // margin.)
+            MARGIN_ACCOUNTS.with(|accounts| {
+                let mut accounts = accounts.borrow_mut();
+                let account = accounts.entry(user).or_insert(MarginAccount {
+                    user,
+                    balances: BTreeMap::new(),
+                    required_margin: 0,
+                });
                 let current = account.get_balance(&asset);
-                account.set_balance(asset, current - amount_u128);
-            }
-        });
+                if current < amount_u128 {
+                    return Err(ClearingError::InsufficientExcessMargin {
+                        current: candid::Nat::from(current),
+                        requested: amount.clone(),
+                        required: amount.clone(), // replace later with true required margin logic
+                    });
+                }
+                account.set_balance(asset.clone(), current - amount_u128);
+                Ok(())
+            })?;
+
+            plan.status = PlanStatus::Finalised;
+
+            WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(withdrawal_id, plan));
+        };
 
         Ok(())
     })
@@ -187,7 +280,7 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
 
             let buyer_account = accounts.entry(buyer).or_insert(MarginAccount {
                 user: buyer,
-                balances: Vec::new(),
+                balances: BTreeMap::new(),
                 required_margin: 0,
             });
 
@@ -201,7 +294,7 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
 
             let seller_account = accounts.entry(seller).or_insert(MarginAccount {
                 user: seller,
-                balances: Vec::new(),
+                balances: BTreeMap::new(),
                 required_margin: 0,
             });
 
@@ -264,9 +357,127 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
     result.into()
 }
 
-#[query]
-pub fn get_margin_account(user: Principal) -> Option<MarginAccount> {
-    MARGIN_ACCOUNTS.with(|accounts| accounts.borrow().get(&user).cloned())
+#[update(guard = "caller_is_not_anonymous")]
+pub async fn get_margin_account(user: Principal) -> Result<MarginAccount, ClearingError> {
+    // TODO: only allow caller to fetch self???
+
+    let user: User = user.into();
+
+    let from_account = user.clearing_account();
+
+    let assets_to_refresh = MARGIN_ACCOUNTS.with(|accounts| {
+        accounts
+            .borrow()
+            .get(&user)
+            .map(|m| m.tracked_assets())
+            .unwrap_or_default()
+    });
+
+    let mut balances: BTreeMap<Asset, u128> = BTreeMap::new();
+
+    for asset in assets_to_refresh.iter().cloned() {
+        let Asset::Icrc(ledger_id) = asset.clone();
+
+        let (ledger_balance,): (candid::Nat,) =
+            ic_cdk::call(ledger_id, "icrc1_balance_of", (from_account,))
+                .await
+                .map_err(|(code, msg)| {
+                    ClearingError::FetchingBalanceFailed(format!(
+                        "icrc1_balance_of {:?}: {}",
+                        code, msg
+                    ))
+                })?;
+
+        let bal_u128: u128 = ledger_balance
+            .0
+            .try_into()
+            .map_err(|_| ClearingError::BalanceMathOverflow)?;
+
+        balances.insert(asset, bal_u128);
+    }
+
+    MARGIN_ACCOUNTS.with(|accounts| {
+        let mut accounts = accounts.borrow_mut();
+        let acct = accounts.entry(user).or_insert(MarginAccount {
+            user,
+            balances: BTreeMap::new(),
+            required_margin: 0,
+        });
+
+        acct.balances = balances.clone();
+    });
+
+    MARGIN_ACCOUNTS.with(|accounts| {
+        accounts
+            .borrow()
+            .get(&user)
+            .cloned()
+            .ok_or(ClearingError::NoMarginAccountFound)
+    })
+}
+
+#[update(guard = "caller_is_not_anonymous")]
+pub async fn get_margin_account_fresh(user: Principal) -> Result<MarginAccount, ClearingError> {
+    // TODO: only allow caller to fetch self???
+    let user: User = user.into();
+
+    let from_account = user.clearing_account();
+
+    let required_margin_u128 = MARGIN_ACCOUNTS.with(|accounts| {
+        accounts
+            .borrow()
+            .get(&user)
+            .map(|m| m.required_margin)
+            .unwrap_or(0)
+    });
+
+    let assets_to_refresh = MARGIN_ACCOUNTS.with(|accounts| {
+        accounts
+            .borrow()
+            .get(&user)
+            .map(|m| m.tracked_assets())
+            .unwrap_or_default()
+    });
+
+    let mut balances: BTreeMap<Asset, u128> = BTreeMap::new();
+
+    for asset in assets_to_refresh.iter().cloned() {
+        let Asset::Icrc(ledger_id) = asset.clone();
+
+        let (ledger_balance,): (candid::Nat,) =
+            ic_cdk::call(ledger_id, "icrc1_balance_of", (from_account,))
+                .await
+                .map_err(|(code, msg)| {
+                    ClearingError::FetchingBalanceFailed(format!(
+                        "icrc1_balance_of {:?}: {}",
+                        code, msg
+                    ))
+                })?;
+
+        let bal_u128: u128 = ledger_balance
+            .0
+            .try_into()
+            .map_err(|_| ClearingError::BalanceMathOverflow)?;
+
+        balances.insert(asset, bal_u128);
+    }
+
+    MARGIN_ACCOUNTS.with(|accounts| {
+        let mut accounts = accounts.borrow_mut();
+        let acct = accounts.entry(user).or_insert(MarginAccount {
+            user,
+            balances: BTreeMap::new(),
+            required_margin: 0,
+        });
+
+        acct.balances = balances.clone();
+    });
+
+    Ok(MarginAccount {
+        user,
+        balances,
+        required_margin: required_margin_u128,
+    })
 }
 
 #[query]
@@ -276,6 +487,20 @@ pub fn get_position(params: GetPositionParams) -> Option<Position> {
             .borrow()
             .get(&(params.user, params.series_id))
             .cloned()
+    })
+}
+
+#[query]
+pub fn get_positions(user: Principal) -> Vec<(SeriesId, Position)> {
+    let user: User = user.into();
+
+    POSITIONS.with(|positions| {
+        positions
+            .borrow()
+            .iter()
+            .filter(|((u, _), _)| *u == user)
+            .map(|((_, series_id), position)| (series_id.clone(), position.clone()))
+            .collect()
     })
 }
 
@@ -303,27 +528,38 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
             let Asset::Icrc(ledger_id) = settlement_asset_val;
 
-            let positions_to_settle: Vec<(Principal, i128)> = POSITIONS.with(|positions| {
+            let (fee_nat,): (candid::Nat,) = ic_cdk::call(ledger_id, "icrc1_fee", ())
+                .await
+                .map_err(|(code, msg)| {
+                    ClearingError::FetchingFeeFailed(format!("icrc1_fee RB: {:?}: {}", code, msg))
+                })?;
+
+            let fee_u128: u128 = fee_nat.0.to_u128().ok_or(ClearingError::FeeMathOverflow)?;
+
+            let positions_to_settle: Vec<(User, i128)> = POSITIONS.with(|positions| {
                 let mut positions = positions.borrow_mut();
-                let users: Vec<Principal> = positions
+
+                let users: Vec<User> = positions
                     .keys()
                     .filter(|(_, sid)| *sid == series_id)
                     .map(|(u, _)| *u)
                     .collect();
 
                 let mut settlement_data = Vec::new();
+
                 for user in users {
                     if let Some(pos) = positions.remove(&(user, series_id.clone())) {
                         settlement_data.push((user, pos.net_qty));
                     }
                 }
+
                 settlement_data
             });
 
             // Split into payers and receivers (using integer arithmetic avoids f64 surprises)
-            let mut payers: Vec<(Principal, u128)> = Vec::new();
-            let mut receivers: Vec<(Principal, u128)> = Vec::new();
-            let mut accounting_updates: Vec<(Principal, i128, u128)> = Vec::new();
+            let mut payers: Vec<(User, u128)> = Vec::new();
+            let mut receivers: Vec<(User, u128)> = Vec::new();
+            let mut accounting_updates: Vec<(User, i128, u128)> = Vec::new();
 
             for (user, net_qty) in positions_to_settle {
                 let payoff_i128: i128 = net_qty
@@ -335,8 +571,18 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                     payers.push((user, amount_u128));
                     accounting_updates.push((user, -1, amount_u128));
                 } else if payoff_i128 > 0 {
-                    receivers.push((user, amount_u128));
-                    accounting_updates.push((user, 1, amount_u128));
+                    // Receiver economically pays payout fee: pool pays fee on-ledger, but receiver
+                    // receives (and is credited) amount minus fee.
+                    if amount_u128 <= fee_u128 {
+                        return Err(ClearingError::TransferFailed(
+                            "settlement payoff too small to cover fee".to_string(),
+                        ));
+                    }
+
+                    let net_to_receiver: u128 = amount_u128 - fee_u128;
+
+                    receivers.push((user, net_to_receiver));
+                    accounting_updates.push((user, 1, net_to_receiver));
                 } else {
                     // no transfer, but still clear required margin
                     accounting_updates.push((user, 0, 0));
@@ -346,9 +592,11 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             for (user, amount_u128) in payers.iter().copied() {
                 let amount_nat = candid::Nat::from(amount_u128);
 
+                let from_subaccount = user.clearing_subaccount();
+
                 // Payer pays canister: User Subaccount -> Pool
                 let args = TransferArg {
-                    from_subaccount: Some(derive_user_subaccount(user)),
+                    from_subaccount: Some(from_subaccount),
                     to: Account {
                         owner: ic_cdk::id(),
                         subaccount: None, // Canister main account pool
@@ -372,15 +620,14 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             for (user, amount_u128) in receivers.iter().copied() {
                 let amount_nat = candid::Nat::from(amount_u128);
 
+                let to_account = user.clearing_account();
+
                 // Canister pays receiver: Pool -> User Subaccount
                 let args = TransferArg {
                     from_subaccount: None, // Canister main account pool
-                    to: Account {
-                        owner: ic_cdk::id(),
-                        subaccount: Some(derive_user_subaccount(user)),
-                    },
+                    to: to_account,
                     amount: amount_nat,
-                    fee: None,
+                    fee: Some(fee_nat.clone()),
                     memo: None,
                     created_at_time: None,
                 };
