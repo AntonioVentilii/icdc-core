@@ -33,6 +33,10 @@ type FreezePositionForTransferParams = record {
 	series_id : text;
 	user : principal
 };
+type GetMarginAccountResult = variant {
+	Ok : MarginAccount;
+	Err : ClearingError
+};
 type GetPositionParams = record { series_id : text; user : principal };
 type MarginAccount = record {
 	required_margin : nat;
@@ -48,7 +52,6 @@ type PositionProof = record {
 	user : principal;
 	clearing_id : principal
 };
-type Result = variant { Ok : MarginAccount; Err : ClearingError };
 type Series = record {
 	strike : opt nat64;
 	payoff_type : PayoffType;
@@ -80,8 +83,8 @@ service : {
 	freeze_position_for_transfer : (FreezePositionForTransferParams) -> (
 		opt PositionProof
 	);
-	get_margin_account : (principal) -> (Result);
-	get_margin_account_fresh : (principal) -> (Result);
+	get_margin_account : (principal) -> (GetMarginAccountResult);
+	get_margin_account_fresh : (principal) -> (GetMarginAccountResult);
 	get_position : (GetPositionParams) -> (opt Position) query;
 	get_positions : (principal) -> (vec record { text; Position }) query;
 	list_series : () -> (vec Series) query;

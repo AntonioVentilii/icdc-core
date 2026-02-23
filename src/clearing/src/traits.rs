@@ -1,6 +1,6 @@
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 
-use crate::{account::derive_user_subaccount, types::User};
+use crate::{types::user::User, utils::account::derive_user_subaccount};
 
 pub trait ClearingAccountExt {
     fn clearing_subaccount(&self) -> Subaccount;

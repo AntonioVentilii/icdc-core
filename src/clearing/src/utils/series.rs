@@ -2,9 +2,9 @@ use candid::Principal;
 use shared::types::{Series, SeriesId};
 
 use crate::{
-    account::is_supported_asset,
-    error::ClearingError,
     memory::{REGISTRY_CANISTER, SERIES},
+    utils::asset::is_supported_asset,
+    ClearingError,
 };
 
 pub async fn ensure_series_registered(series_id: &SeriesId) -> Result<Series, ClearingError> {

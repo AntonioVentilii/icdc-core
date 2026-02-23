@@ -1,31 +1,27 @@
-pub mod account;
 pub mod api;
-pub mod error;
 pub mod guards;
 pub mod memory;
-pub mod params;
-pub mod results;
-pub mod series;
-mod traits;
+pub mod traits;
 pub mod types;
+pub mod utils;
 
 use candid::Principal;
 use ic_cdk::export_candid;
 use ic_cdk_macros::{post_upgrade, pre_upgrade};
 use shared::types::{Series, SeriesId};
-use types::PositionProof;
 
-use crate::{
+use crate::types::{
     error::ClearingError,
+    margin::Position,
     params::{
         DepositCollateralParams, FreezePositionForTransferParams, GetPositionParams,
         SettleSeriesParams, SubmitMatchedTradeParams, WithdrawCollateralParams,
     },
     results::{
-        AcceptPositionTransferResult, DepositCollateralResult, SettleSeriesResult,
-        SubmitMatchedTradeResult, WithdrawCollateralResult,
+        AcceptPositionTransferResult, DepositCollateralResult, GetMarginAccountResult,
+        SettleSeriesResult, SubmitMatchedTradeResult, WithdrawCollateralResult,
     },
-    types::{MarginAccount, Position},
+    state::PositionProof,
 };
 
 #[pre_upgrade]

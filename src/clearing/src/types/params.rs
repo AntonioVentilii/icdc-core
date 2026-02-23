@@ -2,7 +2,7 @@ use candid::{CandidType, Deserialize};
 use serde::Serialize;
 use shared::types::{Asset, SeriesId};
 
-use crate::types::{DepositId, User, WithdrawalId};
+use crate::types::user::{DepositId, User, WithdrawalId};
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct DepositCollateralParams {

@@ -8,8 +8,11 @@ use shared::{
 };
 
 use crate::types::{
-    DepositId, DepositPlan, Event, MarginAccount, Position, StableState, User, WithdrawalId,
-    WithdrawalPlan,
+    event::Event,
+    margin::{MarginAccount, Position},
+    plan::{DepositPlan, WithdrawalPlan},
+    state::StableState,
+    user::{DepositId, User, WithdrawalId},
 };
 
 thread_local! {

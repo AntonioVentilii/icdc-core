@@ -1,7 +1,7 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
 
-use crate::error::ClearingError;
+use crate::{types::margin::MarginAccount, ClearingError};
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum DepositCollateralResult {
@@ -69,6 +69,20 @@ impl From<Result<bool, ClearingError>> for AcceptPositionTransferResult {
         match value {
             Ok(v) => AcceptPositionTransferResult::Ok(v),
             Err(e) => AcceptPositionTransferResult::Err(e),
+        }
+    }
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub enum GetMarginAccountResult {
+    Ok(MarginAccount),
+    Err(ClearingError),
+}
+impl From<Result<MarginAccount, ClearingError>> for GetMarginAccountResult {
+    fn from(value: Result<MarginAccount, ClearingError>) -> Self {
+        match value {
+            Ok(v) => GetMarginAccountResult::Ok(v),
+            Err(e) => GetMarginAccountResult::Err(e),
         }
     }
 }
