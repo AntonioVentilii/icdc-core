@@ -7,12 +7,16 @@ use shared::{
     types::{Series, SeriesId},
 };
 
-use crate::types::{
-    event::Event,
-    margin::{MarginAccount, Position},
-    plan::{DepositPlan, WithdrawalPlan},
-    state::StableState,
-    user::{DepositId, User, WithdrawalId},
+use crate::{
+    types::{
+        event::Event,
+        margin::{MarginAccount, Position},
+        plan::{DepositPlan, WithdrawalPlan},
+        state::StableState,
+        trade::{TradeId, TransferId},
+        user::{DepositId, User, WithdrawalId},
+    },
+    PositionProof,
 };
 
 thread_local! {
@@ -24,6 +28,9 @@ thread_local! {
     pub static REGISTRY_CANISTER: RefCell<Principal> = const { RefCell::new(Principal::anonymous()) };
     pub static DEPOSIT_PLANS: RefCell<BTreeMap<DepositId, DepositPlan>> = const { RefCell::new(BTreeMap::new()) };
     pub static WITHDRAWAL_PLANS: RefCell<BTreeMap<WithdrawalId, WithdrawalPlan>> = const { RefCell::new(BTreeMap::new()) };
+    pub static EXECUTED_TRADES: RefCell<BTreeMap<TradeId, u64>> = const { RefCell::new(BTreeMap::new()) };
+    pub static FROZEN_TRANSFERS: RefCell<BTreeMap<TransferId, PositionProof>> = const { RefCell::new(BTreeMap::new()) };
+    pub static ACCEPTED_TRANSFERS: RefCell<BTreeMap<TransferId, bool>> = const { RefCell::new(BTreeMap::new()) };
 }
 
 pub fn save_state() {
@@ -37,6 +44,11 @@ pub fn save_state() {
         DEPOSIT_PLANS.with(|d| d.borrow().clone());
     let withdrawal_plans: BTreeMap<WithdrawalId, WithdrawalPlan> =
         WITHDRAWAL_PLANS.with(|w| w.borrow().clone());
+    let executed_trades: BTreeMap<TradeId, u64> = EXECUTED_TRADES.with(|t| t.borrow().clone());
+    let frozen_transfers: BTreeMap<TransferId, PositionProof> =
+        FROZEN_TRANSFERS.with(|t| t.borrow().clone());
+    let accepted_transfers: BTreeMap<TransferId, bool> =
+        ACCEPTED_TRANSFERS.with(|t| t.borrow().clone());
 
     let state = StableState {
         positions,
@@ -47,6 +59,9 @@ pub fn save_state() {
         registry,
         deposit_plans,
         withdrawal_plans,
+        executed_trades,
+        frozen_transfers,
+        accepted_transfers,
     };
 
     storage::stable_save((state,)).expect("Save failed");
@@ -64,6 +79,9 @@ pub fn restore_state() {
         registry,
         deposit_plans,
         withdrawal_plans,
+        executed_trades,
+        frozen_transfers,
+        accepted_transfers,
     } = state;
 
     POSITIONS.with(|p| {
@@ -80,6 +98,9 @@ pub fn restore_state() {
     REGISTRY_CANISTER.with(|r| *r.borrow_mut() = registry);
     DEPOSIT_PLANS.with(|d| *d.borrow_mut() = deposit_plans);
     WITHDRAWAL_PLANS.with(|w| *w.borrow_mut() = withdrawal_plans);
+    EXECUTED_TRADES.with(|t| *t.borrow_mut() = executed_trades);
+    FROZEN_TRANSFERS.with(|t| *t.borrow_mut() = frozen_transfers);
+    ACCEPTED_TRANSFERS.with(|t| *t.borrow_mut() = accepted_transfers);
 }
 
 pub fn icp_ledger() -> Principal {

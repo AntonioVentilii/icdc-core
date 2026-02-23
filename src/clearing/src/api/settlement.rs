@@ -6,11 +6,10 @@ use icrc_ledger_types::icrc1::{
 use num_traits::ToPrimitive;
 use shared::types::Asset;
 
-// use crate::types::margin::MarginAccount;
-use crate::traits::ClearingAccountExt;
 use crate::{
     guards::caller_is_controller,
     memory::{MARGIN_ACCOUNTS, POSITIONS, SERIES},
+    traits::ClearingAccountExt,
     types::{
         error::ClearingError, params::SettleSeriesParams, results::SettleSeriesResult, user::User,
     },

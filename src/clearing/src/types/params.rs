@@ -2,7 +2,10 @@ use candid::{CandidType, Deserialize};
 use serde::Serialize;
 use shared::types::{Asset, SeriesId};
 
-use crate::types::user::{DepositId, User, WithdrawalId};
+use crate::types::{
+    trade::{TradeId, TransferId},
+    user::{DepositId, User, WithdrawalId},
+};
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct DepositCollateralParams {
@@ -20,6 +23,7 @@ pub struct WithdrawCollateralParams {
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct SubmitMatchedTradeParams {
+    pub trade_id: TradeId,
     pub series_id: SeriesId,
     pub buyer: User,
     pub seller: User,
@@ -41,6 +45,7 @@ pub struct SettleSeriesParams {
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct FreezePositionForTransferParams {
+    pub transfer_id: TransferId,
     pub user: User,
     pub series_id: SeriesId,
 }

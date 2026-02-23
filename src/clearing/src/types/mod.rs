@@ -6,4 +6,5 @@ pub mod payment;
 pub mod plan;
 pub mod results;
 pub mod state;
+pub mod trade;
 pub mod user;

@@ -1,18 +1,20 @@
 use std::collections::BTreeMap;
 
 use candid::{CandidType, Principal};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use shared::types::{Series, SeriesId};
 
 use crate::types::{
     event::Event,
     margin::{MarginAccount, Position},
     plan::{DepositPlan, WithdrawalPlan},
+    trade::{TradeId, TransferId},
     user::{DepositId, User, WithdrawalId},
 };
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct PositionProof {
+    pub transfer_id: TransferId,
     pub user: User,
     pub series_id: SeriesId,
     pub qty: i128,
@@ -20,7 +22,7 @@ pub struct PositionProof {
     pub signature: Vec<u8>,
 }
 
-#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+#[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct StableState {
     pub positions: Vec<Position>,
     pub accounts: BTreeMap<User, MarginAccount>,
@@ -30,4 +32,7 @@ pub struct StableState {
     pub registry: Principal,
     pub deposit_plans: BTreeMap<DepositId, DepositPlan>,
     pub withdrawal_plans: BTreeMap<WithdrawalId, WithdrawalPlan>,
+    pub executed_trades: BTreeMap<TradeId, u64>,
+    pub frozen_transfers: BTreeMap<TransferId, PositionProof>,
+    pub accepted_transfers: BTreeMap<TransferId, bool>,
 }
