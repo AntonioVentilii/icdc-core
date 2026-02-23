@@ -136,3 +136,67 @@ impl Series {
         series_id.into()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_series_id_consistency() {
+        let underlying = "ICP";
+        let expiry = 1735689600;
+        let payoff_type = PayoffType::Call;
+        let strike = Some(100);
+        let settlement_asset = SettlementAsset::Icp;
+        let oracle_source = "coingecko";
+
+        let id1 = Series::generate_id(
+            underlying,
+            expiry,
+            &payoff_type,
+            strike,
+            &settlement_asset,
+            oracle_source,
+        );
+
+        let id2 = Series::generate_id(
+            underlying,
+            expiry,
+            &payoff_type,
+            strike,
+            &settlement_asset,
+            oracle_source,
+        );
+
+        assert_eq!(id1, id2);
+    }
+
+    #[test]
+    fn test_generate_series_id_different_expiry() {
+        let underlying = "ICP";
+        let payoff_type = PayoffType::Call;
+        let strike = Some(100);
+        let settlement_asset = SettlementAsset::Icp;
+        let oracle_source = "coingecko";
+
+        let id1 = Series::generate_id(
+            underlying,
+            100,
+            &payoff_type,
+            strike,
+            &settlement_asset,
+            oracle_source,
+        );
+
+        let id2 = Series::generate_id(
+            underlying,
+            200,
+            &payoff_type,
+            strike,
+            &settlement_asset,
+            oracle_source,
+        );
+
+        assert_ne!(id1, id2);
+    }
+}
