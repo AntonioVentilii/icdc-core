@@ -1,11 +1,9 @@
 use candid::CandidType;
-use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 use serde::{Deserialize, Serialize};
 use shared::types::{Asset, SeriesId};
 
 use crate::{
     memory::{DEPOSIT_PLANS, SETTLEMENT_PLANS, WITHDRAWAL_PLANS},
-    traits::ClearingAccountExt,
     types::{
         payment::{PaymentIdempotency, PaymentReceipt},
         user::{DepositId, User, WithdrawalId},
@@ -25,7 +23,6 @@ pub struct DepositPlan {
     pub user: User,
     pub asset: Asset,
     pub amount: candid::Nat,
-    pub to_account: Account,
     pub status: PlanStatus,
     pub idempotency: PaymentIdempotency,
     pub receipt: Option<PaymentReceipt>,
@@ -46,8 +43,6 @@ impl DepositPlan {
                 return existing.clone();
             }
 
-            let to_account = user.clearing_account();
-
             let idempotency = PaymentIdempotency::IcrcCreatedAtTime(ic_cdk::api::time());
 
             let plan = DepositPlan {
@@ -55,7 +50,6 @@ impl DepositPlan {
                 user,
                 asset,
                 amount,
-                to_account,
                 status: PlanStatus::Planned,
                 idempotency,
                 receipt: None,
@@ -73,8 +67,7 @@ pub struct WithdrawalPlan {
     pub user: User,
     pub asset: Asset,
     pub amount: candid::Nat,
-    pub from_subaccount: Subaccount,
-    pub to_account: Account,
+    pub to_account: (candid::Principal, Option<[u8; 32]>),
     pub status: PlanStatus,
     pub idempotency: PaymentIdempotency,
     pub receipt: Option<PaymentReceipt>,
@@ -86,6 +79,7 @@ impl WithdrawalPlan {
         user: User,
         asset: Asset,
         amount: candid::Nat,
+        to_account: (candid::Principal, Option<[u8; 32]>),
     ) -> Self {
         WITHDRAWAL_PLANS.with(|m| {
             let mut m = m.borrow_mut();
@@ -96,18 +90,12 @@ impl WithdrawalPlan {
                 return existing.clone();
             }
 
-            let from_subaccount = user.clearing_subaccount();
-
             let plan = WithdrawalPlan {
                 withdrawal_id: withdrawal_id.clone(),
                 user,
                 asset: asset.clone(),
                 amount: amount.clone(),
-                from_subaccount,
-                to_account: Account {
-                    owner: user.principal(),
-                    subaccount: None,
-                },
+                to_account,
                 status: PlanStatus::Planned,
                 idempotency: ic_cdk::api::time().into(),
                 receipt: None,

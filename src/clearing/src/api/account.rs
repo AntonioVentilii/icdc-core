@@ -4,11 +4,12 @@ use ic_cdk_macros::{query, update};
 use shared::types::{Asset, SeriesId};
 
 use crate::{
+    assets::asset::{handler::get_handler, params::AssetBalanceOfParams},
     guards::caller_is_not_anonymous,
     memory::{MARGIN_ACCOUNTS, POSITIONS},
-    traits::ClearingAccountExt,
     types::{
-        errors::{LedgerError, MarginAccountError},
+        account::LedgerAccount,
+        errors::MarginAccountError,
         margin::{MarginAccount, Position},
         params::{GetMarginAccountParams, GetPositionParams},
         results::GetMarginAccountResult,
@@ -63,8 +64,6 @@ pub async fn get_margin_account(params: GetMarginAccountParams) -> GetMarginAcco
         }
 
         // Refresh balances from ledgers (await)
-        let from_account = user.clearing_account();
-
         let assets_to_refresh = MARGIN_ACCOUNTS.with(|accounts| {
             accounts
                 .borrow()
@@ -76,22 +75,15 @@ pub async fn get_margin_account(params: GetMarginAccountParams) -> GetMarginAcco
         let mut balances: BTreeMap<Asset, u128> = BTreeMap::new();
 
         for asset in assets_to_refresh.iter().cloned() {
-            let Asset::Icrc(ledger_id) = asset.clone();
+            let handler = get_handler(&asset).map_err(MarginAccountError::Ledger)?;
 
-            let (ledger_balance,): (candid::Nat,) =
-                ic_cdk::call(ledger_id, "icrc1_balance_of", (from_account,))
-                    .await
-                    .map_err(|(code, msg)| {
-                        MarginAccountError::Ledger(LedgerError::FetchingBalanceFailed(format!(
-                            "icrc1_balance_of {:?}: {}",
-                            code, msg
-                        )))
-                    })?;
-
-            let bal_u128: u128 = ledger_balance
-                .0
-                .try_into()
-                .map_err(|_| MarginAccountError::BalanceMathOverflow)?;
+            let bal_u128 = handler
+                .balance_of(AssetBalanceOfParams {
+                    asset: &asset,
+                    account: LedgerAccount::UserClearing(user),
+                })
+                .await
+                .map_err(MarginAccountError::Ledger)?;
 
             balances.insert(asset, bal_u128);
         }

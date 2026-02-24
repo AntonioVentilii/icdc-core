@@ -1,4 +1,5 @@
 pub mod api;
+pub mod assets;
 pub mod guards;
 pub mod memory;
 pub mod traits;

@@ -1,19 +1,19 @@
 use std::collections::BTreeMap;
 
 use ic_cdk_macros::update;
-use icrc_ledger_types::{
-    icrc1::{
-        account::Account,
-        transfer::{TransferArg, TransferError},
-    },
-    icrc2::transfer_from::{TransferFromArgs, TransferFromError},
-};
-use shared::types::Asset;
 
 use crate::{
+    assets::{
+        asset::{
+            handler::get_handler,
+            params::{AssetTransferFromParams, AssetTransferParams},
+        },
+        types::AssetAmount,
+    },
     guards::caller_is_not_anonymous,
     memory::{DEPOSIT_PLANS, MARGIN_ACCOUNTS, WITHDRAWAL_PLANS},
     types::{
+        account::LedgerAccount,
         errors::{DepositCollateralError, LedgerError, WithdrawCollateralError},
         margin::MarginAccount,
         params::{DepositCollateralParams, WithdrawCollateralParams},
@@ -58,45 +58,35 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
 
             DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
 
-            let args = TransferFromArgs {
-                spender_subaccount: None,
-                from: Account {
-                    owner: user.principal(),
-                    subaccount: None,
-                },
-                to: plan.to_account,
-                amount: amount.clone(),
-                fee: None,
-                memo: None,
-                created_at_time: plan.idempotency.to_created_at_time(),
-            };
+            DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
 
-            let Asset::Icrc(ledger_id) = asset.clone();
+            let handler = get_handler(&asset).map_err(DepositCollateralError::Ledger)?;
 
-            let (res,): (Result<candid::Nat, TransferFromError>,) =
-                ic_cdk::call(ledger_id, "icrc2_transfer_from", (args,))
-                    .await
-                    .map_err(|(code, msg)| {
-                        DepositCollateralError::Ledger(LedgerError::TransferFailed(format!(
-                            "RB: {:?}: {}",
-                            code, msg
-                        )))
-                    })?;
+            let amount_u128: u128 = amount
+                .0
+                .clone()
+                .try_into()
+                .map_err(|_| DepositCollateralError::DepositCollateralMathOverflow)?;
+
+            let res = handler
+                .transfer_from(AssetTransferFromParams {
+                    asset: &asset,
+                    spender: LedgerAccount::CanisterMain,
+                    from: LedgerAccount::External(user.principal(), None),
+                    to: LedgerAccount::UserClearing(user),
+                    amount: AssetAmount::Fixed(amount_u128),
+                    created_at_time: plan.idempotency.to_created_at_time(),
+                })
+                .await;
 
             match res {
                 Ok(block_index) => {
-                    plan.receipt = Some(block_index.into());
-                }
-                Err(TransferFromError::Duplicate { duplicate_of }) => {
-                    // Treat Duplicate as success
-                    plan.receipt = Some(duplicate_of.into());
+                    plan.receipt = Some(candid::Nat::from(block_index).into());
                 }
                 Err(e) => {
                     // Keep plan persisted so retry resumes safely.
                     DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
-                    return Err(DepositCollateralError::Ledger(LedgerError::TransferFailed(
-                        format!("{:?}", e),
-                    )));
+                    return Err(DepositCollateralError::Ledger(e));
                 }
             }
 
@@ -158,6 +148,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             user,
             asset.clone(),
             amount.clone(),
+            (user.principal(), None),
         );
 
         if plan.status == PlanStatus::Finalised {
@@ -212,33 +203,28 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
 
             WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
 
-            let args = TransferArg {
-                from_subaccount: Some(plan.from_subaccount),
-                to: plan.to_account,
-                amount: plan.amount.clone(),
-                fee: None,
-                memo: None,
-                created_at_time: plan.idempotency.to_created_at_time(),
-            };
+            let handler = get_handler(&asset).map_err(WithdrawCollateralError::Ledger)?;
 
-            let Asset::Icrc(ledger_id) = asset.clone();
+            let amount_u128: u128 = plan
+                .amount
+                .0
+                .clone()
+                .try_into()
+                .map_err(|_| WithdrawCollateralError::WithdrawCollateralMathOverflow)?;
 
-            let (res,): (Result<candid::Nat, TransferError>,) =
-                ic_cdk::call(ledger_id, "icrc1_transfer", (args,))
-                    .await
-                    .map_err(|(code, msg)| {
-                        WithdrawCollateralError::Ledger(LedgerError::TransferFailed(format!(
-                            "RB: {:?}: {}",
-                            code, msg
-                        )))
-                    })?;
+            let res = handler
+                .transfer(AssetTransferParams {
+                    asset: &asset,
+                    from: LedgerAccount::UserClearing(user),
+                    to: LedgerAccount::External(plan.to_account.0, plan.to_account.1),
+                    amount: AssetAmount::Fixed(amount_u128),
+                    created_at_time: plan.idempotency.to_created_at_time(),
+                })
+                .await;
 
             match res {
                 Ok(block_index) => {
-                    plan.receipt = Some(block_index.into());
-                }
-                Err(TransferError::Duplicate { duplicate_of }) => {
-                    plan.receipt = Some(duplicate_of.into());
+                    plan.receipt = Some(candid::Nat::from(block_index).into());
                 }
                 Err(e) => {
                     // Refund reserved balance on failure (compensation).
@@ -258,9 +244,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                     // Persist updated plan (reservation cleared) so retries behave correctly.
                     WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
 
-                    return Err(WithdrawCollateralError::Ledger(
-                        LedgerError::TransferFailed(format!("{:?}", e)),
-                    ));
+                    return Err(WithdrawCollateralError::Ledger(e));
                 }
             }
 

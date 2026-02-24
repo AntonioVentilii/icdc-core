@@ -1,16 +1,14 @@
 use ic_cdk_macros::update;
-use icrc_ledger_types::icrc1::{
-    account::Account,
-    transfer::{TransferArg, TransferError},
-};
-use num_traits::ToPrimitive;
-use shared::types::Asset;
 
 use crate::{
+    assets::{
+        asset::{handler::get_handler, params::AssetTransferParams},
+        types::AssetAmount,
+    },
     guards::caller_is_controller,
     memory::{MARGIN_ACCOUNTS, POSITIONS, SERIES, SETTLEMENT_PLANS},
-    traits::ClearingAccountExt,
     types::{
+        account::LedgerAccount,
         errors::{LedgerError, SettlementError},
         params::SettleSeriesParams,
         plan::{PlanStatus, SettlementPlan},
@@ -52,23 +50,6 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                         .map(|ser| ser.settlement_asset.to_asset())
                 })
                 .ok_or(SettlementError::Ledger(LedgerError::UnsupportedLedger))?;
-
-            let Asset::Icrc(ledger_id) = settlement_asset_val.clone();
-
-            let (fee_nat,): (candid::Nat,) = ic_cdk::call(ledger_id, "icrc1_fee", ())
-                .await
-                .map_err(|(code, msg)| {
-                    SettlementError::Ledger(LedgerError::FetchingFeeFailed(format!(
-                        "icrc1_fee RB: {:?}: {}",
-                        code, msg
-                    )))
-                })?;
-
-            // TODO: consider fee in settlement logic later
-            let _fee_u128: u128 = fee_nat
-                .0
-                .to_u128()
-                .ok_or(SettlementError::FeeMathOverflow)?;
 
             let positions_to_settle: Vec<(User, i128)> = POSITIONS.with(|positions| {
                 let mut positions = positions.borrow_mut();
@@ -135,9 +116,9 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
         SETTLEMENT_PLANS.with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
 
         // ---------- Phase B1: collect from payers ----------
-        while (plan.payer_cursor as usize) < plan.payers.len() {
+        while (plan.payer_cursor) < plan.payers.len() {
             let idx_u32 = plan.payer_cursor;
-            let idx = idx_u32 as usize;
+            let idx = idx_u32;
 
             if plan.payer_receipts[idx].is_some() {
                 plan.payer_cursor += 1;
@@ -145,46 +126,28 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 continue;
             }
 
-            let (user, amount_u128) = plan.payers[idx];
+            let (user, _) = plan.payers[idx]; // Amount is not used with DeductAll
 
             let created_at_time = plan.idempotency.to_created_at_time();
 
-            // Payer pays canister: User Subaccount -> Pool
-            let args = TransferArg {
-                from_subaccount: Some(user.clearing_subaccount()),
-                to: Account {
-                    owner: ic_cdk::id(),
-                    subaccount: None, // Canister main account pool
-                },
-                amount: candid::Nat::from(amount_u128),
-                fee: None,
-                memo: None,
-                created_at_time,
-            };
+            let handler = get_handler(&plan.settlement_asset).map_err(SettlementError::Ledger)?;
 
-            let Asset::Icrc(ledger_id) = plan.settlement_asset.clone();
-
-            let (res,): (Result<candid::Nat, TransferError>,) =
-                ic_cdk::call(ledger_id, "icrc1_transfer", (args,))
-                    .await
-                    .map_err(|(code, msg)| {
-                        SettlementError::Ledger(LedgerError::TransferFailed(format!(
-                            "RB: {:?}: {}",
-                            code, msg
-                        )))
-                    })?;
+            let res = handler
+                .transfer(AssetTransferParams {
+                    asset: &plan.settlement_asset,
+                    from: LedgerAccount::UserClearing(user),
+                    to: LedgerAccount::CanisterMain,
+                    amount: AssetAmount::DeductAll, // Use DeductAll for drains
+                    created_at_time,
+                })
+                .await;
 
             match res {
-                Ok(block) => plan.payer_receipts[idx] = Some(block.into()),
-                Err(TransferError::Duplicate { duplicate_of }) => {
-                    plan.payer_receipts[idx] = Some(duplicate_of.into())
-                }
+                Ok(block) => plan.payer_receipts[idx] = Some(candid::Nat::from(block).into()),
                 Err(e) => {
                     SETTLEMENT_PLANS
                         .with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
-                    return Err(SettlementError::Ledger(LedgerError::TransferFailed(
-                        format!("{:?}", e),
-                    )));
+                    return Err(SettlementError::Ledger(e));
                 }
             }
 
@@ -193,9 +156,9 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
         }
 
         // ---------- Phase B2: pay receivers ----------
-        while (plan.receiver_cursor as usize) < plan.receivers.len() {
+        while (plan.receiver_cursor) < plan.receivers.len() {
             let idx_u32 = plan.receiver_cursor;
-            let idx = idx_u32 as usize;
+            let idx = idx_u32;
 
             if plan.receiver_receipts[idx].is_some() {
                 plan.receiver_cursor += 1;
@@ -207,39 +170,24 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
             let created_at_time = plan.idempotency.to_created_at_time();
 
-            // Canister pays receiver: Pool -> User Subaccount
-            let args = TransferArg {
-                from_subaccount: None, // Canister main account pool
-                to: user.clearing_account(),
-                amount: candid::Nat::from(amount_u128),
-                fee: None,
-                memo: None,
-                created_at_time,
-            };
+            let handler = get_handler(&plan.settlement_asset).map_err(SettlementError::Ledger)?;
 
-            let Asset::Icrc(ledger_id) = plan.settlement_asset.clone();
-
-            let (res,): (Result<candid::Nat, TransferError>,) =
-                ic_cdk::call(ledger_id, "icrc1_transfer", (args,))
-                    .await
-                    .map_err(|(code, msg)| {
-                        SettlementError::Ledger(LedgerError::TransferFailed(format!(
-                            "RB: {:?}: {}",
-                            code, msg
-                        )))
-                    })?;
+            let res = handler
+                .transfer(AssetTransferParams {
+                    asset: &plan.settlement_asset,
+                    from: LedgerAccount::CanisterMain,
+                    to: LedgerAccount::UserClearing(user),
+                    amount: AssetAmount::Fixed(amount_u128),
+                    created_at_time,
+                })
+                .await;
 
             match res {
-                Ok(block) => plan.receiver_receipts[idx] = Some(block.into()),
-                Err(TransferError::Duplicate { duplicate_of }) => {
-                    plan.receiver_receipts[idx] = Some(duplicate_of.into())
-                }
+                Ok(block) => plan.receiver_receipts[idx] = Some(candid::Nat::from(block).into()),
                 Err(e) => {
                     SETTLEMENT_PLANS
                         .with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
-                    return Err(SettlementError::Ledger(LedgerError::TransferFailed(
-                        format!("{:?}", e),
-                    )));
+                    return Err(SettlementError::Ledger(e));
                 }
             }
 
