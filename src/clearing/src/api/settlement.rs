@@ -1,4 +1,5 @@
 use ic_cdk_macros::update;
+use shared::types::Asset;
 
 use crate::{
     assets::{
@@ -16,7 +17,6 @@ use crate::{
         user::User,
     },
 };
-use shared::types::Asset;
 
 #[update(guard = "caller_is_controller")]
 pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
@@ -44,8 +44,12 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             existing
         } else {
             let (positions_to_settle, settlement_asset_val) = SERIES.with(|s| {
-                let ser = s.borrow().get(&series_id).cloned().ok_or(SettlementError::Ledger(LedgerError::UnsupportedLedger))?;
-                
+                let ser = s
+                    .borrow()
+                    .get(&series_id)
+                    .cloned()
+                    .ok_or(SettlementError::Ledger(LedgerError::UnsupportedLedger))?;
+
                 POSITIONS.with(|positions| {
                     let mut positions = positions.borrow_mut();
 
@@ -61,12 +65,18 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                             settlement_data.push((user, pos.net_qty, pos.locked_collateral));
                         }
                     }
-                    Ok::<(Vec<(User, i128, u128)>, Asset), SettlementError>((settlement_data, ser.settlement_asset.to_asset()))
+                    Ok::<(Vec<(User, i128, u128)>, Asset), SettlementError>((
+                        settlement_data,
+                        ser.settlement_asset.to_asset(),
+                    ))
                 })
             })?;
 
             let handler = get_handler(&settlement_asset_val).map_err(SettlementError::Ledger)?;
-            let fee = handler.get_fee(&settlement_asset_val).await.map_err(SettlementError::Ledger)?;
+            let fee = handler
+                .get_fee(&settlement_asset_val)
+                .await
+                .map_err(SettlementError::Ledger)?;
 
             // Compute net payers/receivers + accounting updates
             let mut payers: Vec<(User, u128)> = Vec::new();
@@ -102,7 +112,10 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 settlement_price,
                 settlement_asset_val,
                 fee,
-                positions_to_settle.iter().map(|(u, q, _)| (*u, *q)).collect(),
+                positions_to_settle
+                    .iter()
+                    .map(|(u, q, _)| (*u, *q))
+                    .collect(),
                 payers,
                 receivers,
                 accounting_updates,
@@ -172,7 +185,10 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             let created_at_time = plan.idempotency.to_created_at_time();
 
             let handler = get_handler(&plan.settlement_asset).map_err(SettlementError::Ledger)?;
-            let fee = handler.get_fee(&plan.settlement_asset).await.map_err(SettlementError::Ledger)?;
+            let fee = handler
+                .get_fee(&plan.settlement_asset)
+                .await
+                .map_err(SettlementError::Ledger)?;
 
             if amount_u128 <= fee {
                 // Too small to transfer, mark as skipped (0 block index)
@@ -226,11 +242,17 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                             1 => {
                                 // Winner: profit - fee
                                 let net_increase = amount_u128.saturating_sub(fee);
-                                account.set_balance(settlement_asset_val.clone(), current + net_increase);
+                                account.set_balance(
+                                    settlement_asset_val.clone(),
+                                    current + net_increase,
+                                );
                             }
                             -1 => {
                                 // Loser: debt + fee
-                                account.set_balance(settlement_asset_val.clone(), current.saturating_sub(amount_u128 + fee));
+                                account.set_balance(
+                                    settlement_asset_val.clone(),
+                                    current.saturating_sub(amount_u128 + fee),
+                                );
                             }
                             _ => {} // sign == 0 => no balance change
                         }

@@ -117,7 +117,8 @@ pub struct SettlementPlan {
     pub positions: Vec<(User, i128)>,
     pub payers: Vec<(User, u128)>,
     pub receivers: Vec<(User, u128)>,
-    pub accounting_updates: Vec<(User, i8, u128, u128)>, // (user, sign, profit_loss, margin_to_release)
+    pub accounting_updates: Vec<(User, i8, u128, u128)>, /* (user, sign, profit_loss,
+                                                          * margin_to_release) */
     pub payer_cursor: usize,
     pub receiver_cursor: usize,
     pub accounting_cursor: usize,

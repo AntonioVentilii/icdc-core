@@ -42,15 +42,36 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
 
         // Calculate margin requirements for the updated positions
         // We need to know the old requirements to calculate the delta
-        let (buyer_delta_i128, seller_delta_i128, new_buyer_qty, new_buyer_margin, new_seller_qty, new_seller_margin) = POSITIONS.with(|positions| {
+        let (
+            buyer_delta_i128,
+            seller_delta_i128,
+            new_buyer_qty,
+            new_buyer_margin,
+            new_seller_qty,
+            new_seller_margin,
+        ) = POSITIONS.with(|positions| {
             let positions = positions.borrow();
 
-            let old_buyer_margin = positions.get(&(buyer, series_id.clone())).map(|p| p.locked_collateral).unwrap_or(0);
-            let old_seller_margin = positions.get(&(seller, series_id.clone())).map(|p| p.locked_collateral).unwrap_or(0);
+            let old_buyer_margin = positions
+                .get(&(buyer, series_id.clone()))
+                .map(|p| p.locked_collateral)
+                .unwrap_or(0);
+            let old_seller_margin = positions
+                .get(&(seller, series_id.clone()))
+                .map(|p| p.locked_collateral)
+                .unwrap_or(0);
 
             // New quantities
-            let new_buyer_qty = positions.get(&(buyer, series_id.clone())).map(|p| p.net_qty).unwrap_or(0) + qty;
-            let new_seller_qty = positions.get(&(seller, series_id.clone())).map(|p| p.net_qty).unwrap_or(0) - qty;
+            let new_buyer_qty = positions
+                .get(&(buyer, series_id.clone()))
+                .map(|p| p.net_qty)
+                .unwrap_or(0)
+                + qty;
+            let new_seller_qty = positions
+                .get(&(seller, series_id.clone()))
+                .map(|p| p.net_qty)
+                .unwrap_or(0)
+                - qty;
 
             // New margins (simplified Binary logic: max payoff is 1.0)
             let max_payoff: u128 = 100_000_000;
@@ -76,7 +97,7 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
                 new_buyer_qty,
                 new_buyer_margin,
                 new_seller_qty,
-                new_seller_margin
+                new_seller_margin,
             )
         });
 
@@ -97,7 +118,9 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
             let final_buyer_required = if buyer_delta > 0 {
                 buyer_acc.required_margin + (buyer_delta as u128)
             } else {
-                buyer_acc.required_margin.saturating_sub(buyer_delta.unsigned_abs())
+                buyer_acc
+                    .required_margin
+                    .saturating_sub(buyer_delta.unsigned_abs())
             };
 
             if final_buyer_required > buyer_collateral {
@@ -114,7 +137,9 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
             let final_seller_required = if seller_delta > 0 {
                 seller_acc.required_margin + (seller_delta as u128)
             } else {
-                seller_acc.required_margin.saturating_sub(seller_delta.unsigned_abs())
+                seller_acc
+                    .required_margin
+                    .saturating_sub(seller_delta.unsigned_abs())
             };
 
             if final_seller_required > seller_collateral {
@@ -131,21 +156,25 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
         POSITIONS.with(|positions| {
             let mut positions = positions.borrow_mut();
 
-            let b_pos = positions.entry((buyer, series_id.clone())).or_insert(Position {
-                user: buyer,
-                series_id: series_id.clone(),
-                net_qty: 0,
-                locked_collateral: 0,
-            });
+            let b_pos = positions
+                .entry((buyer, series_id.clone()))
+                .or_insert(Position {
+                    user: buyer,
+                    series_id: series_id.clone(),
+                    net_qty: 0,
+                    locked_collateral: 0,
+                });
             b_pos.net_qty = new_buyer_qty;
             b_pos.locked_collateral = new_buyer_margin;
 
-            let s_pos = positions.entry((seller, series_id.clone())).or_insert(Position {
-                user: seller,
-                series_id: series_id.clone(),
-                net_qty: 0,
-                locked_collateral: 0,
-            });
+            let s_pos = positions
+                .entry((seller, series_id.clone()))
+                .or_insert(Position {
+                    user: seller,
+                    series_id: series_id.clone(),
+                    net_qty: 0,
+                    locked_collateral: 0,
+                });
             s_pos.net_qty = new_seller_qty;
             s_pos.locked_collateral = new_seller_margin;
         });

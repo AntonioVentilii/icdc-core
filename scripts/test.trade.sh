@@ -4,6 +4,7 @@ print_margin_account() {
   dfx canister call clearing get_margin_account "(record { refresh = null })"
 }
 
+# Snapshot BEFORE settlement (last step before settle_series)
 print_settlement_snapshot() {
   local when="$1"
   echo "📸 Margin accounts $when:"
@@ -13,6 +14,29 @@ print_settlement_snapshot() {
   print_margin_account
   dfx identity use default
 }
+
+get_balance() {
+  local target_identity="$1"
+  local current_identity=$(dfx identity whoami)
+
+  dfx identity use "$target_identity" >/dev/null 2>&1
+  local res=$(dfx canister call clearing get_margin_account "(record { refresh = null })")
+
+  # Restore original identity
+  dfx identity use "$current_identity" >/dev/null 2>&1
+
+  # Extract the last : nat occurrences (the balance, not required_margin)
+  echo "$res" | grep -oE '[0-9_]+ : nat' | tail -n 1 | awk '{print $1}' | tr -d '_'
+}
+
+# --- CONFIGURATION ---
+ALLOWANCE=10000000000      # 100 ICP
+DEPOSIT_AMOUNT=1000000000  # 10 ICP
+TRADE_QTY=10               # 10 units
+TRADE_PRICE=55000000       # 0.55 ICP
+SETTLEMENT_PRICE=100000000 # 1 ICP
+MAX_PAYOFF=100000000       # For binary payoff, max payoff is 1 ICP
+LEDGER_FEE=10000           # 0.0001 ICP, adjust based on actual fee structure
 
 # Init
 TIMESTAMP=$(date +%s)
@@ -44,6 +68,10 @@ echo "🚀 Sending test tokens to default identity ($PRINCIPAL)..."
 echo "🚀 Sending test tokens to secondary identity ($SECONDARY)..."
 ./scripts/send.tokens.sh "$SECONDARY" 50
 
+# Start balances
+BAL_START_DEFAULT=$(get_balance "default")
+BAL_START_SECONDARY=$(get_balance "secondary")
+
 # Set allowance for the default identity
 echo "🚀 Setting allowance for default identity to the clearing canister $CLEARING..."
 dfx canister call icp_ledger icrc2_approve "(
@@ -52,7 +80,7 @@ dfx canister call icp_ledger icrc2_approve "(
     memo = null;
     from_subaccount = null;
     created_at_time = null;
-    amount = 10_000_000_000 : nat;
+    amount = $ALLOWANCE : nat;
     expected_allowance = null;
     expires_at = null;
     spender = record {
@@ -72,7 +100,7 @@ dfx canister call clearing deposit_collateral "(
   record {
     deposit_id = \"DEPOSIT_TEST_${TIMESTAMP}\";
     asset = variant { Icrc = principal \"$ICP_LEDGER\" };
-    amount = 1_000_000_000 : nat;
+    amount = $DEPOSIT_AMOUNT : nat;
   },
 )"
 print_margin_account
@@ -88,7 +116,7 @@ dfx canister call icp_ledger icrc2_approve "(
     memo = null;
     from_subaccount = null;
     created_at_time = null;
-    amount = 10_000_000_000 : nat;
+    amount = $ALLOWANCE : nat;
     expected_allowance = null;
     expires_at = null;
     spender = record {
@@ -104,7 +132,7 @@ dfx canister call clearing deposit_collateral "(
   record {
     deposit_id = \"DEPOSIT_TEST_${TIMESTAMP}\";
     asset = variant { Icrc = principal \"$ICP_LEDGER\" };
-    amount = 1_000_000_000 : nat;
+    amount = $DEPOSIT_AMOUNT : nat;
   },
 )"
 dfx canister call clearing get_margin_account "(record { refresh = null })"
@@ -140,8 +168,8 @@ dfx canister call clearing submit_matched_trade "(
     series_id = \"$SERIES_ID\";
     buyer = principal \"$PRINCIPAL\";
     seller = principal \"$SECONDARY\";
-    qty = 10 : int;
-    price = 55_000_000 : nat64;
+    qty = $TRADE_QTY : int;
+    price = $TRADE_PRICE : nat64;
   },
 )"
 
@@ -162,14 +190,14 @@ dfx canister call clearing get_position "(
 dfx identity use default
 
 # Snapshot BEFORE settlement (last step before settle_series)
-print_settlement_snapshot "AFTER"
+print_settlement_snapshot "BEFORE"
 
 # Settle series
 echo "🚀 Settling series in favour of default identity..."
 dfx canister call clearing settle_series "(
   record {
     series_id = \"$SERIES_ID\";
-    settlement_price = 100_000_000 : nat64;
+    settlement_price = $SETTLEMENT_PRICE : nat64;
   },
 )"
 
@@ -192,5 +220,60 @@ dfx canister call clearing get_position "(
 )"
 dfx identity use default
 
-# Conclusion
-echo "✅ Test flow completed!"
+# --- VERBOSE SUMMARY ---
+echo "-------------------------------------------------------"
+echo "📊 TEST SUMMARY & VERIFICATION"
+echo "-------------------------------------------------------"
+
+FINAL_BAL_DEFAULT=$(get_balance "default")
+FINAL_BAL_SECONDARY=$(get_balance "secondary")
+
+DELTA_DEFAULT=$((FINAL_BAL_DEFAULT - BAL_START_DEFAULT))
+DELTA_SECONDARY=$((FINAL_BAL_SECONDARY - BAL_START_SECONDARY))
+
+# Expected changes (Binary Payoff Logic)
+# Winners Delta = Deposit + Profit - Fee
+# Losers Delta  = Deposit - Loss - Fee (if Loss is debt collected)
+PROFIT=$((TRADE_QTY * (SETTLEMENT_PRICE - TRADE_PRICE)))
+LOSS=$((TRADE_QTY * (TRADE_PRICE - (SETTLEMENT_PRICE - MAX_PAYOFF))))
+
+# For binary Long: if Win, payout is MAX_PAYOFF. So Profit is (MAX_PAYOFF - TRADE_PRICE) * QTY = (100M - 55M) * 10 = 450M.
+# For binary Short: if Loss, debt is (MAX_PAYOFF - (MAX_PAYOFF - TRADE_PRICE)) * QTY? No.
+# Actually, the user's test CASE is:
+# Trade 10 @ 55, Settlement 100.
+# Default (Long) profit = (100 - 55) * 10 = 450M.
+# Secondary (Short) loss = (100 - 55) * 10 = 450M.
+EXPECTED_DELTA_DEFAULT=$((DEPOSIT_AMOUNT + PROFIT - LEDGER_FEE))
+EXPECTED_DELTA_SECONDARY=$((DEPOSIT_AMOUNT - PROFIT - LEDGER_FEE))
+
+echo "Trade:            $TRADE_QTY units @ $TRADE_PRICE e8"
+echo "Settlement:       $SETTLEMENT_PRICE e8"
+echo "Net Profit/Loss:  $PROFIT e8"
+echo "Ledger Fee:       $LEDGER_FEE e8"
+echo ""
+echo "Identity  | Expected Δ Balance | Actual Δ Balance | Status"
+echo "----------|-------------------|------------------|-------"
+
+status_default="❌ FAIL"
+if [ "$DELTA_DEFAULT" -eq "$EXPECTED_DELTA_DEFAULT" ]; then status_default="✅ PASS"; fi
+
+status_secondary="❌ FAIL"
+if [ "$DELTA_SECONDARY" -eq "$EXPECTED_DELTA_SECONDARY" ]; then status_secondary="✅ PASS"; fi
+
+printf "%-9s | +%-16s | +%-15s | %s\n" "Default" "$EXPECTED_DELTA_DEFAULT" "$DELTA_DEFAULT" "$status_default"
+printf "%-9s | +%-16s | +%-15s | %s\n" "Secondary" "$EXPECTED_DELTA_SECONDARY" "$DELTA_SECONDARY" "$status_secondary"
+
+echo "-------------------------------------------------------"
+
+if [ "$DELTA_DEFAULT" -eq "$EXPECTED_DELTA_DEFAULT" ] && [ "$DELTA_SECONDARY" -eq "$EXPECTED_DELTA_SECONDARY" ]; then
+  echo "🎉 ALL EXPECTATIONS MATCH REALITY!"
+  echo "✅ Test flow completed successfully."
+  exit 0
+else
+  echo "⚠️ SOME EXPECTATIONS DID NOT MATCH."
+  echo "❌ Test flow failed verification."
+  # List actual deltas for debugging
+  echo "Default Logic:   Expected $EXPECTED_DELTA_DEFAULT, Got $DELTA_DEFAULT"
+  echo "Secondary Logic: Expected $EXPECTED_DELTA_SECONDARY, Got $DELTA_SECONDARY"
+  exit 1
+fi
