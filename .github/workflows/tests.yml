@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  integration:
-    name: Integration Tests
+  unit:
+    name: Unit Tests
     runs-on: ubuntu-latest
     concurrency:
       group: tests-integration-${{ github.ref }}
@@ -29,11 +29,11 @@ jobs:
         run: npm run build
 
       - name: Run tests
-        run: npm run test
+        run: npm run test:unit
 
   tests-pass:
     name: Tests Pass
-    needs: ['integration']
+    needs: ['unit']
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     concurrency:
