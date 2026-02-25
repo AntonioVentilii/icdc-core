@@ -152,6 +152,7 @@ impl SettlementPlan {
 
             let idempotency = ic_cdk::api::time().into();
 
+            let positions_len = positions.len();
             let plan = SettlementPlan {
                 series_id: series_id.clone(),
                 settlement_price,
@@ -165,7 +166,7 @@ impl SettlementPlan {
                 accounting_applied: false,
                 status: PlanStatus::Planned,
                 idempotency,
-                payer_receipts: vec![None; payers.len()],
+                payer_receipts: vec![None; positions_len],
                 receiver_receipts: vec![None; receivers.len()],
             };
 

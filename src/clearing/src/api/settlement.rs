@@ -115,10 +115,10 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
         plan.status = PlanStatus::Executing;
         SETTLEMENT_PLANS.with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
 
-        // ---------- Phase B1: collect from payers ----------
-        while (plan.payer_cursor) < plan.payers.len() {
-            let idx_u32 = plan.payer_cursor;
-            let idx = idx_u32;
+        // ---------- Phase B1: collect from participants ----------
+        // We collect from ALL participants to pool collateral in the canister's main account.
+        while (plan.payer_cursor) < plan.positions.len() {
+            let idx = plan.payer_cursor;
 
             if plan.payer_receipts[idx].is_some() {
                 plan.payer_cursor += 1;
@@ -126,7 +126,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 continue;
             }
 
-            let (user, _) = plan.payers[idx]; // Amount is not used with DeductAll
+            let (user, _) = plan.positions[idx];
 
             let created_at_time = plan.idempotency.to_created_at_time();
 
@@ -137,7 +137,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                     asset: &plan.settlement_asset,
                     from: LedgerAccount::UserClearing(user),
                     to: LedgerAccount::CanisterMain,
-                    amount: AssetAmount::DeductAll, // Use DeductAll for drains
+                    amount: AssetAmount::DeductAll, // Pool all collateral for this series
                     created_at_time,
                 })
                 .await;
