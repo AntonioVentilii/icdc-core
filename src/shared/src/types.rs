@@ -90,6 +90,8 @@ pub struct Series {
     pub series_id: SeriesId,
     /// The underlying asset ticker or identifier (e.g., "ICP/USD").
     pub underlying: String,
+    /// The canonical underlying ID assigned by the Registry.
+    pub underlying_id: u32,
     /// Expiry timestamp in nanoseconds since UNIX epoch.
     pub expiry: u64,
     /// The mathematical payoff model used for this series.
@@ -108,6 +110,7 @@ impl Series {
     /// ensuring that identical series have the same ID while preventing collisions.
     pub fn generate_id(
         underlying: &str,
+        underlying_id: u32,
         expiry: u64,
         payoff_type: &PayoffType,
         strike: Option<u64>,
@@ -122,6 +125,9 @@ impl Series {
         // Explicit field separators to avoid ambiguity
         hasher.update(b"|UNDERLYING|");
         hasher.update(underlying.as_bytes());
+
+        hasher.update(b"|UNDERLYING_ID|");
+        hasher.update(underlying_id.to_be_bytes());
 
         hasher.update(b"|EXPIRY|");
         hasher.update(expiry.to_be_bytes());
@@ -162,6 +168,7 @@ mod tests {
 
         let id1 = Series::generate_id(
             underlying,
+            1,
             expiry,
             &payoff_type,
             strike,
@@ -171,6 +178,7 @@ mod tests {
 
         let id2 = Series::generate_id(
             underlying,
+            1,
             expiry,
             &payoff_type,
             strike,
@@ -191,6 +199,7 @@ mod tests {
 
         let id1 = Series::generate_id(
             underlying,
+            1,
             100,
             &payoff_type,
             strike,
@@ -200,6 +209,7 @@ mod tests {
 
         let id2 = Series::generate_id(
             underlying,
+            1,
             200,
             &payoff_type,
             strike,

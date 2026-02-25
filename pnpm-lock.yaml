@@ -1,0 +1,78 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    devDependencies:
+      '@icp-sdk/bindgen':
+        specifier: ^0.2.2
+        version: 0.2.2
+      prettier:
+        specifier: ^3.8.1
+        version: 3.8.1
+      prettier-plugin-motoko:
+        specifier: ^0.12.5
+        version: 0.12.5(prettier@3.8.1)
+      prettier-plugin-organize-imports:
+        specifier: ^4.3.0
+        version: 4.3.0(prettier@3.8.1)(typescript@5.9.3)
+
+packages:
+
+  '@icp-sdk/bindgen@0.2.2':
+    resolution: {integrity: sha512-zGeFBIwogs1oFrhNSnSeBuHbNKnuqtZ4MqKLuWp2qcNxw+JLglK6JHNo7we6+PtnjaeKABg3/hjhha+mzSJzlg==}
+    hasBin: true
+
+  commander@14.0.3:
+    resolution: {integrity: sha512-H+y0Jo/T1RZ9qPP4Eh1pkcQcLRglraJaSLoyOtHxu6AapkjWVCy2Sit1QQ4x3Dng8qDlSsZEet7g5Pq06MvTgw==}
+    engines: {node: '>=20'}
+
+  prettier-plugin-motoko@0.12.5:
+    resolution: {integrity: sha512-zNv17AQnNuLSKwS/bVIYeTV+gHE+D2ZP11X243g8fkyCu8OD2/bHZkms9HG1AUxJLp/qr0l8Qp3jAmxhhdZRZA==}
+    peerDependencies:
+      prettier: ^2.7 || ^3.0
+
+  prettier-plugin-organize-imports@4.3.0:
+    resolution: {integrity: sha512-FxFz0qFhyBsGdIsb697f/EkvHzi5SZOhWAjxcx2dLt+Q532bAlhswcXGYB1yzjZ69kW8UoadFBw7TyNwlq96Iw==}
+    peerDependencies:
+      prettier: '>=2.0'
+      typescript: '>=2.9'
+      vue-tsc: ^2.1.0 || 3
+    peerDependenciesMeta:
+      vue-tsc:
+        optional: true
+
+  prettier@3.8.1:
+    resolution: {integrity: sha512-UOnG6LftzbdaHZcKoPFtOcCKztrQ57WkHDeRD9t/PTQtmT0NHSeWWepj6pS0z/N7+08BHFDQVUrfmfMRcZwbMg==}
+    engines: {node: '>=14'}
+    hasBin: true
+
+  typescript@5.9.3:
+    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
+snapshots:
+
+  '@icp-sdk/bindgen@0.2.2':
+    dependencies:
+      commander: 14.0.3
+
+  commander@14.0.3: {}
+
+  prettier-plugin-motoko@0.12.5(prettier@3.8.1):
+    dependencies:
+      prettier: 3.8.1
+
+  prettier-plugin-organize-imports@4.3.0(prettier@3.8.1)(typescript@5.9.3):
+    dependencies:
+      prettier: 3.8.1
+      typescript: 5.9.3
+
+  prettier@3.8.1: {}
+
+  typescript@5.9.3: {}

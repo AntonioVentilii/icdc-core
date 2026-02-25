@@ -2,7 +2,10 @@ use ic_cdk_macros::{query, update};
 use shared::types::{Series, SeriesId};
 
 use crate::{
-    errors::RegistryError, memory::SERIES_STORE, params::AddSeriesParams, results::AddSeriesResult,
+    errors::RegistryError,
+    memory::{get_or_create_underlying_id, SERIES_STORE, UNDERLYING_IDS},
+    params::AddSeriesParams,
+    results::AddSeriesResult,
     utils::canonical_id_part,
 };
 
@@ -30,11 +33,13 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
             oracle_source,
         } = params;
 
-        let underlying = canonical_id_part(&underlying);
+        let underlying_ticker = canonical_id_part(&underlying);
         let oracle_source = canonical_id_part(&oracle_source);
+        let underlying_id = get_or_create_underlying_id(&underlying_ticker);
 
         let series_id = Series::generate_id(
-            &underlying,
+            &underlying_ticker,
+            underlying_id,
             expiry,
             &payoff_type,
             strike,
@@ -44,7 +49,8 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
 
         let series = Series {
             series_id: series_id.clone(),
-            underlying,
+            underlying: underlying_ticker,
+            underlying_id,
             expiry,
             payoff_type,
             strike,
@@ -85,4 +91,17 @@ pub fn get_series(series_id: SeriesId) -> Option<Series> {
 #[query]
 pub fn list_series() -> Vec<Series> {
     SERIES_STORE.with(|store| store.borrow().values().cloned().collect())
+}
+
+/// Retrieves the canonical ID for a given underlying asset ticker.
+///
+/// # Arguments
+/// * `ticker` - The asset ticker (e.g., "BTC/USD").
+///
+/// # Returns
+/// * `Some(u32)` containing the canonical ID if found.
+/// * `None` otherwise.
+#[query]
+pub fn get_underlying_id(ticker: String) -> Option<u32> {
+    UNDERLYING_IDS.with(|ids| ids.borrow().get(&ticker.to_uppercase()).cloned())
 }
