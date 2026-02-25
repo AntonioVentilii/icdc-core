@@ -33,11 +33,11 @@ echo "🚀 Secondary identity created with principal: $SECONDARY"
 
 # Send test tokens to default identity
 echo "🚀 Sending test tokens to default identity ($PRINCIPAL)..."
-./scripts/send.tokens.sh "$PRINCIPAL" 20
+./scripts/send.tokens.sh "$PRINCIPAL" 50
 
 # Send test tokens to secondary identity
 echo "🚀 Sending test tokens to secondary identity ($SECONDARY)..."
-./scripts/send.tokens.sh "$SECONDARY" 20
+./scripts/send.tokens.sh "$SECONDARY" 50
 
 # Set allowance for the default identity
 echo "🚀 Setting allowance for default identity to the clearing canister $CLEARING..."
@@ -47,7 +47,7 @@ dfx canister call icp_ledger icrc2_approve "(
     memo = null;
     from_subaccount = null;
     created_at_time = null;
-    amount = 1_000_000_000 : nat;
+    amount = 10_000_000_000 : nat;
     expected_allowance = null;
     expires_at = null;
     spender = record {
@@ -67,7 +67,7 @@ dfx canister call clearing deposit_collateral "(
   record {
     deposit_id = \"DEPOSIT_TEST_${TIMESTAMP}\";
     asset = variant { Icrc = principal \"$ICP_LEDGER\" };
-    amount = 200_000_000 : nat;
+    amount = 1_000_000_000 : nat;
   },
 )"
 print_margin_account
@@ -83,7 +83,7 @@ dfx canister call icp_ledger icrc2_approve "(
     memo = null;
     from_subaccount = null;
     created_at_time = null;
-    amount = 1_000_000_000 : nat;
+    amount = 10_000_000_000 : nat;
     expected_allowance = null;
     expires_at = null;
     spender = record {
@@ -99,7 +99,7 @@ dfx canister call clearing deposit_collateral "(
   record {
     deposit_id = \"DEPOSIT_TEST_${TIMESTAMP}\";
     asset = variant { Icrc = principal \"$ICP_LEDGER\" };
-    amount = 200_000_000 : nat;
+    amount = 1_000_000_000 : nat;
   },
 )"
 dfx canister call clearing get_margin_account "(record { refresh = null })"
