@@ -16,6 +16,7 @@ use crate::{
         user::User,
     },
 };
+use shared::types::Asset;
 
 #[update(guard = "caller_is_controller")]
 pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
@@ -42,57 +43,54 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
             existing
         } else {
-            // --- Build plan from scratch ---
-            let settlement_asset_val = SERIES
-                .with(|s| {
-                    s.borrow()
-                        .get(&series_id)
-                        .map(|ser| ser.settlement_asset.to_asset())
-                })
-                .ok_or(SettlementError::Ledger(LedgerError::UnsupportedLedger))?;
+            let (positions_to_settle, settlement_asset_val) = SERIES.with(|s| {
+                let ser = s.borrow().get(&series_id).cloned().ok_or(SettlementError::Ledger(LedgerError::UnsupportedLedger))?;
+                
+                POSITIONS.with(|positions| {
+                    let mut positions = positions.borrow_mut();
 
-            let positions_to_settle: Vec<(User, i128)> = POSITIONS.with(|positions| {
-                let mut positions = positions.borrow_mut();
+                    let users: Vec<User> = positions
+                        .keys()
+                        .filter(|(_, sid)| *sid == series_id)
+                        .map(|(u, _)| *u)
+                        .collect();
 
-                let users: Vec<User> = positions
-                    .keys()
-                    .filter(|(_, sid)| *sid == series_id)
-                    .map(|(u, _)| *u)
-                    .collect();
-
-                let mut settlement_data = Vec::new();
-
-                for user in users {
-                    if let Some(pos) = positions.remove(&(user, series_id.clone())) {
-                        settlement_data.push((user, pos.net_qty));
+                    let mut settlement_data = Vec::new();
+                    for user in users {
+                        if let Some(pos) = positions.remove(&(user, series_id.clone())) {
+                            settlement_data.push((user, pos.net_qty, pos.locked_collateral));
+                        }
                     }
-                }
+                    Ok::<(Vec<(User, i128, u128)>, Asset), SettlementError>((settlement_data, ser.settlement_asset.to_asset()))
+                })
+            })?;
 
-                settlement_data
-            });
-
-            // Compute payers/receivers + accounting updates
+            // Compute net payers/receivers + accounting updates
             let mut payers: Vec<(User, u128)> = Vec::new();
             let mut receivers: Vec<(User, u128)> = Vec::new();
-            let mut accounting_updates: Vec<(User, i8, u128)> = Vec::new();
+            let mut accounting_updates: Vec<(User, i8, u128, u128)> = Vec::new(); // (user, sign, profit_loss, margin_to_release)
 
-            for (user, net_qty) in positions_to_settle.iter().copied() {
-                let payoff_i128: i128 = net_qty
-                    .checked_mul(settlement_price as i128)
-                    .ok_or(SettlementError::PayoffMathOverflow)?;
+            for (user, net_qty, locked_collateral) in positions_to_settle.iter().copied() {
+                let payoff_u128: u128 = net_qty.unsigned_abs() * (settlement_price as u128);
+                let max_payoff: u128 = 100_000_000;
+                let max_payoff_total = net_qty.unsigned_abs() * max_payoff;
 
-                let amount_u128: u128 = payoff_i128.unsigned_abs();
-
-                if payoff_i128 < 0 {
-                    payers.push((user, amount_u128));
-                    accounting_updates.push((user, -1, amount_u128));
-                } else if payoff_i128 > 0 {
-                    // No fee subtraction for now
-                    // TODO: consider fee subtraction from receiver side in future
-                    receivers.push((user, amount_u128));
-                    accounting_updates.push((user, 1, amount_u128));
+                let cashflow: i128 = if net_qty >= 0 {
+                    (payoff_u128 as i128) - (locked_collateral as i128)
                 } else {
-                    accounting_updates.push((user, 0, 0));
+                    (max_payoff_total as i128) - (payoff_u128 as i128) - (locked_collateral as i128)
+                };
+
+                if cashflow < 0 {
+                    let amount = cashflow.unsigned_abs();
+                    payers.push((user, amount));
+                    accounting_updates.push((user, -1, amount, locked_collateral));
+                } else if cashflow > 0 {
+                    let amount = cashflow.unsigned_abs();
+                    receivers.push((user, amount));
+                    accounting_updates.push((user, 1, amount, locked_collateral));
+                } else {
+                    accounting_updates.push((user, 0, 0, locked_collateral));
                 }
             }
 
@@ -100,7 +98,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 series_id.clone(),
                 settlement_price,
                 settlement_asset_val,
-                positions_to_settle,
+                positions_to_settle.iter().map(|(u, q, _)| (*u, *q)).collect(),
                 payers,
                 receivers,
                 accounting_updates,
@@ -115,9 +113,8 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
         plan.status = PlanStatus::Executing;
         SETTLEMENT_PLANS.with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
 
-        // ---------- Phase B1: collect from participants ----------
-        // We collect from ALL participants to pool collateral in the canister's main account.
-        while (plan.payer_cursor) < plan.positions.len() {
+        // ---------- Phase B1: collect from net losers ----------
+        while (plan.payer_cursor) < plan.payers.len() {
             let idx = plan.payer_cursor;
 
             if plan.payer_receipts[idx].is_some() {
@@ -126,7 +123,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 continue;
             }
 
-            let (user, _) = plan.positions[idx];
+            let (user, amount_u128) = plan.payers[idx];
 
             let created_at_time = plan.idempotency.to_created_at_time();
 
@@ -137,7 +134,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                     asset: &plan.settlement_asset,
                     from: LedgerAccount::UserClearing(user),
                     to: LedgerAccount::CanisterMain,
-                    amount: AssetAmount::DeductAll, // Pool all collateral for this series
+                    amount: AssetAmount::Fixed(amount_u128),
                     created_at_time,
                 })
                 .await;
@@ -195,14 +192,17 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             SETTLEMENT_PLANS.with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
         }
 
-        // ---------- Phase C: apply internal accounting once ----------
+        // ---------- Phase C: apply internal accounting updates ----------
         if !plan.accounting_applied {
             let settlement_asset_val = plan.settlement_asset.clone();
 
             MARGIN_ACCOUNTS.with(|accounts| {
                 let mut accounts = accounts.borrow_mut();
 
-                for (user, sign, amount_u128) in plan.accounting_updates.iter().copied() {
+                while plan.accounting_cursor < plan.accounting_updates.len() {
+                    let idx = plan.accounting_cursor;
+                    let (user, sign, amount_u128, margin_release) = plan.accounting_updates[idx];
+
                     if let Some(account) = accounts.get_mut(&user) {
                         let current = account.get_balance(&settlement_asset_val);
 
@@ -214,7 +214,15 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                             _ => {} // sign == 0 => no balance change
                         }
 
-                        account.required_margin = 0;
+                        account.required_margin =
+                            account.required_margin.saturating_sub(margin_release);
+                    }
+
+                    plan.accounting_cursor += 1;
+                    // Persist cursor progression regularly
+                    if plan.accounting_cursor % 10 == 0 {
+                        SETTLEMENT_PLANS
+                            .with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
                     }
                 }
             });

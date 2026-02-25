@@ -18,8 +18,13 @@ print_settlement_snapshot() {
 TIMESTAMP=$(date +%s)
 
 # Canister IDs
-CLEARING="uxrrr-q7777-77774-qaaaq-cai"
-ICP_LEDGER="ryjl3-tyaaa-aaaaa-aaaba-cai"
+CLEARING=$(dfx canister id clearing)
+ICP_LEDGER=$(dfx canister id icp_ledger)
+REGISTRY=$(dfx canister id registry)
+
+# Initialize clearing canister with registry ID
+echo "🚀 Setting registry canister ID to $REGISTRY in clearing canister $CLEARING..."
+dfx canister call clearing set_registry_canister "(principal \"$REGISTRY\")"
 
 # Inititalize with default identity
 dfx identity use default

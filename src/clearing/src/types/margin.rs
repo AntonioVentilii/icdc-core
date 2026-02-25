@@ -11,6 +11,7 @@ pub struct Position {
     pub user: User,
     pub series_id: SeriesId,
     pub net_qty: i128,
+    pub locked_collateral: u128,
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]

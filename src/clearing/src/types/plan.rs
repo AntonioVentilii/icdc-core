@@ -116,9 +116,10 @@ pub struct SettlementPlan {
     pub positions: Vec<(User, i128)>,
     pub payers: Vec<(User, u128)>,
     pub receivers: Vec<(User, u128)>,
-    pub accounting_updates: Vec<(User, i8, u128)>, // (user, sign, amount_u128)
+    pub accounting_updates: Vec<(User, i8, u128, u128)>, // (user, sign, profit_loss, margin_to_release)
     pub payer_cursor: usize,
     pub receiver_cursor: usize,
+    pub accounting_cursor: usize,
     pub accounting_applied: bool,
     pub status: PlanStatus,
     pub idempotency: PaymentIdempotency,
@@ -141,7 +142,7 @@ impl SettlementPlan {
         positions: Vec<(User, i128)>,
         payers: Vec<(User, u128)>,
         receivers: Vec<(User, u128)>,
-        accounting_updates: Vec<(User, i8, u128)>,
+        accounting_updates: Vec<(User, i8, u128, u128)>,
     ) -> Self {
         SETTLEMENT_PLANS.with(|m| {
             let mut m = m.borrow_mut();
@@ -163,6 +164,7 @@ impl SettlementPlan {
                 accounting_updates,
                 payer_cursor: 0,
                 receiver_cursor: 0,
+                accounting_cursor: 0,
                 accounting_applied: false,
                 status: PlanStatus::Planned,
                 idempotency,

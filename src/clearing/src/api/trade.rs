@@ -40,93 +40,90 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
 
         let settlement_asset = series.settlement_asset.to_asset();
 
-        // For Binary options (0 or 1), max payoff is 1.0 (100_000_000).
-        // Buyer risk: (price) * qty
-        // Seller risk: (1.0 - price) * qty
-        let max_payoff: u64 = 100_000_000;
-        let required_margin = if qty > 0 {
-            // Buyer
-            qty.unsigned_abs() * (price as u128)
-        } else {
-            // Seller
-            let seller_risk_per_unit = max_payoff.saturating_sub(price);
-            qty.unsigned_abs() * (seller_risk_per_unit as u128)
-        };
+        // Calculate margin requirements for the updated positions
+        // We need to know the old requirements to calculate the delta
+        let (buyer_delta_i128, seller_delta_i128, new_buyer_qty, new_buyer_margin, new_seller_qty, new_seller_margin) = POSITIONS.with(|positions| {
+            let positions = positions.borrow();
 
-        // Phase B: apply state changes (no awaits) BUT do it in a "commit-like" way
-        // We will:
-        // 1) update margin accounts
-        // 2) update positions
-        // 3) append event
-        // 4) record EXECUTED_TRADES[trade_id] = event_id
-        //
-        // Because there is no await between these, this is atomic w.r.t. interleaving.
+            let old_buyer_margin = positions.get(&(buyer, series_id.clone())).map(|p| p.locked_collateral).unwrap_or(0);
+            let old_seller_margin = positions.get(&(seller, series_id.clone())).map(|p| p.locked_collateral).unwrap_or(0);
 
+            // New quantities
+            let new_buyer_qty = positions.get(&(buyer, series_id.clone())).map(|p| p.net_qty).unwrap_or(0) + qty;
+            let new_seller_qty = positions.get(&(seller, series_id.clone())).map(|p| p.net_qty).unwrap_or(0) - qty;
+
+            // New margins (simplified Binary logic: max payoff is 1.0)
+            let max_payoff: u128 = 100_000_000;
+            let new_buyer_margin = if new_buyer_qty > 0 {
+                new_buyer_qty.unsigned_abs() * (price as u128)
+            } else if new_buyer_qty < 0 {
+                new_buyer_qty.unsigned_abs() * (max_payoff.saturating_sub(price as u128))
+            } else {
+                0
+            };
+
+            let new_seller_margin = if new_seller_qty > 0 {
+                new_seller_qty.unsigned_abs() * (price as u128)
+            } else if new_seller_qty < 0 {
+                new_seller_qty.unsigned_abs() * (max_payoff.saturating_sub(price as u128))
+            } else {
+                0
+            };
+
+            (
+                (new_buyer_margin as i128) - (old_buyer_margin as i128),
+                (new_seller_margin as i128) - (old_seller_margin as i128),
+                new_buyer_qty,
+                new_buyer_margin,
+                new_seller_qty,
+                new_seller_margin
+            )
+        });
+
+        let buyer_delta = buyer_delta_i128;
+        let seller_delta = seller_delta_i128;
+
+        // Phase B: apply state changes (no awaits)
         MARGIN_ACCOUNTS.with(|accounts| {
             let mut accounts = accounts.borrow_mut();
 
-            if buyer == seller {
-                let acc = accounts.entry(buyer).or_insert(MarginAccount {
-                    user: buyer,
-                    balances: BTreeMap::new(),
-                    required_margin: 0,
-                });
+            // Check Buyer
+            let buyer_acc = accounts.entry(buyer).or_insert(MarginAccount {
+                user: buyer,
+                balances: BTreeMap::new(),
+                required_margin: 0,
+            });
+            let buyer_collateral = buyer_acc.get_balance(&settlement_asset);
+            let final_buyer_required = if buyer_delta > 0 {
+                buyer_acc.required_margin + (buyer_delta as u128)
+            } else {
+                buyer_acc.required_margin.saturating_sub(buyer_delta.unsigned_abs())
+            };
 
-                let collateral = acc.get_balance(&settlement_asset);
-
-                let new_required = acc.required_margin + required_margin;
-
-                if new_required > collateral {
-                    return Err(TradeError::BuyerInsufficientMargin);
-                }
-
-                acc.required_margin = new_required;
-
-                return Ok(());
-            }
-
-            let buyer_required_now = accounts.get(&buyer).map(|a| a.required_margin).unwrap_or(0);
-            let buyer_collateral = accounts
-                .get(&buyer)
-                .map(|a| a.get_balance(&settlement_asset))
-                .unwrap_or(0);
-
-            let seller_required_now = accounts
-                .get(&seller)
-                .map(|a| a.required_margin)
-                .unwrap_or(0);
-            let seller_collateral = accounts
-                .get(&seller)
-                .map(|a| a.get_balance(&settlement_asset))
-                .unwrap_or(0);
-
-            let new_buyer_required = buyer_required_now + required_margin;
-            if new_buyer_required > buyer_collateral {
+            if final_buyer_required > buyer_collateral {
                 return Err(TradeError::BuyerInsufficientMargin);
             }
 
-            let new_seller_required = seller_required_now + required_margin;
-            if new_seller_required > seller_collateral {
+            // Check Seller
+            let seller_acc = accounts.entry(seller).or_insert(MarginAccount {
+                user: seller,
+                balances: BTreeMap::new(),
+                required_margin: 0,
+            });
+            let seller_collateral = seller_acc.get_balance(&settlement_asset);
+            let final_seller_required = if seller_delta > 0 {
+                seller_acc.required_margin + (seller_delta as u128)
+            } else {
+                seller_acc.required_margin.saturating_sub(seller_delta.unsigned_abs())
+            };
+
+            if final_seller_required > seller_collateral {
                 return Err(TradeError::SellerInsufficientMargin);
             }
 
-            {
-                let buyer_account = accounts.entry(buyer).or_insert(MarginAccount {
-                    user: buyer,
-                    balances: BTreeMap::new(),
-                    required_margin: 0,
-                });
-                buyer_account.required_margin = new_buyer_required;
-            }
-
-            {
-                let seller_account = accounts.entry(seller).or_insert(MarginAccount {
-                    user: seller,
-                    balances: BTreeMap::new(),
-                    required_margin: 0,
-                });
-                seller_account.required_margin = new_seller_required;
-            }
+            // Apply changes
+            accounts.get_mut(&buyer).unwrap().required_margin = final_buyer_required;
+            accounts.get_mut(&seller).unwrap().required_margin = final_seller_required;
 
             Ok(())
         })?;
@@ -134,23 +131,23 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
         POSITIONS.with(|positions| {
             let mut positions = positions.borrow_mut();
 
-            let buyer_pos = positions
-                .entry((buyer, series_id.clone()))
-                .or_insert(Position {
-                    user: buyer,
-                    series_id: series_id.clone(),
-                    net_qty: 0,
-                });
-            buyer_pos.net_qty += qty;
+            let b_pos = positions.entry((buyer, series_id.clone())).or_insert(Position {
+                user: buyer,
+                series_id: series_id.clone(),
+                net_qty: 0,
+                locked_collateral: 0,
+            });
+            b_pos.net_qty = new_buyer_qty;
+            b_pos.locked_collateral = new_buyer_margin;
 
-            let seller_pos = positions
-                .entry((seller, series_id.clone()))
-                .or_insert(Position {
-                    user: seller,
-                    series_id: series_id.clone(),
-                    net_qty: 0,
-                });
-            seller_pos.net_qty -= qty;
+            let s_pos = positions.entry((seller, series_id.clone())).or_insert(Position {
+                user: seller,
+                series_id: series_id.clone(),
+                net_qty: 0,
+                locked_collateral: 0,
+            });
+            s_pos.net_qty = new_seller_qty;
+            s_pos.locked_collateral = new_seller_margin;
         });
 
         let event_id = NEXT_EVENT_ID.with(|id| {
@@ -242,6 +239,7 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
                     user: proof.user,
                     series_id: proof.series_id.clone(),
                     net_qty: 0,
+                    locked_collateral: 0,
                 });
             pos.net_qty += proof.qty;
         });
