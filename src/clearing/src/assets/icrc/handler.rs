@@ -18,9 +18,11 @@ use crate::{
     types::{account::LedgerAccount, errors::LedgerError},
 };
 
+/// Implementation of [`AssetHandler`] for ICRC-1 and ICRC-2 compatible ledgers.
 pub struct IcrcHandler;
 
 impl IcrcHandler {
+    /// Resolves a [`LedgerAccount`] into a concrete ICRC [`Account`].
     fn resolve_account(&self, account: LedgerAccount) -> Account {
         match account {
             LedgerAccount::UserClearing(u) => u.clearing_account(),
@@ -32,6 +34,7 @@ impl IcrcHandler {
         }
     }
 
+    /// Retrieves the balance of an ICRC account.
     pub async fn balance_of(&self, params: AssetBalanceOfParams<'_>) -> Result<u128, LedgerError> {
         let Asset::Icrc(ledger_id) = params.asset;
 
@@ -48,6 +51,7 @@ impl IcrcHandler {
         ledger_balance.0.to_u128().ok_or(LedgerError::MathOverflow)
     }
 
+    /// Retrieves the transfer fee of an ICRC ledger.
     pub async fn get_fee(&self, asset: &Asset) -> Result<u128, LedgerError> {
         let Asset::Icrc(ledger_id) = asset;
 
@@ -63,6 +67,7 @@ impl IcrcHandler {
         fee_nat.0.to_u128().ok_or(LedgerError::MathOverflow)
     }
 
+    /// Executes an ICRC-1 transfer.
     pub async fn transfer(&self, params: AssetTransferParams<'_>) -> Result<u128, LedgerError> {
         let Asset::Icrc(ledger_id) = params.asset;
 
@@ -120,6 +125,7 @@ impl IcrcHandler {
         }
     }
 
+    /// Executes an ICRC-2 transfer_from call.
     pub async fn transfer_from(
         &self,
         params: AssetTransferFromParams<'_>,

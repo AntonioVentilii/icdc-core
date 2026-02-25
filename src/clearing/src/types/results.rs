@@ -9,9 +9,12 @@ use crate::types::{
     margin::MarginAccount,
 };
 
+/// Result of a collateral deposit operation.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum DepositCollateralResult {
+    /// Deposit was successfully planned or executed.
     Ok,
+    /// Failed to process deposit.
     Err(DepositCollateralError),
 }
 impl From<Result<(), DepositCollateralError>> for DepositCollateralResult {
@@ -23,9 +26,12 @@ impl From<Result<(), DepositCollateralError>> for DepositCollateralResult {
     }
 }
 
+/// Result of a collateral withdrawal operation.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum WithdrawCollateralResult {
+    /// Withdrawal was successfully planned or executed.
     Ok,
+    /// Failed to process withdrawal.
     Err(WithdrawCollateralError),
 }
 impl From<Result<(), WithdrawCollateralError>> for WithdrawCollateralResult {
@@ -37,9 +43,12 @@ impl From<Result<(), WithdrawCollateralError>> for WithdrawCollateralResult {
     }
 }
 
+/// Result of a matched trade submission.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum SubmitMatchedTradeResult {
+    /// Returns `true` if the trade was successfully processed.
     Ok(bool),
+    /// Failed to submit or match the trade.
     Err(TradeError),
 }
 impl From<Result<bool, TradeError>> for SubmitMatchedTradeResult {
@@ -51,9 +60,12 @@ impl From<Result<bool, TradeError>> for SubmitMatchedTradeResult {
     }
 }
 
+/// Result of a derivative series settlement request.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum SettleSeriesResult {
+    /// Settlement plan was successfully created or is already executing.
     Ok,
+    /// Failed to initiate settlement.
     Err(SettlementError),
 }
 impl From<Result<(), SettlementError>> for SettleSeriesResult {
@@ -65,9 +77,12 @@ impl From<Result<(), SettlementError>> for SettleSeriesResult {
     }
 }
 
+/// Result of a position transfer acceptance.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum AcceptPositionTransferResult {
+    /// Returns `true` if the transfer was successfully accepted and processed.
     Ok(bool),
+    /// Failed to accept the position transfer.
     Err(TradeError),
 }
 impl From<Result<bool, TradeError>> for AcceptPositionTransferResult {
@@ -79,9 +94,12 @@ impl From<Result<bool, TradeError>> for AcceptPositionTransferResult {
     }
 }
 
+/// Result of a margin account retrieval request.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum GetMarginAccountResult {
+    /// Successfully retrieved the margin account details.
     Ok(MarginAccount),
+    /// Failed to retrieve the margin account.
     Err(MarginAccountError),
 }
 impl From<Result<MarginAccount, MarginAccountError>> for GetMarginAccountResult {

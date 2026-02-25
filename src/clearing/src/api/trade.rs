@@ -21,6 +21,18 @@ use crate::{
     utils::series::ensure_series_registered,
 };
 
+/// Submits a matched trade from an exchange for clearing.
+///
+/// This method validates the series registration, calculates margin requirements,
+/// checks for sufficient collateral, and updates the positions of both buyer and seller.
+///
+/// # Arguments
+/// * `params` - The trade details including ID, series, buyer, seller, quantity, and price.
+///
+/// # Returns
+/// * [`SubmitMatchedTradeResult::Ok(true)`] if the trade was successfully processed or was a
+///   duplicate.
+/// * [`SubmitMatchedTradeResult::Err`] if margin is insufficient or another error occurs.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMatchedTradeResult {
     let result: Result<bool, TradeError> = (async {
@@ -205,6 +217,10 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
     result.into()
 }
 
+/// Freezes a user's position to prepare it for transfer to another clearing canister.
+///
+/// Once frozen, the position is removed from active state and a [`PositionProof`] is issued.
+/// This method is gated to canister controllers.
 #[update(guard = "caller_is_controller")]
 pub fn freeze_position_for_transfer(
     params: FreezePositionForTransferParams,
@@ -246,6 +262,10 @@ pub fn freeze_position_for_transfer(
     proof_opt
 }
 
+/// Accepts a position transfer from another clearing canister.
+///
+/// This method validates the series and increases the target user's position based on the provided
+/// proof. This method is gated to canister controllers.
 #[update(guard = "caller_is_controller")]
 pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTransferResult {
     let result: Result<bool, TradeError> = (async {

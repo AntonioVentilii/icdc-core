@@ -1,10 +1,12 @@
 type AcceptPositionTransferResult = variant { Ok : bool; Err : TradeError };
 type Asset = variant { Icrc : principal };
-type CommonError = variant { Internal : text; Unauthorized; RegistryNotSet };
-type DepositCollateralError = variant {
-	DepositCollateralMathOverflow;
-	Ledger : LedgerError
+type CommonError = variant {
+	Internal : text;
+	MathOverflow;
+	Unauthorized;
+	RegistryNotSet
 };
+type DepositCollateralError = variant { MathOverflow; Ledger : LedgerError };
 type DepositCollateralParams = record {
 	deposit_id : text;
 	asset : Asset;
@@ -23,10 +25,11 @@ type GetMarginAccountResult = variant {
 };
 type GetPositionParams = record { series_id : text };
 type LedgerError = variant {
-	FetchingBalanceFailed : text;
-	TransferFailed : text;
-	UnsupportedLedger;
-	FetchingFeeFailed : text
+	TransferError : text;
+	InsufficientBalance : record { balance : nat; required : nat };
+	MathOverflow;
+	CallError : record { method : text; code : int32; message : text };
+	UnsupportedLedger
 };
 type MarginAccount = record {
 	required_margin : nat;
@@ -35,11 +38,16 @@ type MarginAccount = record {
 };
 type MarginAccountError = variant {
 	NoMarginAccountFound;
-	BalanceMathOverflow;
+	MathOverflow;
 	Ledger : LedgerError
 };
 type PayoffType = variant { Put; Binary; Call };
-type Position = record { series_id : text; net_qty : int; user : principal };
+type Position = record {
+	series_id : text;
+	net_qty : int;
+	user : principal;
+	locked_collateral : nat
+};
 type PositionProof = record {
 	qty : int;
 	signature : blob;
@@ -61,9 +69,8 @@ type SettleSeriesParams = record { series_id : text; settlement_price : nat64 };
 type SettleSeriesResult = variant { Ok; Err : SettlementError };
 type SettlementAsset = variant { Icp; CkUsdc };
 type SettlementError = variant {
-	PayoffMathOverflow;
 	UnsupportedSettlementAsset;
-	FeeMathOverflow;
+	MathOverflow;
 	Ledger : LedgerError;
 	Common : CommonError
 };
@@ -77,19 +84,18 @@ type SubmitMatchedTradeParams = record {
 };
 type SubmitMatchedTradeResult = variant { Ok : bool; Err : TradeError };
 type TradeError = variant {
-	BuyerInsufficientMargin;
-	GettingRegistrySeriesFailed : text;
-	SellerInsufficientMargin;
-	SeriesNotFound;
+	RegistryError : text;
+	InsufficientMargin : record {
+		balance : nat;
+		user : principal;
+		required : nat
+	};
+	SeriesNotFound : text;
 	Common : CommonError
 };
 type WithdrawCollateralError = variant {
-	InsufficientExcessMargin : record {
-		requested : nat;
-		required : nat;
-		current : nat
-	};
-	WithdrawCollateralMathOverflow;
+	InsufficientExcessMargin : record { requested : nat; current : nat };
+	MathOverflow;
 	Ledger : LedgerError
 };
 type WithdrawCollateralParams = record {
@@ -99,21 +105,92 @@ type WithdrawCollateralParams = record {
 };
 type WithdrawCollateralResult = variant { Ok; Err : WithdrawCollateralError };
 service : {
+	// Accepts a position transfer from another clearing canister.
+	//
+	// This method validates the series and increases the target user's position based on the provided
+	// proof. This method is gated to canister controllers.
 	accept_position_transfer : (PositionProof) -> (AcceptPositionTransferResult);
+	// Deposits collateral into the user's margin account.
+	//
+	// This is a multi-phase operation:
+	// 1. Building a [`DepositPlan`] for idempotency.
+	// 2. Executing the asynchronous ledger transfer (`transfer_from`).
+	// 3. Finalising the internal margin account balances.
+	//
+	// # Arguments
+	// * `params` - The deposit details including amount, asset, and a unique deposit ID.
+	//
+	// # Returns
+	// * [`DepositCollateralResult::Ok`] if the deposit was successfully planned or executed.
+	// * [`DepositCollateralResult::Err`] if the asset is unsupported or a transfer error occurs.
 	deposit_collateral : (DepositCollateralParams) -> (DepositCollateralResult);
+	// Freezes a user's position to prepare it for transfer to another clearing canister.
+	//
+	// Once frozen, the position is removed from active state and a [`PositionProof`] is issued.
+	// This method is gated to canister controllers.
 	freeze_position_for_transfer : (FreezePositionForTransferParams) -> (
 		opt PositionProof
 	);
+	// Retrieves the current user's margin account details, optionally refreshing balances.
+	//
+	// # Arguments
+	// * `params` - Includes an optional `refresh` flag to trigger external ledger checks.
 	get_margin_account : (GetMarginAccountParams) -> (GetMarginAccountResult);
+	// Retrieves the current user's margin account details (query only).
+	//
+	// This does not refresh balances from external ledgers.
 	get_margin_account_query : () -> (GetMarginAccountResult) query;
+	// Retrieves a specific position for the caller.
 	get_position : (GetPositionParams) -> (opt Position) query;
+	// Retrieves all open positions for the caller.
 	get_positions : () -> (vec record { text; Position }) query;
+	// Returns a list of all derivative series currently cached in the clearing canister.
 	list_series : () -> (vec Series) query;
+	// Sets the principal of the Series Registry canister.
+	//
+	// This principal is used to discover and validate derivative series.
+	// This method is gated to canister controllers.
 	set_registry_canister : (principal) -> ();
+	// Settles a derivative series at a specific price.
+	//
+	// This is a complex background operation consisting of:
+	// 1. Creating or resuming a [`SettlementPlan`].
+	// 2. Collecting collateral from users with net losses.
+	// 3. Paying out collateral to users with net profits.
+	// 4. Finalising internal margin account balances and releasing locked collateral.
+	//
+	// This method is gated to canister controllers and is intended to be called by an off-chain oracle
+	// or automation.
 	settle_series : (SettleSeriesParams) -> (SettleSeriesResult);
+	// Submits a matched trade from an exchange for clearing.
+	//
+	// This method validates the series registration, calculates margin requirements,
+	// checks for sufficient collateral, and updates the positions of both buyer and seller.
+	//
+	// # Arguments
+	// * `params` - The trade details including ID, series, buyer, seller, quantity, and price.
+	//
+	// # Returns
+	// * [`SubmitMatchedTradeResult::Ok(true)`] if the trade was successfully processed or was a
+	// duplicate.
+	// * [`SubmitMatchedTradeResult::Err`] if margin is insufficient or another error occurs.
 	submit_matched_trade : (SubmitMatchedTradeParams) -> (
 		SubmitMatchedTradeResult
 	);
+	// Withdraws collateral from the user's margin account to an external address.
+	//
+	// This is a multi-phase operation:
+	// 1. Building a [`WithdrawalPlan`] for idempotency.
+	// 2. Reserving the internal balance to prevent double-spending or risk violations.
+	// 3. Executing the asynchronous ledger transfer (`transfer`).
+	// 4. Finalising the plan status.
+	//
+	// # Arguments
+	// * `params` - The withdrawal details including amount, asset, and a unique withdrawal ID.
+	//
+	// # Returns
+	// * [`WithdrawalCollateralResult::Ok`] if the withdrawal was successfully planned or executed.
+	// * [`WithdrawalCollateralResult::Err`] if margin is insufficient or a transfer error occurs.
 	withdraw_collateral : (WithdrawCollateralParams) -> (
 		WithdrawCollateralResult
 	)

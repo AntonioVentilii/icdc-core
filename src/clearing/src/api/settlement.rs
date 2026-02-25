@@ -19,6 +19,16 @@ use crate::{
     },
 };
 
+/// Settles a derivative series at a specific price.
+///
+/// This is a complex background operation consisting of:
+/// 1. Creating or resuming a [`SettlementPlan`].
+/// 2. Collecting collateral from users with net losses.
+/// 3. Paying out collateral to users with net profits.
+/// 4. Finalising internal margin account balances and releasing locked collateral.
+///
+/// This method is gated to canister controllers and is intended to be called by an off-chain oracle
+/// or automation.
 #[update(guard = "caller_is_controller")]
 pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
     let result: Result<(), SettlementError> = (async {

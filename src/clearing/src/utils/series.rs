@@ -7,6 +7,17 @@ use crate::{
     utils::asset::is_supported_asset,
 };
 
+/// Ensures that a derivative series is registered and cached locally.
+///
+/// If the series is not found in local state, it attempts to fetch it from the registry canister.
+///
+/// # Arguments
+/// * `series_id` - The identifier of the series to validate and cache.
+///
+/// # Returns
+/// * [`Series`] if successfully registered or already present.
+/// * [`TradeError`] if the registry is not set, the series is not found, or the asset is
+///   unsupported.
 pub async fn ensure_series_registered(series_id: &SeriesId) -> Result<Series, TradeError> {
     if let Some(series) = SERIES.with(|s| s.borrow().get(series_id).cloned()) {
         return Ok(series);

@@ -6,6 +6,18 @@ use crate::{
     utils::canonical_id_part,
 };
 
+/// Adds a new derivative series to the registry.
+///
+/// This method generates a canonical [`SeriesId`] for the provided parameters.
+/// If the series already exists, it returns an error.
+///
+/// # Arguments
+/// * `params` - The defining parameters for the new series.
+///
+/// # Returns
+/// * [`AddSeriesResult::Ok`] containing the new [`SeriesId`] on success.
+/// * [`AddSeriesResult::Err`] with [`RegistryError::SeriesAlreadyExists`] if the series is already
+///   registered.
 #[update]
 pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
     let result: Result<SeriesId, RegistryError> = {
@@ -56,11 +68,20 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
     result.into()
 }
 
+/// Retrieves a specific [`Series`] by its [`SeriesId`].
+///
+/// # Arguments
+/// * `series_id` - The unique identifier of the series to retrieve.
+///
+/// # Returns
+/// * `Some(Series)` if the series exists in the registry.
+/// * `None` otherwise.
 #[query]
 pub fn get_series(series_id: SeriesId) -> Option<Series> {
     SERIES_STORE.with(|store| store.borrow().get(&series_id).cloned())
 }
 
+/// Returns a list of all registered derivative series.
 #[query]
 pub fn list_series() -> Vec<Series> {
     SERIES_STORE.with(|store| store.borrow().values().cloned().collect())

@@ -17,6 +17,9 @@ use crate::{
     },
 };
 
+/// Retrieves the current user's margin account details (query only).
+///
+/// This does not refresh balances from external ledgers.
 #[query(guard = "caller_is_not_anonymous")]
 pub fn get_margin_account_query() -> GetMarginAccountResult {
     let result: Result<MarginAccount, MarginAccountError> = {
@@ -34,6 +37,10 @@ pub fn get_margin_account_query() -> GetMarginAccountResult {
     result.into()
 }
 
+/// Retrieves the current user's margin account details, optionally refreshing balances.
+///
+/// # Arguments
+/// * `params` - Includes an optional `refresh` flag to trigger external ledger checks.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn get_margin_account(params: GetMarginAccountParams) -> GetMarginAccountResult {
     let result: Result<MarginAccount, MarginAccountError> = (async {
@@ -112,6 +119,7 @@ pub async fn get_margin_account(params: GetMarginAccountParams) -> GetMarginAcco
     result.into()
 }
 
+/// Retrieves a specific position for the caller.
 #[query(guard = "caller_is_not_anonymous")]
 pub fn get_position(params: GetPositionParams) -> Option<Position> {
     let caller: User = ic_cdk::caller().into();
@@ -119,6 +127,7 @@ pub fn get_position(params: GetPositionParams) -> Option<Position> {
     POSITIONS.with(|positions| positions.borrow().get(&(caller, params.series_id)).cloned())
 }
 
+/// Retrieves all open positions for the caller.
 #[query(guard = "caller_is_not_anonymous")]
 pub fn get_positions() -> Vec<(SeriesId, Position)> {
     let caller: User = ic_cdk::caller().into();

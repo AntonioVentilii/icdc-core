@@ -4,6 +4,7 @@ use ic_cdk::storage;
 use shared::types::{Series, SeriesId};
 
 thread_local! {
+    /// Global stable storage for all registered derivative series.
     pub static SERIES_STORE: RefCell<BTreeMap<SeriesId, Series>> = const { RefCell::new(BTreeMap::new()) };
 }
 

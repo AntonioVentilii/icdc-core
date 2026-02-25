@@ -4,6 +4,11 @@ use shared::types::{PayoffType, Series};
 ///
 /// Returns the amount (in the settlement asset's base units) that the long side
 /// of the position receives.
+///
+/// # Arguments
+/// * `series` - The derivative series details.
+/// * `settlement_price` - The final price from the oracle.
+/// * `qty` - The net quantity of the position (positive for Long, negative for Short).
 pub fn get_settlement_value(series: &Series, settlement_price: u64, qty: i128) -> u128 {
     let abs_qty = qty.unsigned_abs();
     match series.payoff_type {
@@ -49,6 +54,14 @@ pub fn get_settlement_value(series: &Series, settlement_price: u64, qty: i128) -
 }
 
 /// Calculates the required collateral (margin) to hold a position.
+///
+/// This determines how much of the settlement asset must be locked in the user's
+/// margin account to maintain the position.
+///
+/// # Arguments
+/// * `series` - The derivative series details.
+/// * `price` - The current market price or entry price.
+/// * `qty` - The net quantity of the position.
 pub fn get_required_margin(series: &Series, price: u64, qty: i128) -> u128 {
     let abs_qty = qty.unsigned_abs();
     match series.payoff_type {

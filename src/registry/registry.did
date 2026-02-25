@@ -20,7 +20,28 @@ type Series = record {
 };
 type SettlementAsset = variant { Icp; CkUsdc };
 service : {
+	// Adds a new derivative series to the registry.
+	//
+	// This method generates a canonical [`SeriesId`] for the provided parameters.
+	// If the series already exists, it returns an error.
+	//
+	// # Arguments
+	// * `params` - The defining parameters for the new series.
+	//
+	// # Returns
+	// * [`AddSeriesResult::Ok`] containing the new [`SeriesId`] on success.
+	// * [`AddSeriesResult::Err`] with [`RegistryError::SeriesAlreadyExists`] if the series is already
+	// registered.
 	add_series : (AddSeriesParams) -> (AddSeriesResult);
+	// Retrieves a specific [`Series`] by its [`SeriesId`].
+	//
+	// # Arguments
+	// * `series_id` - The unique identifier of the series to retrieve.
+	//
+	// # Returns
+	// * `Some(Series)` if the series exists in the registry.
+	// * `None` otherwise.
 	get_series : (text) -> (opt Series) query;
+	// Returns a list of all registered derivative series.
 	list_series : () -> (vec Series) query
 }

@@ -1,3 +1,13 @@
+/// Normalises an identifier part by trimming, converting to uppercase, and validating characters.
+///
+/// # Arguments
+/// * `s` - The string to normalise.
+///
+/// # Returns
+/// * A normalised uppercase string.
+///
+/// # Panics
+/// * Traps if the identifier contains whitespace or invalid characters.
 pub fn canonical_id_part(s: &str) -> String {
     let trimmed = s.trim().to_ascii_uppercase();
 

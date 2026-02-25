@@ -1,12 +1,22 @@
+/// 1 KiB in bytes (1024)
 pub const KIB: u64 = 1024;
+/// 1 MiB in bytes (1024 * 1024)
 pub const MIB: u64 = 1024 * KIB;
+/// 1 GiB in bytes (1024 * 1024 * 1024)
 pub const GIB: u64 = 1024 * MIB;
 
+/// Number of nanoseconds in one second
 pub const SECOND_NS: u64 = 1_000_000_000;
+/// Number of nanoseconds in one minute
 pub const MINUTE_NS: u64 = 60 * SECOND_NS;
+/// Number of nanoseconds in one hour
 pub const HOUR_NS: u64 = 60 * MINUTE_NS;
+/// Number of nanoseconds in one day
 pub const DAY_NS: u64 = 24 * HOUR_NS;
+/// Number of nanoseconds in 30 days
 pub const MONTH_NS: u64 = 30 * DAY_NS;
 
+/// Principal ID of the ICP Ledger canister
 pub const ICP_LEDGER: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
+/// Principal ID of the ckUSDC Ledger canister
 pub const CKUSDC_LEDGER: &str = "yfumr-cyaaa-aaaar-qaela-cai";

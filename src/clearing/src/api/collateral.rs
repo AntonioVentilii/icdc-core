@@ -24,6 +24,19 @@ use crate::{
     utils::asset::is_supported_asset,
 };
 
+/// Deposits collateral into the user's margin account.
+///
+/// This is a multi-phase operation:
+/// 1. Building a [`DepositPlan`] for idempotency.
+/// 2. Executing the asynchronous ledger transfer (`transfer_from`).
+/// 3. Finalising the internal margin account balances.
+///
+/// # Arguments
+/// * `params` - The deposit details including amount, asset, and a unique deposit ID.
+///
+/// # Returns
+/// * [`DepositCollateralResult::Ok`] if the deposit was successfully planned or executed.
+/// * [`DepositCollateralResult::Err`] if the asset is unsupported or a transfer error occurs.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositCollateralResult {
     let result: Result<(), DepositCollateralError> = (async {
@@ -129,6 +142,20 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
     result.into()
 }
 
+/// Withdraws collateral from the user's margin account to an external address.
+///
+/// This is a multi-phase operation:
+/// 1. Building a [`WithdrawalPlan`] for idempotency.
+/// 2. Reserving the internal balance to prevent double-spending or risk violations.
+/// 3. Executing the asynchronous ledger transfer (`transfer`).
+/// 4. Finalising the plan status.
+///
+/// # Arguments
+/// * `params` - The withdrawal details including amount, asset, and a unique withdrawal ID.
+///
+/// # Returns
+/// * [`WithdrawalCollateralResult::Ok`] if the withdrawal was successfully planned or executed.
+/// * [`WithdrawalCollateralResult::Err`] if margin is insufficient or a transfer error occurs.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCollateralResult {
     let result: Result<(), WithdrawCollateralError> = (async {

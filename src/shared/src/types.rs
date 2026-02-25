@@ -4,17 +4,23 @@ use sha2::{Digest, Sha256};
 
 use crate::constants::{CKUSDC_LEDGER, ICP_LEDGER};
 
+/// Represents a supported asset in the ICDC ecosystem.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Asset {
+    /// An ICRC-compliant token identified by its canister [`Principal`].
     Icrc(Principal),
 }
 
+/// Supported assets for settlement of derivative contracts.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum SettlementAsset {
+    /// Internet Computer Protocol (ICP) utility token.
     Icp,
+    /// Chain-key USDC (ckUSDC) stablecoin.
     CkUsdc,
 }
 impl SettlementAsset {
+    /// Returns the unique identifier bytes used for ID generation.
     pub fn as_id_bytes(&self) -> &'static [u8] {
         match self {
             SettlementAsset::Icp => b"ICP",
@@ -22,6 +28,7 @@ impl SettlementAsset {
         }
     }
 
+    /// Converts the settlement asset to its generic [`Asset`] representation.
     pub fn to_asset(&self) -> Asset {
         match self {
             SettlementAsset::Icp => Asset::Icrc(Principal::from_text(ICP_LEDGER).unwrap()),
@@ -30,52 +37,43 @@ impl SettlementAsset {
     }
 }
 
+/// Metadata about the current state of a canister.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct CanisterStatus {
+    /// Semantic version of the canister code.
     pub version: String,
+    /// Current cycle balance of the canister.
     pub cycles_balance: u128,
+    /// Total memory usage in bytes (including stable memory).
     pub memory_usage_bytes: u64,
+    /// Current heap memory usage in bytes.
     pub heap_memory_usage_bytes: u64,
 }
 
+/// A unique identifier for a derivative series.
+/// Encapsulates a hex-encoded string derived from series parameters.
 #[derive(
     CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
 pub struct SeriesId(String);
-// impl SeriesId {
-//     pub fn new(value: String) -> Self {
-//         Self(value)
-//     }
-//
-//     pub fn as_str(&self) -> &str {
-//         &self.0
-//     }
-// }
-// impl Deref for SeriesId {
-//     type Target = str;
-//
-//     fn deref(&self) -> &Self::Target {
-//         &self.0
-//     }
-// }
 impl From<String> for SeriesId {
     fn from(value: String) -> Self {
         Self(value)
     }
 }
-// impl From<&str> for SeriesId {
-//     fn from(value: &str) -> Self {
-//         Self(value.to_string())
-//     }
-// }
 
+/// Defines the payoff structure for a derivative contract.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum PayoffType {
+    /// A fixed payoff if the condition is met (all-or-nothing).
     Binary,
+    /// Payoff based on the positive difference between underlying price and strike.
     Call,
+    /// Payoff based on the positive difference between strike and underlying price.
     Put,
 }
 impl PayoffType {
+    /// Returns the unique identifier bytes used for ID generation.
     pub fn as_id_bytes(&self) -> &'static [u8] {
         match self {
             PayoffType::Binary => b"BINARY",
@@ -85,17 +83,29 @@ impl PayoffType {
     }
 }
 
+/// Defines a specific derivative series (contract).
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct Series {
+    /// Unique identifier computed from series parameters.
     pub series_id: SeriesId,
+    /// The underlying asset ticker or identifier (e.g., "ICP/USD").
     pub underlying: String,
+    /// Expiry timestamp in nanoseconds since UNIX epoch.
     pub expiry: u64,
+    /// The mathematical payoff model used for this series.
     pub payoff_type: PayoffType,
+    /// Target price for options, if applicable.
     pub strike: Option<u64>,
+    /// The asset used to settle the contract payoff.
     pub settlement_asset: SettlementAsset,
+    /// The identifier of the oracle providing the settlement data.
     pub oracle_source: String,
 }
 impl Series {
+    /// Generates a unique [`SeriesId`] based on the contract parameters.
+    ///
+    /// The ID is computed using a SHA-256 hash of all defining parameters,
+    /// ensuring that identical series have the same ID while preventing collisions.
     pub fn generate_id(
         underlying: &str,
         expiry: u64,
