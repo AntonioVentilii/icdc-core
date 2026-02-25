@@ -17,10 +17,12 @@ print_settlement_snapshot() {
 
 get_balance() {
   local target_identity="$1"
-  local current_identity=$(dfx identity whoami)
+  local current_identity
+  current_identity=$(dfx identity whoami)
 
   dfx identity use "$target_identity" >/dev/null 2>&1
-  local res=$(dfx canister call clearing get_margin_account "(record { refresh = null })")
+  local res
+  res=$(dfx canister call clearing get_margin_account "(record { refresh = null })")
 
   # Restore original identity
   dfx identity use "$current_identity" >/dev/null 2>&1
@@ -35,7 +37,6 @@ DEPOSIT_AMOUNT=1000000000  # 10 ICP
 TRADE_QTY=10               # 10 units
 TRADE_PRICE=55000000       # 0.55 ICP
 SETTLEMENT_PRICE=100000000 # 1 ICP
-MAX_PAYOFF=100000000       # For binary payoff, max payoff is 1 ICP
 LEDGER_FEE=10000           # 0.0001 ICP, adjust based on actual fee structure
 
 # Init
@@ -235,7 +236,6 @@ DELTA_SECONDARY=$((FINAL_BAL_SECONDARY - BAL_START_SECONDARY))
 # Winners Delta = Deposit + Profit - Fee
 # Losers Delta  = Deposit - Loss - Fee (if Loss is debt collected)
 PROFIT=$((TRADE_QTY * (SETTLEMENT_PRICE - TRADE_PRICE)))
-LOSS=$((TRADE_QTY * (TRADE_PRICE - (SETTLEMENT_PRICE - MAX_PAYOFF))))
 
 # For binary Long: if Win, payout is MAX_PAYOFF. So Profit is (MAX_PAYOFF - TRADE_PRICE) * QTY = (100M - 55M) * 10 = 450M.
 # For binary Short: if Loss, debt is (MAX_PAYOFF - (MAX_PAYOFF - TRADE_PRICE)) * QTY? No.
