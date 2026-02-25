@@ -15,6 +15,7 @@ type Series = record {
 	series_id : text;
 	settlement_asset : SettlementAsset;
 	underlying : text;
+	underlying_id : nat32;
 	expiry : nat64;
 	oracle_source : text
 };
@@ -42,6 +43,8 @@ service : {
 	// * `Some(Series)` if the series exists in the registry.
 	// * `None` otherwise.
 	get_series : (text) -> (opt Series) query;
+	// Retrieves the canonical ID for a given underlying asset ticker.
+	get_underlying_id : (text) -> (opt nat32) query;
 	// Returns a list of all registered derivative series.
 	list_series : () -> (vec Series) query
 }

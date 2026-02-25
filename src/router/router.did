@@ -1,0 +1,10 @@
+type ShardKey = record {
+	underlying_id : nat32;
+	expiry_month : nat32
+};
+
+service : {
+	"resolve_clearing" : (nat32, nat32) -> (opt principal) query;
+	"register_shard" : (nat32, nat32, principal) -> ();
+	"list_shards" : () -> (vec record { ShardKey; principal }) query
+}
