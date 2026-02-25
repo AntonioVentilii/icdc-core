@@ -17,7 +17,7 @@ use crate::{
         errors::{DepositCollateralError, LedgerError, WithdrawCollateralError},
         margin::MarginAccount,
         params::{DepositCollateralParams, WithdrawCollateralParams},
-        plan::{DepositPlan, PlanStatus, WithdrawalPlan},
+        plan::{DepositPlan, DepositPlanParams, PlanStatus, WithdrawalPlan, WithdrawalPlanParams},
         results::{DepositCollateralResult, WithdrawCollateralResult},
         user::User,
     },
@@ -42,8 +42,12 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
         }
 
         // ---------- Phase A: Build plan (no awaits) ----------
-        let mut plan =
-            DepositPlan::get_or_create(deposit_id.clone(), user, asset.clone(), amount.clone());
+        let mut plan = DepositPlan::get_or_create(DepositPlanParams {
+            deposit_id: deposit_id.clone(),
+            user,
+            asset: asset.clone(),
+            amount: amount.clone(),
+        });
 
         if plan.status == PlanStatus::Finalised {
             return Ok(());
@@ -143,13 +147,13 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
         }
 
         // ---------- Phase A: Build plan (durable, no awaits) ----------
-        let mut plan = WithdrawalPlan::get_or_create(
-            withdrawal_id.clone(),
+        let mut plan = WithdrawalPlan::get_or_create(WithdrawalPlanParams {
+            withdrawal_id: withdrawal_id.clone(),
             user,
-            asset.clone(),
-            amount.clone(),
-            (user.principal(), None),
-        );
+            asset: asset.clone(),
+            amount: amount.clone(),
+            to_account: (user.principal(), None),
+        });
 
         if plan.status == PlanStatus::Finalised {
             return Ok(());

@@ -12,7 +12,7 @@ use crate::{
         account::LedgerAccount,
         errors::{LedgerError, SettlementError},
         params::SettleSeriesParams,
-        plan::{PlanStatus, SettlementPlan},
+        plan::{PlanStatus, SettlementPlan, SettlementPlanParams},
         results::SettleSeriesResult,
         user::User,
     },
@@ -107,19 +107,19 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 }
             }
 
-            SettlementPlan::get_or_create(
-                series_id.clone(),
+            SettlementPlan::get_or_create(SettlementPlanParams {
+                series_id: series_id.clone(),
                 settlement_price,
-                settlement_asset_val,
+                settlement_asset: settlement_asset_val,
                 fee,
-                positions_to_settle
+                positions: positions_to_settle
                     .iter()
                     .map(|(u, q, _)| (*u, *q))
                     .collect(),
                 payers,
                 receivers,
                 accounting_updates,
-            )
+            })
         };
 
         if plan.status == PlanStatus::Finalised {

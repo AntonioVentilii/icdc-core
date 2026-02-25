@@ -18,6 +18,35 @@ pub enum PlanStatus {
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct DepositPlanParams {
+    pub deposit_id: DepositId,
+    pub user: User,
+    pub asset: Asset,
+    pub amount: candid::Nat,
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct WithdrawalPlanParams {
+    pub withdrawal_id: WithdrawalId,
+    pub user: User,
+    pub asset: Asset,
+    pub amount: candid::Nat,
+    pub to_account: (candid::Principal, Option<[u8; 32]>),
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct SettlementPlanParams {
+    pub series_id: SeriesId,
+    pub settlement_price: u64,
+    pub settlement_asset: Asset,
+    pub fee: u128,
+    pub positions: Vec<(User, i128)>,
+    pub payers: Vec<(User, u128)>,
+    pub receivers: Vec<(User, u128)>,
+    pub accounting_updates: Vec<(User, i8, u128, u128)>,
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct DepositPlan {
     pub deposit_id: DepositId,
     pub user: User,
@@ -28,14 +57,16 @@ pub struct DepositPlan {
     pub receipt: Option<PaymentReceipt>,
 }
 impl DepositPlan {
-    pub fn get_or_create(
-        deposit_id: DepositId,
-        user: User,
-        asset: Asset,
-        amount: candid::Nat,
-    ) -> Self {
+    pub fn get_or_create(params: DepositPlanParams) -> Self {
         DEPOSIT_PLANS.with(|m| {
             let mut m = m.borrow_mut();
+
+            let DepositPlanParams {
+                deposit_id,
+                user,
+                asset,
+                amount,
+            } = params;
 
             let key = (user, deposit_id.clone());
 
@@ -46,7 +77,7 @@ impl DepositPlan {
             let idempotency = PaymentIdempotency::IcrcCreatedAtTime(ic_cdk::api::time());
 
             let plan = DepositPlan {
-                deposit_id: deposit_id.clone(),
+                deposit_id,
                 user,
                 asset,
                 amount,
@@ -74,15 +105,17 @@ pub struct WithdrawalPlan {
     pub reserved_amount: Option<u128>,
 }
 impl WithdrawalPlan {
-    pub fn get_or_create(
-        withdrawal_id: WithdrawalId,
-        user: User,
-        asset: Asset,
-        amount: candid::Nat,
-        to_account: (candid::Principal, Option<[u8; 32]>),
-    ) -> Self {
+    pub fn get_or_create(params: WithdrawalPlanParams) -> Self {
         WITHDRAWAL_PLANS.with(|m| {
             let mut m = m.borrow_mut();
+
+            let WithdrawalPlanParams {
+                withdrawal_id,
+                user,
+                asset,
+                amount,
+                to_account,
+            } = params;
 
             let key = (user, withdrawal_id.clone());
 
@@ -91,10 +124,10 @@ impl WithdrawalPlan {
             }
 
             let plan = WithdrawalPlan {
-                withdrawal_id: withdrawal_id.clone(),
+                withdrawal_id,
                 user,
-                asset: asset.clone(),
-                amount: amount.clone(),
+                asset,
+                amount,
                 to_account,
                 status: PlanStatus::Planned,
                 idempotency: ic_cdk::api::time().into(),
@@ -102,7 +135,7 @@ impl WithdrawalPlan {
                 reserved_amount: None,
             };
 
-            m.insert(key.clone(), plan.clone());
+            m.insert(key, plan.clone());
             plan
         })
     }
@@ -137,27 +170,34 @@ impl SettlementPlan {
         10_000u64 + (idx as u64)
     }
 
-    pub fn get_or_create(
-        series_id: SeriesId,
-        settlement_price: u64,
-        settlement_asset: Asset,
-        fee: u128,
-        positions: Vec<(User, i128)>,
-        payers: Vec<(User, u128)>,
-        receivers: Vec<(User, u128)>,
-        accounting_updates: Vec<(User, i8, u128, u128)>,
-    ) -> Self {
+    pub fn get_or_create(params: SettlementPlanParams) -> Self {
         SETTLEMENT_PLANS.with(|m| {
             let mut m = m.borrow_mut();
 
-            if let Some(existing) = m.get(&series_id) {
+            let SettlementPlanParams {
+                series_id,
+                settlement_price,
+                settlement_asset,
+                fee,
+                positions,
+                payers,
+                receivers,
+                accounting_updates,
+            } = params;
+
+            let key = series_id.clone();
+
+            if let Some(existing) = m.get(&key) {
                 return existing.clone();
             }
 
             let idempotency = ic_cdk::api::time().into();
 
+            let payers_len = payers.len();
+            let receivers_len = receivers.len();
+
             let plan = SettlementPlan {
-                series_id: series_id.clone(),
+                series_id,
                 settlement_price,
                 settlement_asset,
                 fee,
@@ -171,11 +211,11 @@ impl SettlementPlan {
                 accounting_applied: false,
                 status: PlanStatus::Planned,
                 idempotency,
-                payer_receipts: vec![None; payers.len()],
-                receiver_receipts: vec![None; receivers.len()],
+                payer_receipts: vec![None; payers_len],
+                receiver_receipts: vec![None; receivers_len],
             };
 
-            m.insert(series_id, plan.clone());
+            m.insert(key, plan.clone());
             plan
         })
     }
