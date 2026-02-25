@@ -3,7 +3,8 @@
 	"version": "0.0.1",
 	"scripts": {
 		"build": "./scripts/build.sh",
-		"test": "./scripts/test-integration.sh",
+		"test:unit": "scripts/test.unit.sh",
+		"test": "npm run test:unit",
 		"format": "prettier --write . && ./scripts/format.sh",
 		"lint": "prettier --check . && ./scripts/lint.sh",
 		"deploy:prod": "dfx deploy --ic --upgrade-unchanged",
