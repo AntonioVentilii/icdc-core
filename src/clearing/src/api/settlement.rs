@@ -8,6 +8,7 @@ use crate::{
     },
     guards::caller_is_controller,
     memory::{MARGIN_ACCOUNTS, POSITIONS, SERIES, SETTLEMENT_PLANS},
+    payoffs::get_settlement_value,
     types::{
         account::LedgerAccount,
         errors::{LedgerError, SettlementError},
@@ -84,15 +85,16 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             let mut accounting_updates: Vec<(User, i8, u128, u128)> = Vec::new(); // (user, sign, profit_loss, margin_to_release)
 
             for (user, net_qty, locked_collateral) in positions_to_settle.iter().copied() {
-                let payoff_u128: u128 = net_qty.unsigned_abs() * (settlement_price as u128);
-                let max_payoff: u128 = 100_000_000;
-                let max_payoff_total = net_qty.unsigned_abs() * max_payoff;
+                let ser = SERIES.with(|s| {
+                    s.borrow()
+                        .get(&series_id)
+                        .cloned()
+                        .expect("Series must exist during settlement")
+                });
 
-                let cashflow: i128 = if net_qty >= 0 {
-                    (payoff_u128 as i128) - (locked_collateral as i128)
-                } else {
-                    (max_payoff_total as i128) - (payoff_u128 as i128) - (locked_collateral as i128)
-                };
+                let payoff_u128 = get_settlement_value(&ser, settlement_price, net_qty);
+
+                let cashflow: i128 = (payoff_u128 as i128) - (locked_collateral as i128);
 
                 if cashflow < 0 {
                     let amount = cashflow.unsigned_abs();

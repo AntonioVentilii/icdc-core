@@ -9,6 +9,7 @@ use crate::{
         ACCEPTED_TRANSFERS, EVENTS, EXECUTED_TRADES, FROZEN_TRANSFERS, MARGIN_ACCOUNTS,
         NEXT_EVENT_ID, POSITIONS,
     },
+    payoffs::get_required_margin,
     types::{
         errors::TradeError,
         event::{Event, EventType},
@@ -73,23 +74,9 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
                 .unwrap_or(0)
                 - qty;
 
-            // New margins (simplified Binary logic: max payoff is 1.0)
-            let max_payoff: u128 = 100_000_000;
-            let new_buyer_margin = if new_buyer_qty > 0 {
-                new_buyer_qty.unsigned_abs() * (price as u128)
-            } else if new_buyer_qty < 0 {
-                new_buyer_qty.unsigned_abs() * (max_payoff.saturating_sub(price as u128))
-            } else {
-                0
-            };
-
-            let new_seller_margin = if new_seller_qty > 0 {
-                new_seller_qty.unsigned_abs() * (price as u128)
-            } else if new_seller_qty < 0 {
-                new_seller_qty.unsigned_abs() * (max_payoff.saturating_sub(price as u128))
-            } else {
-                0
-            };
+            // New margins
+            let new_buyer_margin = get_required_margin(&series, price, new_buyer_qty);
+            let new_seller_margin = get_required_margin(&series, price, new_seller_qty);
 
             (
                 (new_buyer_margin as i128) - (old_buyer_margin as i128),
