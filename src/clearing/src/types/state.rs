@@ -7,7 +7,7 @@ use shared::types::{Series, SeriesId};
 use crate::types::{
     event::Event,
     margin::{MarginAccount, Position},
-    plan::{DepositPlan, SettlementPlan, WithdrawalPlan},
+    plans::{DepositPlan, SettlementPlan, WithdrawalPlan},
     trade::{TradeId, TransferId},
     user::{DepositKey, User, WithdrawalKey},
 };

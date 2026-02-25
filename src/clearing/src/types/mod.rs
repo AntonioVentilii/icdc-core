@@ -4,7 +4,7 @@ pub mod event;
 pub mod margin;
 pub mod params;
 pub mod payment;
-pub mod plan;
+pub mod plans;
 pub mod results;
 pub mod state;
 pub mod trade;

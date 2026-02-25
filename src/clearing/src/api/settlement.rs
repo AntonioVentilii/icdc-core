@@ -12,7 +12,7 @@ use crate::{
         account::LedgerAccount,
         errors::{LedgerError, SettlementError},
         params::SettleSeriesParams,
-        plan::{PlanStatus, SettlementPlan, SettlementPlanParams},
+        plans::{PlanStatus, SettlementPlan, SettlementPlanParams},
         results::SettleSeriesResult,
         user::User,
     },

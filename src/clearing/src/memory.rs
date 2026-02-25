@@ -11,7 +11,7 @@ use crate::{
     types::{
         event::Event,
         margin::{MarginAccount, Position},
-        plan::{DepositPlan, SettlementPlan, WithdrawalPlan},
+        plans::{DepositPlan, SettlementPlan, WithdrawalPlan},
         state::StableState,
         trade::{TradeId, TransferId},
         user::{DepositKey, User, WithdrawalKey},

@@ -17,7 +17,7 @@ use crate::{
         errors::{DepositCollateralError, LedgerError, WithdrawCollateralError},
         margin::MarginAccount,
         params::{DepositCollateralParams, WithdrawCollateralParams},
-        plan::{DepositPlan, DepositPlanParams, PlanStatus, WithdrawalPlan, WithdrawalPlanParams},
+        plans::{DepositPlan, DepositPlanParams, PlanStatus, WithdrawalPlan, WithdrawalPlanParams},
         results::{DepositCollateralResult, WithdrawCollateralResult},
         user::User,
     },
