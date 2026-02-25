@@ -1,52 +1,63 @@
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
+use shared::types::SeriesId;
+
+use crate::types::user::User;
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum CommonError {
     Unauthorized,
     RegistryNotSet,
     Internal(String),
+    MathOverflow,
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum LedgerError {
-    TransferFailed(String),
+    TransferError(String),
     UnsupportedLedger,
-    FetchingFeeFailed(String),
-    FetchingBalanceFailed(String),
+    CallError {
+        method: String,
+        code: i32,
+        message: String,
+    },
+    InsufficientBalance {
+        balance: u128,
+        required: u128,
+    },
+    MathOverflow,
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum DepositCollateralError {
     Ledger(LedgerError),
-    DepositCollateralMathOverflow,
+    MathOverflow,
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum WithdrawCollateralError {
     Ledger(LedgerError),
-    InsufficientExcessMargin {
-        current: candid::Nat,
-        requested: candid::Nat,
-        required: candid::Nat,
-    },
-    WithdrawCollateralMathOverflow,
+    InsufficientExcessMargin { current: u128, requested: u128 },
+    MathOverflow,
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum MarginAccountError {
     Ledger(LedgerError),
     NoMarginAccountFound,
-    BalanceMathOverflow,
+    MathOverflow,
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum TradeError {
     Common(CommonError),
-    SeriesNotFound,
-    BuyerInsufficientMargin,
-    SellerInsufficientMargin,
-    GettingRegistrySeriesFailed(String),
+    SeriesNotFound(SeriesId),
+    InsufficientMargin {
+        user: User,
+        balance: u128,
+        required: u128,
+    },
+    RegistryError(String),
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -54,6 +65,5 @@ pub enum SettlementError {
     Common(CommonError),
     Ledger(LedgerError),
     UnsupportedSettlementAsset,
-    PayoffMathOverflow,
-    FeeMathOverflow,
+    MathOverflow,
 }

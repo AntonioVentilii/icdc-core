@@ -39,14 +39,13 @@ impl IcrcHandler {
 
         let (ledger_balance,): (Nat,) = ic_cdk::call(*ledger_id, "icrc1_balance_of", (account,))
             .await
-            .map_err(|(code, msg)| {
-                LedgerError::FetchingBalanceFailed(format!("RB: {:?}: {}", code, msg))
+            .map_err(|(code, msg)| LedgerError::CallError {
+                method: "icrc1_balance_of".to_string(),
+                code: code as i32,
+                message: msg,
             })?;
 
-        ledger_balance
-            .0
-            .to_u128()
-            .ok_or_else(|| LedgerError::TransferFailed("balance math overflow".to_string()))
+        ledger_balance.0.to_u128().ok_or(LedgerError::MathOverflow)
     }
 
     pub async fn get_fee(&self, asset: &Asset) -> Result<u128, LedgerError> {
@@ -55,14 +54,13 @@ impl IcrcHandler {
         let (fee_nat,): (Nat,) =
             ic_cdk::call(*ledger_id, "icrc1_fee", ())
                 .await
-                .map_err(|(code, msg)| {
-                    LedgerError::FetchingFeeFailed(format!("RB: {:?}: {}", code, msg))
+                .map_err(|(code, msg)| LedgerError::CallError {
+                    method: "icrc1_fee".to_string(),
+                    code: code as i32,
+                    message: msg,
                 })?;
 
-        fee_nat
-            .0
-            .to_u128()
-            .ok_or_else(|| LedgerError::TransferFailed("fee math overflow".to_string()))
+        fee_nat.0.to_u128().ok_or(LedgerError::MathOverflow)
     }
 
     pub async fn transfer(&self, params: AssetTransferParams<'_>) -> Result<u128, LedgerError> {
@@ -86,9 +84,10 @@ impl IcrcHandler {
                     .await?;
                 let fee = self.get_fee(params.asset).await?;
                 if balance <= fee {
-                    return Err(LedgerError::TransferFailed(
-                        "insufficient balance for fee".to_string(),
-                    ));
+                    return Err(LedgerError::InsufficientBalance {
+                        balance,
+                        required: fee,
+                    });
                 }
                 balance - fee
             }
@@ -106,20 +105,18 @@ impl IcrcHandler {
         let (res,): (Result<Nat, TransferError>,) =
             ic_cdk::call(*ledger_id, "icrc1_transfer", (icrc_args,))
                 .await
-                .map_err(|(code, msg)| {
-                    LedgerError::TransferFailed(format!("RB: {:?}: {}", code, msg))
+                .map_err(|(code, msg)| LedgerError::CallError {
+                    method: "icrc1_transfer".to_string(),
+                    code: code as i32,
+                    message: msg,
                 })?;
 
         match res {
-            Ok(block) => block
-                .0
-                .to_u128()
-                .ok_or_else(|| LedgerError::TransferFailed("block index overflow".to_string())),
-            Err(TransferError::Duplicate { duplicate_of }) => duplicate_of
-                .0
-                .to_u128()
-                .ok_or_else(|| LedgerError::TransferFailed("block index overflow".to_string())),
-            Err(e) => Err(LedgerError::TransferFailed(format!("{:?}", e))),
+            Ok(block) => block.0.to_u128().ok_or(LedgerError::MathOverflow),
+            Err(TransferError::Duplicate { duplicate_of }) => {
+                duplicate_of.0.to_u128().ok_or(LedgerError::MathOverflow)
+            }
+            Err(e) => Err(LedgerError::TransferError(format!("{:?}", e))),
         }
     }
 
@@ -146,9 +143,10 @@ impl IcrcHandler {
                     .await?;
                 let fee = self.get_fee(params.asset).await?;
                 if balance <= fee {
-                    return Err(LedgerError::TransferFailed(
-                        "insufficient balance for fee".to_string(),
-                    ));
+                    return Err(LedgerError::InsufficientBalance {
+                        balance,
+                        required: fee,
+                    });
                 }
                 balance - fee
             }
@@ -167,20 +165,18 @@ impl IcrcHandler {
         let (res,): (Result<Nat, TransferFromError>,) =
             ic_cdk::call(*ledger_id, "icrc2_transfer_from", (icrc_args,))
                 .await
-                .map_err(|(code, msg)| {
-                    LedgerError::TransferFailed(format!("RB: {:?}: {}", code, msg))
+                .map_err(|(code, msg)| LedgerError::CallError {
+                    method: "icrc2_transfer_from".to_string(),
+                    code: code as i32,
+                    message: msg,
                 })?;
 
         match res {
-            Ok(block) => block
-                .0
-                .to_u128()
-                .ok_or_else(|| LedgerError::TransferFailed("block index overflow".to_string())),
-            Err(TransferFromError::Duplicate { duplicate_of }) => duplicate_of
-                .0
-                .to_u128()
-                .ok_or_else(|| LedgerError::TransferFailed("block index overflow".to_string())),
-            Err(e) => Err(LedgerError::TransferFailed(format!("{:?}", e))),
+            Ok(block) => block.0.to_u128().ok_or(LedgerError::MathOverflow),
+            Err(TransferFromError::Duplicate { duplicate_of }) => {
+                duplicate_of.0.to_u128().ok_or(LedgerError::MathOverflow)
+            }
+            Err(e) => Err(LedgerError::TransferError(format!("{:?}", e))),
         }
     }
 }

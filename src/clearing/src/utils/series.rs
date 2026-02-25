@@ -21,13 +21,10 @@ pub async fn ensure_series_registered(series_id: &SeriesId) -> Result<Series, Tr
     let (series_opt,): (Option<Series>,) = ic_cdk::call(registry, "get_series", (series_id,))
         .await
         .map_err(|(code, msg)| {
-            TradeError::GettingRegistrySeriesFailed(format!(
-                "Registry call failed: {:?}: {}",
-                code, msg
-            ))
+            TradeError::RegistryError(format!("Registry call failed: {:?}: {}", code, msg))
         })?;
 
-    let series = series_opt.ok_or(TradeError::SeriesNotFound)?;
+    let series = series_opt.ok_or_else(|| TradeError::SeriesNotFound(series_id.clone()))?;
 
     let asset = series.settlement_asset.to_asset();
 

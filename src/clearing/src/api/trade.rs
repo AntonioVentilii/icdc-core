@@ -124,7 +124,11 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
             };
 
             if final_buyer_required > buyer_collateral {
-                return Err(TradeError::BuyerInsufficientMargin);
+                return Err(TradeError::InsufficientMargin {
+                    user: buyer,
+                    balance: buyer_collateral,
+                    required: final_buyer_required,
+                });
             }
 
             // Check Seller
@@ -143,7 +147,11 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
             };
 
             if final_seller_required > seller_collateral {
-                return Err(TradeError::SellerInsufficientMargin);
+                return Err(TradeError::InsufficientMargin {
+                    user: seller,
+                    balance: seller_collateral,
+                    required: final_seller_required,
+                });
             }
 
             // Apply changes

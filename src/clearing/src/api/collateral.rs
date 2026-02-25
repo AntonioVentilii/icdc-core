@@ -70,7 +70,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
                 .0
                 .clone()
                 .try_into()
-                .map_err(|_| DepositCollateralError::DepositCollateralMathOverflow)?;
+                .map_err(|_| DepositCollateralError::MathOverflow)?;
 
             let res = handler
                 .transfer_from(AssetTransferFromParams {
@@ -104,7 +104,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
                 .0
                 .clone()
                 .try_into()
-                .map_err(|_| DepositCollateralError::DepositCollateralMathOverflow)?;
+                .map_err(|_| DepositCollateralError::MathOverflow)?;
 
             MARGIN_ACCOUNTS.with(|accounts| {
                 let mut accounts = accounts.borrow_mut();
@@ -168,7 +168,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                 .0
                 .clone()
                 .try_into()
-                .map_err(|_| WithdrawCollateralError::WithdrawCollateralMathOverflow)?;
+                .map_err(|_| WithdrawCollateralError::MathOverflow)?;
 
             MARGIN_ACCOUNTS.with(|accounts| {
                 let mut accounts = accounts.borrow_mut();
@@ -183,9 +183,8 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
 
                 if current < amount_u128 {
                     return Err(WithdrawCollateralError::InsufficientExcessMargin {
-                        current: candid::Nat::from(current),
-                        requested: amount.clone(),
-                        required: amount.clone(), // TODO: replace with true required margin logic
+                        current,
+                        requested: amount_u128,
                     });
                 }
 
@@ -214,7 +213,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                 .0
                 .clone()
                 .try_into()
-                .map_err(|_| WithdrawCollateralError::WithdrawCollateralMathOverflow)?;
+                .map_err(|_| WithdrawCollateralError::MathOverflow)?;
 
             let res = handler
                 .transfer(AssetTransferParams {

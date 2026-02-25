@@ -36,7 +36,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
             if existing.settlement_price != settlement_price {
                 // TODO: specific error variant for this case
-                return Err(SettlementError::Ledger(LedgerError::TransferFailed(
+                return Err(SettlementError::Ledger(LedgerError::TransferError(
                     "settlement already in progress with different settlement_price".to_string(),
                 )));
             }
