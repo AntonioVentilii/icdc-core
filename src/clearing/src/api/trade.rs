@@ -40,9 +40,18 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
 
         let settlement_asset = series.settlement_asset.to_asset();
 
-        // TODO: Calculate real margin based on series parameters. For now we just do qty * price as
-        // a placeholder.
-        let required_margin = qty.unsigned_abs() * (price as u128) / 1_000_000;
+        // For Binary options (0 or 1), max payoff is 1.0 (100_000_000).
+        // Buyer risk: (price) * qty
+        // Seller risk: (1.0 - price) * qty
+        let max_payoff: u64 = 100_000_000;
+        let required_margin = if qty > 0 {
+            // Buyer
+            qty.unsigned_abs() * (price as u128)
+        } else {
+            // Seller
+            let seller_risk_per_unit = max_payoff.saturating_sub(price);
+            qty.unsigned_abs() * (seller_risk_per_unit as u128)
+        };
 
         // Phase B: apply state changes (no awaits) BUT do it in a "commit-like" way
         // We will:
