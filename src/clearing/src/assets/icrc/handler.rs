@@ -49,7 +49,7 @@ impl IcrcHandler {
             .ok_or_else(|| LedgerError::TransferFailed("balance math overflow".to_string()))
     }
 
-    async fn get_fee(&self, asset: &Asset) -> Result<u128, LedgerError> {
+    pub async fn get_fee(&self, asset: &Asset) -> Result<u128, LedgerError> {
         let Asset::Icrc(ledger_id) = asset;
 
         let (fee_nat,): (Nat,) =

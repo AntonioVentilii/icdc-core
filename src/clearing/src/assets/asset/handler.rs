@@ -33,6 +33,12 @@ impl AssetHandler {
             AssetHandler::Icrc(h) => h.transfer_from(params).await,
         }
     }
+
+    pub async fn get_fee(&self, asset: &Asset) -> Result<u128, LedgerError> {
+        match self {
+            AssetHandler::Icrc(h) => h.get_fee(asset).await,
+        }
+    }
 }
 
 pub fn get_handler(asset: &Asset) -> Result<AssetHandler, LedgerError> {

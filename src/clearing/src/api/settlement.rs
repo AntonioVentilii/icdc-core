@@ -51,7 +51,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
                     let users: Vec<User> = positions
                         .keys()
-                        .filter(|(_, sid)| *sid == series_id)
+                        .filter(|(_, sid)| sid == &series_id)
                         .map(|(u, _)| *u)
                         .collect();
 
@@ -64,6 +64,9 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                     Ok::<(Vec<(User, i128, u128)>, Asset), SettlementError>((settlement_data, ser.settlement_asset.to_asset()))
                 })
             })?;
+
+            let handler = get_handler(&settlement_asset_val).map_err(SettlementError::Ledger)?;
+            let fee = handler.get_fee(&settlement_asset_val).await.map_err(SettlementError::Ledger)?;
 
             // Compute net payers/receivers + accounting updates
             let mut payers: Vec<(User, u128)> = Vec::new();
@@ -98,6 +101,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 series_id.clone(),
                 settlement_price,
                 settlement_asset_val,
+                fee,
                 positions_to_settle.iter().map(|(u, q, _)| (*u, *q)).collect(),
                 payers,
                 receivers,
@@ -163,11 +167,22 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 continue;
             }
 
-            let (user, amount_u128) = plan.receivers[idx];
+            let (user, mut amount_u128) = plan.receivers[idx];
 
             let created_at_time = plan.idempotency.to_created_at_time();
 
             let handler = get_handler(&plan.settlement_asset).map_err(SettlementError::Ledger)?;
+            let fee = handler.get_fee(&plan.settlement_asset).await.map_err(SettlementError::Ledger)?;
+
+            if amount_u128 <= fee {
+                // Too small to transfer, mark as skipped (0 block index)
+                plan.receiver_receipts[idx] = Some(candid::Nat::from(0u64).into());
+                plan.receiver_cursor += 1;
+                SETTLEMENT_PLANS.with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
+                continue;
+            }
+
+            amount_u128 -= fee;
 
             let res = handler
                 .transfer(AssetTransferParams {
@@ -195,6 +210,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
         // ---------- Phase C: apply internal accounting updates ----------
         if !plan.accounting_applied {
             let settlement_asset_val = plan.settlement_asset.clone();
+            let fee = plan.fee;
 
             MARGIN_ACCOUNTS.with(|accounts| {
                 let mut accounts = accounts.borrow_mut();
@@ -207,10 +223,15 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                         let current = account.get_balance(&settlement_asset_val);
 
                         match sign {
-                            1 => account
-                                .set_balance(settlement_asset_val.clone(), current + amount_u128),
-                            -1 => account
-                                .set_balance(settlement_asset_val.clone(), current - amount_u128),
+                            1 => {
+                                // Winner: profit - fee
+                                let net_increase = amount_u128.saturating_sub(fee);
+                                account.set_balance(settlement_asset_val.clone(), current + net_increase);
+                            }
+                            -1 => {
+                                // Loser: debt + fee
+                                account.set_balance(settlement_asset_val.clone(), current.saturating_sub(amount_u128 + fee));
+                            }
                             _ => {} // sign == 0 => no balance change
                         }
 

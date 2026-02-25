@@ -113,6 +113,7 @@ pub struct SettlementPlan {
     pub series_id: SeriesId,
     pub settlement_price: u64,
     pub settlement_asset: Asset,
+    pub fee: u128,
     pub positions: Vec<(User, i128)>,
     pub payers: Vec<(User, u128)>,
     pub receivers: Vec<(User, u128)>,
@@ -139,6 +140,7 @@ impl SettlementPlan {
         series_id: SeriesId,
         settlement_price: u64,
         settlement_asset: Asset,
+        fee: u128,
         positions: Vec<(User, i128)>,
         payers: Vec<(User, u128)>,
         receivers: Vec<(User, u128)>,
@@ -153,11 +155,11 @@ impl SettlementPlan {
 
             let idempotency = ic_cdk::api::time().into();
 
-            let positions_len = positions.len();
             let plan = SettlementPlan {
                 series_id: series_id.clone(),
                 settlement_price,
                 settlement_asset,
+                fee,
                 positions,
                 payers: payers.clone(),
                 receivers: receivers.clone(),
@@ -168,7 +170,7 @@ impl SettlementPlan {
                 accounting_applied: false,
                 status: PlanStatus::Planned,
                 idempotency,
-                payer_receipts: vec![None; positions_len],
+                payer_receipts: vec![None; payers.len()],
                 receiver_receipts: vec![None; receivers.len()],
             };
 
