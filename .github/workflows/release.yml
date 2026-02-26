@@ -1,0 +1,122 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - v*
+  release:
+    types: [released]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  wasm:
+    name: Build WASM
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: release-wasm-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload bucket.wasm.gz
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: bucket.wasm.gz
+          path: ./target/wasm32-unknown-unknown/release/bucket.wasm.gz
+
+      - name: Upload registry.wasm.gz
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: registry.wasm.gz
+          path: ./target/wasm32-unknown-unknown/release/registry.wasm.gz
+
+  candid:
+    name: Generate Candid
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: release-candid-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - name: clearing.did
+            target: clearing
+          - name: registry.did
+            target: registry
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: 'Upload ${{ matrix.name }}'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: ${{ matrix.name }}
+          path: ./src/${{ matrix.target }}/${{ matrix.name }}
+
+  release:
+    name: Publish Release
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: release-publish-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: write # Required to create/update the GitHub Release and/or upload release assets.
+    needs: ['wasm', 'candid']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Download clearing.wasm.gz
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: clearing.wasm.gz
+          path: .
+
+      - name: Download clearing.did
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: clearing.did
+          path: .
+
+      - name: Download registry.wasm.gz
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: registry.wasm.gz
+          path: .
+
+      - name: Download registry.did
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: registry.did
+          path: .
+
+      - name: Release
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            ./clearing.wasm.gz
+            ./clearing.did
+            ./registry.wasm.gz
+            ./registry.did
