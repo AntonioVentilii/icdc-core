@@ -32,11 +32,11 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Upload bucket.wasm.gz
+      - name: Upload clearing.wasm.gz
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: bucket.wasm.gz
-          path: ./target/wasm32-unknown-unknown/release/bucket.wasm.gz
+          name: clearing.wasm.gz
+          path: ./target/wasm32-unknown-unknown/release/clearing.wasm.gz
 
       - name: Upload registry.wasm.gz
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
