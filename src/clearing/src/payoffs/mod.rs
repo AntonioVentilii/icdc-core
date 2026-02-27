@@ -90,7 +90,7 @@ pub fn get_required_margin(series: &Series, price: u64, qty: i128) -> u128 {
 #[cfg(test)]
 mod tests {
     use candid::Principal;
-use shared::types::{PayoffType, SeriesId, SettlementAsset};
+    use shared::types::{PayoffType, SeriesId, SettlementAsset};
 
     use super::*;
 
