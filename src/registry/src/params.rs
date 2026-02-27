@@ -17,4 +17,8 @@ pub struct AddSeriesParams {
     pub settlement_asset: SettlementAsset,
     /// The price oracle identifier (case-insensitive, e.g., "Coingecko").
     pub oracle_source: String,
+    /// A short, descriptive title for the series.
+    pub title: String,
+    /// A detailed description of the series.
+    pub description: String,
 }

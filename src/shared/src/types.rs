@@ -100,6 +100,12 @@ pub struct Series {
     pub settlement_asset: SettlementAsset,
     /// The identifier of the oracle providing the settlement data.
     pub oracle_source: String,
+    /// The principal identifier of the series creator.
+    pub creator: Principal,
+    /// A short, descriptive title for the series.
+    pub title: String,
+    /// A detailed description of the series.
+    pub description: String,
 }
 impl Series {
     /// Generates a unique [`SeriesId`] based on the contract parameters.
@@ -208,5 +214,25 @@ mod tests {
         );
 
         assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn test_series_with_metadata() {
+        let series = Series {
+            series_id: SeriesId::from("test".to_string()),
+            underlying: "ICP".to_string(),
+            expiry: 1735689600,
+            payoff_type: PayoffType::Call,
+            strike: Some(100),
+            settlement_asset: SettlementAsset::Icp,
+            oracle_source: "coingecko".to_string(),
+            creator: Principal::anonymous(),
+            title: "Long ICP Call".to_string(),
+            description: "A vanilla call option on ICP".to_string(),
+        };
+
+        assert_eq!(series.title, "Long ICP Call");
+        assert_eq!(series.description, "A vanilla call option on ICP");
+        assert_eq!(series.creator, Principal::anonymous());
     }
 }

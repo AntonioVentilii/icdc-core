@@ -7,6 +7,7 @@
 		"test": "npm run test:unit",
 		"format": "prettier --write . && ./scripts/format.sh",
 		"lint": "prettier --check . && ./scripts/lint.sh",
+		"did": "./scripts/did.sh && npm run format && npm run lint",
 		"deploy:prod": "dfx deploy --ic --upgrade-unchanged",
 		"deploy:staging": "dfx deploy --network staging --upgrade-unchanged"
 	},

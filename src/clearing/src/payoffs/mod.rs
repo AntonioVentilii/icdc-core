@@ -89,7 +89,8 @@ pub fn get_required_margin(series: &Series, price: u64, qty: i128) -> u128 {
 
 #[cfg(test)]
 mod tests {
-    use shared::types::{PayoffType, SeriesId, SettlementAsset};
+    use candid::Principal;
+use shared::types::{PayoffType, SeriesId, SettlementAsset};
 
     use super::*;
 
@@ -102,6 +103,9 @@ mod tests {
             strike,
             settlement_asset: SettlementAsset::Icp,
             oracle_source: "oracle".to_string(),
+            creator: Principal::anonymous(),
+            title: "Test Series".to_string(),
+            description: "A test series for unit testing".to_string(),
         }
     }
 

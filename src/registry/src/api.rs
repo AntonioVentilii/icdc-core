@@ -1,5 +1,8 @@
 use ic_cdk_macros::{query, update};
-use shared::types::{Series, SeriesId};
+use shared::{
+    constants::{MAX_SERIES_DESCRIPTION_LEN, MAX_SERIES_TITLE_LEN},
+    types::{Series, SeriesId},
+};
 
 use crate::{
     errors::RegistryError, memory::SERIES_STORE, params::AddSeriesParams, results::AddSeriesResult,
@@ -28,7 +31,17 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
             strike,
             settlement_asset,
             oracle_source,
+            title,
+            description,
         } = params;
+
+        if title.chars().count() > MAX_SERIES_TITLE_LEN {
+            return Err(RegistryError::TitleTooLong).into();
+        }
+
+        if description.chars().count() > MAX_SERIES_DESCRIPTION_LEN {
+            return Err(RegistryError::DescriptionTooLong).into();
+        }
 
         let underlying = canonical_id_part(&underlying);
         let oracle_source = canonical_id_part(&oracle_source);
@@ -50,6 +63,9 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
             strike,
             settlement_asset,
             oracle_source,
+            creator: ic_cdk::caller(),
+            title,
+            description,
         };
 
         SERIES_STORE.with(|store| {

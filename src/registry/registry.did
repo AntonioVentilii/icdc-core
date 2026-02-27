@@ -1,20 +1,29 @@
 type AddSeriesParams = record {
+	title : text;
 	strike : opt nat64;
 	payoff_type : PayoffType;
 	settlement_asset : SettlementAsset;
 	underlying : text;
+	description : text;
 	expiry : nat64;
 	oracle_source : text
 };
 type AddSeriesResult = variant { Ok : text; Err : RegistryError };
 type PayoffType = variant { Put; Binary; Call };
-type RegistryError = variant { SeriesAlreadyExists };
+type RegistryError = variant {
+	DescriptionTooLong;
+	TitleTooLong;
+	SeriesAlreadyExists
+};
 type Series = record {
+	title : text;
 	strike : opt nat64;
+	creator : principal;
 	payoff_type : PayoffType;
 	series_id : text;
 	settlement_asset : SettlementAsset;
 	underlying : text;
+	description : text;
 	expiry : nat64;
 	oracle_source : text
 };
