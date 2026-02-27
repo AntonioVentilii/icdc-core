@@ -64,6 +64,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
             settlement_asset,
             oracle_source,
             creator: ic_cdk::caller(),
+            created_at: ic_cdk::api::time(),
             title,
             description,
         };

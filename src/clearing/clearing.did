@@ -65,6 +65,7 @@ type Series = record {
 	settlement_asset : SettlementAsset;
 	underlying : text;
 	description : text;
+	created_at : nat64;
 	expiry : nat64;
 	oracle_source : text
 };

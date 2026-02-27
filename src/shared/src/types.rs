@@ -102,6 +102,8 @@ pub struct Series {
     pub oracle_source: String,
     /// The principal identifier of the series creator.
     pub creator: Principal,
+    /// Timestamp of series creation in nanoseconds since UNIX epoch.
+    pub created_at: u64,
     /// A short, descriptive title for the series.
     pub title: String,
     /// A detailed description of the series.
@@ -227,6 +229,7 @@ mod tests {
             settlement_asset: SettlementAsset::Icp,
             oracle_source: "coingecko".to_string(),
             creator: Principal::anonymous(),
+            created_at: 1700000000,
             title: "Long ICP Call".to_string(),
             description: "A vanilla call option on ICP".to_string(),
         };

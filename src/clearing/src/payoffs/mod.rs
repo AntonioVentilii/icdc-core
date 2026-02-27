@@ -104,6 +104,7 @@ mod tests {
             settlement_asset: SettlementAsset::Icp,
             oracle_source: "oracle".to_string(),
             creator: Principal::anonymous(),
+            created_at: 1700000000,
             title: "Test Series".to_string(),
             description: "A test series for unit testing".to_string(),
         }
