@@ -19,7 +19,7 @@ type ListSeriesParams = record {
 	search_term : opt text;
 	oracle_source : opt text
 };
-type PaginationParams = record { offset : opt nat64; limit : opt nat64 };
+type PaginationParams = record { cursor : opt text; limit : opt nat64 };
 type PayoffType = variant { Put; Binary; Call };
 type RegistryError = variant {
 	DescriptionTooLong;
@@ -39,6 +39,7 @@ type Series = record {
 	created_at_ns : nat64;
 	oracle_source : text
 };
+type SeriesPage = record { next_cursor : opt text; items : vec Series };
 type SettlementAsset = variant { Icp; CkUsdc };
 service : {
 	// Adds a new derivative series to the registry.
@@ -63,8 +64,8 @@ service : {
 	// * `Some(Series)` if the series exists in the registry.
 	// * `None` otherwise.
 	get_series : (text) -> (opt Series) query;
-	// Returns a list of all registered derivative series, optionally paginated.
-	list_series : (PaginationParams) -> (vec Series) query;
-	// Returns a list of all registered derivative series, optionally filtered and paginated.
-	list_series_with : (ListSeriesParams) -> (vec Series) query
+	// Returns a paginated page of all registered derivative series.
+	list_series : (PaginationParams) -> (SeriesPage) query;
+	// Returns a paginated page of registered derivative series, optionally filtered.
+	list_series_with : (ListSeriesParams) -> (SeriesPage) query
 }

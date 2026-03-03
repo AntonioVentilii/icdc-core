@@ -1,6 +1,6 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
-use shared::types::{PayoffType, Series, SettlementAsset};
+use shared::types::{PayoffType, Series, SeriesId, SettlementAsset};
 
 /// Input parameters for registering a new derivative series.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -28,19 +28,48 @@ pub struct AddSeriesParams {
 pub struct PaginationParams {
     /// Maximum number of items to return.
     pub limit: Option<u64>,
-    /// Number of items to skip.
-    pub offset: Option<u64>,
+    /// Return items strictly *after* this series id (exclusive).
+    pub cursor: Option<SeriesId>,
 }
-
 impl PaginationParams {
-    /// Applies pagination (offset and limit) to the provided iterator.
-    pub fn apply<I, T>(params: Option<&Self>, iter: I) -> impl Iterator<Item = T>
+    /// Applies cursor-based pagination to the provided iterator.
+    ///
+    /// The iterator MUST yield items in ascending order of their [`SeriesId`].
+    /// This method skips all items up to and including the provided `cursor`,
+    /// then takes `limit` items. It returns those items (cloned) and the ID
+    /// of the *next* available item (if any) to be used as a cursor in subsequent requests.
+    pub fn apply<'a, I>(params: Option<&Self>, iter: I) -> (Vec<Series>, Option<SeriesId>)
     where
-        I: Iterator<Item = T>,
+        I: Iterator<Item = (&'a SeriesId, &'a Series)>,
     {
-        let offset = params.and_then(|p| p.offset).unwrap_or(0) as usize;
+        let cursor = params.and_then(|p| p.cursor.as_ref());
+        // Default to u64::MAX if no limit is provided ("give them all").
         let limit = params.and_then(|p| p.limit).unwrap_or(u64::MAX) as usize;
-        iter.skip(offset).take(limit)
+
+        // Pre-allocate the vector with a sensible cap (100) to prevent 
+        // massive allocations if the requested limit is extremely high.
+        let mut items = Vec::with_capacity(std::cmp::min(limit, 100));
+        let mut next_cursor = None;
+
+        // Fallback: Skip items up to the cursor if the caller didn't use a range optimization.
+        let mut iter = iter.skip_while(move |(id, _)| cursor.is_some_and(|c| *id <= c));
+
+        // Collect up to 'limit' items for the current page.
+        for _ in 0..limit {
+            if let Some((_, s)) = iter.next() {
+                items.push(s.clone());
+            } else {
+                // Iterator exhausted before reaching the limit.
+                return (items, None);
+            }
+        }
+
+        // Check if there's at least one more item to provide a 'next_cursor'.
+        if let Some((id, _)) = iter.next() {
+            next_cursor = Some(id.clone());
+        }
+
+        (items, next_cursor)
     }
 }
 
@@ -64,7 +93,6 @@ pub struct ListSeriesParams {
     /// Optional pagination parameters.
     pub pagination: Option<PaginationParams>,
 }
-
 impl ListSeriesParams {
     /// Returns true if the provided series matches all defined filter criteria.
     pub fn matches(&self, series: &Series) -> bool {
@@ -233,40 +261,47 @@ mod tests {
         use super::*;
 
         #[test]
-        fn test_apply_pagination() {
-            let items = vec![1, 2, 3, 4, 5];
+        fn test_apply_pagination_cursor() {
+            let s1 = create_test_series();
+            let mut s2 = s1.clone();
+            s2.series_id = SeriesId::from("test-id-2".to_string());
+            let mut s3 = s1.clone();
+            s3.series_id = SeriesId::from("test-id-3".to_string());
+
+            let items = vec![
+                (s1.series_id.clone(), s1),
+                (s2.series_id.clone(), s2),
+                (s3.series_id.clone(), s3),
+            ];
+
+            let items_ref: Vec<(&SeriesId, &Series)> =
+                items.iter().map(|(id, s)| (id, s)).collect();
 
             // No pagination
-            let result: Vec<_> = PaginationParams::apply(None, items.clone().into_iter()).collect();
-            assert_eq!(result, items);
+            let (result, next) = PaginationParams::apply(None, items_ref.clone().into_iter());
+            assert_eq!(result.len(), 3);
+            assert!(next.is_none());
 
-            // Limit only
+            // Limit and next cursor
             let pagination = Some(PaginationParams {
                 limit: Some(2),
-                ..Default::default()
+                cursor: None,
             });
-            let result: Vec<_> =
-                PaginationParams::apply(pagination.as_ref(), items.clone().into_iter()).collect();
-            assert_eq!(result, vec![1, 2]);
+            let (result, next) =
+                PaginationParams::apply(pagination.as_ref(), items_ref.clone().into_iter());
+            assert_eq!(result.len(), 2);
+            assert_eq!(next, Some(SeriesId::from("test-id-3".to_string())));
 
-            // Offset only
+            // From cursor
             let pagination = Some(PaginationParams {
-                offset: Some(2),
-                ..Default::default()
+                limit: Some(1),
+                cursor: Some(SeriesId::from("test-id".to_string())),
             });
-            let result: Vec<_> =
-                PaginationParams::apply(pagination.as_ref(), items.clone().into_iter()).collect();
-            assert_eq!(result, vec![3, 4, 5]);
-
-            // Limit and offset
-            let pagination = Some(PaginationParams {
-                limit: Some(2),
-                offset: Some(1),
-                ..Default::default()
-            });
-            let result: Vec<_> =
-                PaginationParams::apply(pagination.as_ref(), items.clone().into_iter()).collect();
-            assert_eq!(result, vec![2, 3]);
+            let (result, next) =
+                PaginationParams::apply(pagination.as_ref(), items_ref.clone().into_iter());
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].series_id.as_str(), "test-id-2");
+            assert_eq!(next, Some(SeriesId::from("test-id-3".to_string())));
         }
     }
 }

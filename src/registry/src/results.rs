@@ -1,6 +1,6 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
-use shared::types::SeriesId;
+use shared::types::{Series, SeriesId};
 
 use crate::errors::RegistryError;
 
@@ -19,4 +19,13 @@ impl From<Result<SeriesId, RegistryError>> for AddSeriesResult {
             Err(e) => AddSeriesResult::Err(e),
         }
     }
+}
+
+/// A paginated page of registered series.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct SeriesPage {
+    /// The list of series in this page.
+    pub items: Vec<Series>,
+    /// The cursor to be used for the next request, if any.
+    pub next_cursor: Option<SeriesId>,
 }
