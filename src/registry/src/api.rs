@@ -5,7 +5,10 @@ use shared::{
 };
 
 use crate::{
-    errors::RegistryError, memory::SERIES_STORE, params::AddSeriesParams, results::AddSeriesResult,
+    errors::RegistryError,
+    memory::SERIES_STORE,
+    params::{AddSeriesParams, ListSeriesParams},
+    results::AddSeriesResult,
     utils::canonical_id_part,
 };
 
@@ -98,8 +101,21 @@ pub fn get_series(series_id: SeriesId) -> Option<Series> {
     SERIES_STORE.with(|store| store.borrow().get(&series_id).cloned())
 }
 
+/// Returns a list of all registered derivative series, optionally filtered.
+#[query]
+pub fn list_series_with(params: ListSeriesParams) -> Vec<Series> {
+    SERIES_STORE.with(|store| {
+        store
+            .borrow()
+            .values()
+            .filter(|s| params.matches(s))
+            .cloned()
+            .collect()
+    })
+}
+
 /// Returns a list of all registered derivative series.
 #[query]
 pub fn list_series() -> Vec<Series> {
-    SERIES_STORE.with(|store| store.borrow().values().cloned().collect())
+    list_series_with(ListSeriesParams::default())
 }

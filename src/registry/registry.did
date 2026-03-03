@@ -9,6 +9,15 @@ type AddSeriesParams = record {
 	oracle_source : text
 };
 type AddSeriesResult = variant { Ok : text; Err : RegistryError };
+type ListSeriesParams = record {
+	strike : opt nat64;
+	creator : opt principal;
+	payoff_type : opt PayoffType;
+	settlement_asset : opt SettlementAsset;
+	underlying : opt text;
+	search_term : opt text;
+	oracle_source : opt text
+};
 type PayoffType = variant { Put; Binary; Call };
 type RegistryError = variant {
 	DescriptionTooLong;
@@ -53,5 +62,7 @@ service : {
 	// * `None` otherwise.
 	get_series : (text) -> (opt Series) query;
 	// Returns a list of all registered derivative series.
-	list_series : () -> (vec Series) query
+	list_series : () -> (vec Series) query;
+	// Returns a list of all registered derivative series, optionally filtered.
+	list_series_with : (ListSeriesParams) -> (vec Series) query
 }

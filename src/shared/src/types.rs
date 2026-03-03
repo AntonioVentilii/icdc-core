@@ -61,6 +61,12 @@ impl From<String> for SeriesId {
         Self(value)
     }
 }
+impl SeriesId {
+    /// Returns the inner string representation of the series ID.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 /// Defines the payoff structure for a derivative contract.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
