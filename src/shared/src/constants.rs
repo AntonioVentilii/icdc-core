@@ -22,6 +22,6 @@ pub const ICP_LEDGER: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
 pub const CKUSDC_LEDGER: &str = "yfumr-cyaaa-aaaar-qaela-cai";
 
 /// Maximum length of a series title in characters.
-pub const MAX_SERIES_TITLE_LEN: usize = 64;
+pub const MAX_SERIES_TITLE_LEN: usize = 128;
 /// Maximum length of a series description in characters.
-pub const MAX_SERIES_DESCRIPTION_LEN: usize = 256;
+pub const MAX_SERIES_DESCRIPTION_LEN: usize = 1024;
