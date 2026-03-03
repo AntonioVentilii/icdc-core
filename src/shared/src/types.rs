@@ -91,7 +91,7 @@ pub struct Series {
     /// The underlying asset ticker or identifier (e.g., "ICP/USD").
     pub underlying: String,
     /// Expiry timestamp in nanoseconds since UNIX epoch.
-    pub expiry: u64,
+    pub expiry_ns: u64,
     /// The mathematical payoff model used for this series.
     pub payoff_type: PayoffType,
     /// Target price for options, if applicable.
@@ -103,7 +103,7 @@ pub struct Series {
     /// The principal identifier of the series creator.
     pub creator: Principal,
     /// Timestamp of series creation in nanoseconds since UNIX epoch.
-    pub created_at: u64,
+    pub created_at_ns: u64,
     /// A short, descriptive title for the series.
     pub title: String,
     /// A detailed description of the series.
@@ -116,7 +116,7 @@ impl Series {
     /// ensuring that identical series have the same ID while preventing collisions.
     pub fn generate_id(
         underlying: &str,
-        expiry: u64,
+        expiry_ns: u64,
         payoff_type: &PayoffType,
         strike: Option<u64>,
         settlement_asset: &SettlementAsset,
@@ -132,7 +132,7 @@ impl Series {
         hasher.update(underlying.as_bytes());
 
         hasher.update(b"|EXPIRY|");
-        hasher.update(expiry.to_be_bytes());
+        hasher.update(expiry_ns.to_be_bytes());
 
         hasher.update(b"|PAYOFF|");
         hasher.update(payoff_type.as_id_bytes());
@@ -223,13 +223,13 @@ mod tests {
         let series = Series {
             series_id: SeriesId::from("test".to_string()),
             underlying: "ICP".to_string(),
-            expiry: 1735689600,
+            expiry_ns: 1735689600,
             payoff_type: PayoffType::Call,
             strike: Some(100),
             settlement_asset: SettlementAsset::Icp,
             oracle_source: "coingecko".to_string(),
             creator: Principal::anonymous(),
-            created_at: 1700000000,
+            created_at_ns: 1700000000,
             title: "Long ICP Call".to_string(),
             description: "A vanilla call option on ICP".to_string(),
         };

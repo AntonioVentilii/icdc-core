@@ -2,10 +2,10 @@ type AddSeriesParams = record {
 	title : text;
 	strike : opt nat64;
 	payoff_type : PayoffType;
+	expiry_ns : nat64;
 	settlement_asset : SettlementAsset;
 	underlying : text;
 	description : text;
-	expiry : nat64;
 	oracle_source : text
 };
 type AddSeriesResult = variant { Ok : text; Err : RegistryError };
@@ -20,12 +20,12 @@ type Series = record {
 	strike : opt nat64;
 	creator : principal;
 	payoff_type : PayoffType;
+	expiry_ns : nat64;
 	series_id : text;
 	settlement_asset : SettlementAsset;
 	underlying : text;
 	description : text;
-	created_at : nat64;
-	expiry : nat64;
+	created_at_ns : nat64;
 	oracle_source : text
 };
 type SettlementAsset = variant { Icp; CkUsdc };

@@ -92,7 +92,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
                     from: LedgerAccount::External(user.principal(), None),
                     to: LedgerAccount::UserClearing(user),
                     amount: AssetAmount::Fixed(amount_u128),
-                    created_at_time: plan.idempotency.to_created_at_time(),
+                    created_at_time_ns: plan.idempotency_ns.to_created_at_time_ns(),
                 })
                 .await;
 
@@ -248,7 +248,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                     from: LedgerAccount::UserClearing(user),
                     to: LedgerAccount::External(plan.to_account.0, plan.to_account.1),
                     amount: AssetAmount::Fixed(amount_u128),
-                    created_at_time: plan.idempotency.to_created_at_time(),
+                    created_at_time_ns: plan.idempotency_ns.to_created_at_time_ns(),
                 })
                 .await;
 

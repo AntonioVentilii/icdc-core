@@ -26,7 +26,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
     let result: Result<SeriesId, RegistryError> = {
         let AddSeriesParams {
             underlying,
-            expiry,
+            expiry_ns,
             payoff_type,
             strike,
             settlement_asset,
@@ -48,7 +48,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
 
         let series_id = Series::generate_id(
             &underlying,
-            expiry,
+            expiry_ns,
             &payoff_type,
             strike,
             &settlement_asset,
@@ -58,13 +58,13 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
         let series = Series {
             series_id: series_id.clone(),
             underlying,
-            expiry,
+            expiry_ns,
             payoff_type,
             strike,
             settlement_asset,
             oracle_source,
             creator: ic_cdk::caller(),
-            created_at: ic_cdk::api::time(),
+            created_at_ns: ic_cdk::api::time(),
             title,
             description,
         };

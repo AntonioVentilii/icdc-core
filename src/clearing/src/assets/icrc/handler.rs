@@ -104,7 +104,7 @@ impl IcrcHandler {
             amount: Nat::from(amount_u128),
             fee: None,
             memo: None,
-            created_at_time: params.created_at_time,
+            created_at_time: params.created_at_time_ns,
         };
 
         let (res,): (Result<Nat, TransferError>,) =
@@ -165,7 +165,7 @@ impl IcrcHandler {
             amount: Nat::from(amount_u128),
             fee: None,
             memo: None,
-            created_at_time: params.created_at_time,
+            created_at_time: params.created_at_time_ns,
         };
 
         let (res,): (Result<Nat, TransferFromError>,) =

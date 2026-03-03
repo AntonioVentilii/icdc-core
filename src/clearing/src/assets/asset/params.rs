@@ -20,8 +20,8 @@ pub struct AssetTransferParams<'a> {
     pub to: LedgerAccount,
     /// The amount to transfer.
     pub amount: AssetAmount,
-    /// Optional timestamp for ledger idempotency.
-    pub created_at_time: Option<u64>,
+    /// Optional timestamp in nanoseconds for ledger idempotency.
+    pub created_at_time_ns: Option<u64>,
 }
 
 /// Parameters for an asset transfer from a spender's allowance.
@@ -36,6 +36,6 @@ pub struct AssetTransferFromParams<'a> {
     pub to: LedgerAccount,
     /// The amount to transfer.
     pub amount: AssetAmount,
-    /// Optional timestamp for ledger idempotency.
-    pub created_at_time: Option<u64>,
+    /// Optional timestamp in nanoseconds for ledger idempotency.
+    pub created_at_time_ns: Option<u64>,
 }

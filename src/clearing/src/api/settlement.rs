@@ -154,7 +154,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
             let (user, amount_u128) = plan.payers[idx];
 
-            let created_at_time = plan.idempotency.to_created_at_time();
+            let created_at_time_ns = plan.idempotency_ns.to_created_at_time_ns();
 
             let handler = get_handler(&plan.settlement_asset).map_err(SettlementError::Ledger)?;
 
@@ -164,7 +164,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                     from: LedgerAccount::UserClearing(user),
                     to: LedgerAccount::CanisterMain,
                     amount: AssetAmount::Fixed(amount_u128),
-                    created_at_time,
+                    created_at_time_ns,
                 })
                 .await;
 
@@ -194,7 +194,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
             let (user, mut amount_u128) = plan.receivers[idx];
 
-            let created_at_time = plan.idempotency.to_created_at_time();
+            let created_at_time_ns = plan.idempotency_ns.to_created_at_time_ns();
 
             let handler = get_handler(&plan.settlement_asset).map_err(SettlementError::Ledger)?;
             let fee = handler
@@ -218,7 +218,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                     from: LedgerAccount::CanisterMain,
                     to: LedgerAccount::UserClearing(user),
                     amount: AssetAmount::Fixed(amount_u128),
-                    created_at_time,
+                    created_at_time_ns,
                 })
                 .await;
 

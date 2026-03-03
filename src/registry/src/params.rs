@@ -8,7 +8,7 @@ pub struct AddSeriesParams {
     /// The underlying asset ticker (case-insensitive, e.g., "ICP").
     pub underlying: String,
     /// Expiry timestamp in nanoseconds since UNIX epoch.
-    pub expiry: u64,
+    pub expiry_ns: u64,
     /// The payoff model for the series.
     pub payoff_type: PayoffType,
     /// The option strike price, if applicable.

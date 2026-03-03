@@ -83,8 +83,8 @@ pub struct DepositPlan {
     pub amount: candid::Nat,
     /// Current execution status of the plan.
     pub status: PlanStatus,
-    /// Idempotency key for ledger transfers.
-    pub idempotency: PaymentIdempotency,
+    /// Idempotency key in nanoseconds for ledger transfers.
+    pub idempotency_ns: PaymentIdempotency,
     /// Proof of successful transfer, if completed.
     pub receipt: Option<PaymentReceipt>,
 }
@@ -107,7 +107,7 @@ impl DepositPlan {
                 return existing.clone();
             }
 
-            let idempotency = ic_cdk::api::time().into();
+            let idempotency_ns = ic_cdk::api::time().into();
 
             let plan = DepositPlan {
                 deposit_id,
@@ -115,7 +115,7 @@ impl DepositPlan {
                 asset,
                 amount,
                 status: PlanStatus::Planned,
-                idempotency,
+                idempotency_ns,
                 receipt: None,
             };
 
@@ -140,8 +140,8 @@ pub struct WithdrawalPlan {
     pub to_account: (candid::Principal, Option<[u8; 32]>),
     /// Current execution status of the plan.
     pub status: PlanStatus,
-    /// Idempotency key for ledger transfers.
-    pub idempotency: PaymentIdempotency,
+    /// Idempotency key in nanoseconds for ledger transfers.
+    pub idempotency_ns: PaymentIdempotency,
     /// Proof of successful transfer, if completed.
     pub receipt: Option<PaymentReceipt>,
     /// The amount successfully reserved for withdrawal.
@@ -167,7 +167,7 @@ impl WithdrawalPlan {
                 return existing.clone();
             }
 
-            let idempotency = ic_cdk::api::time().into();
+            let idempotency_ns = ic_cdk::api::time().into();
 
             let plan = WithdrawalPlan {
                 withdrawal_id,
@@ -176,7 +176,7 @@ impl WithdrawalPlan {
                 amount,
                 to_account,
                 status: PlanStatus::Planned,
-                idempotency,
+                idempotency_ns,
                 receipt: None,
                 reserved_amount: None,
             };
@@ -216,8 +216,8 @@ pub struct SettlementPlan {
     pub accounting_applied: bool,
     /// Current execution status of the plan.
     pub status: PlanStatus,
-    /// Base idempotency key for transfers.
-    pub idempotency: PaymentIdempotency,
+    /// Base idempotency key in nanoseconds for transfers.
+    pub idempotency_ns: PaymentIdempotency,
     /// Receipts for successful payer transfers.
     pub payer_receipts: Vec<Option<PaymentReceipt>>,
     /// Receipts for successful receiver transfers.
@@ -256,7 +256,7 @@ impl SettlementPlan {
                 return existing.clone();
             }
 
-            let idempotency = ic_cdk::api::time().into();
+            let idempotency_ns = ic_cdk::api::time().into();
 
             let payers_len = payers.len();
             let receivers_len = receivers.len();
@@ -275,7 +275,7 @@ impl SettlementPlan {
                 accounting_cursor: 0,
                 accounting_applied: false,
                 status: PlanStatus::Planned,
-                idempotency,
+                idempotency_ns,
                 payer_receipts: vec![None; payers_len],
                 receiver_receipts: vec![None; receivers_len],
             };

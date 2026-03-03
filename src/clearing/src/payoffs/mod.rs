@@ -98,13 +98,13 @@ mod tests {
         Series {
             series_id: SeriesId::from("test".to_string()),
             underlying: "ICP".to_string(),
-            expiry: 0,
+            expiry_ns: 0,
             payoff_type,
             strike,
             settlement_asset: SettlementAsset::Icp,
             oracle_source: "oracle".to_string(),
             creator: Principal::anonymous(),
-            created_at: 1700000000,
+            created_at_ns: 1700000000,
             title: "Test Series".to_string(),
             description: "A test series for unit testing".to_string(),
         }

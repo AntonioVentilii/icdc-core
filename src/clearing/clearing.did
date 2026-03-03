@@ -61,12 +61,12 @@ type Series = record {
 	strike : opt nat64;
 	creator : principal;
 	payoff_type : PayoffType;
+	expiry_ns : nat64;
 	series_id : text;
 	settlement_asset : SettlementAsset;
 	underlying : text;
 	description : text;
-	created_at : nat64;
-	expiry : nat64;
+	created_at_ns : nat64;
 	oracle_source : text
 };
 type SettleSeriesParams = record { series_id : text; settlement_price : nat64 };
