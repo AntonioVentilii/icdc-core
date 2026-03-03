@@ -23,6 +23,27 @@ pub struct AddSeriesParams {
     pub description: String,
 }
 
+/// Parameters for paginating results.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug, Default)]
+pub struct PaginationParams {
+    /// Maximum number of items to return.
+    pub limit: Option<u64>,
+    /// Number of items to skip.
+    pub offset: Option<u64>,
+}
+
+impl PaginationParams {
+    /// Applies pagination (offset and limit) to the provided iterator.
+    pub fn apply<I, T>(params: Option<&Self>, iter: I) -> impl Iterator<Item = T>
+    where
+        I: Iterator<Item = T>,
+    {
+        let offset = params.and_then(|p| p.offset).unwrap_or(0) as usize;
+        let limit = params.and_then(|p| p.limit).unwrap_or(u64::MAX) as usize;
+        iter.skip(offset).take(limit)
+    }
+}
+
 /// Parameters for filtering the list of registered derivative series.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, Default)]
 pub struct ListSeriesParams {
@@ -40,6 +61,8 @@ pub struct ListSeriesParams {
     pub creator: Option<candid::Principal>,
     /// Filter by a search term in the title or description (case-insensitive, partial match).
     pub search_term: Option<String>,
+    /// Optional pagination parameters.
+    pub pagination: Option<PaginationParams>,
 }
 
 impl ListSeriesParams {
@@ -127,78 +150,123 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_matches_underlying() {
-        let series = create_test_series();
-        let params = ListSeriesParams {
-            underlying: Some("icp".to_string()),
-            ..Default::default()
-        };
-        assert!(params.matches(&series));
+    mod list_series_params {
+        use super::*;
 
-        let params = ListSeriesParams {
-            underlying: Some("btc".to_string()),
-            ..Default::default()
-        };
-        assert!(!params.matches(&series));
+        #[test]
+        fn test_matches_underlying() {
+            let series = create_test_series();
+            let params = ListSeriesParams {
+                underlying: Some("icp".to_string()),
+                ..Default::default()
+            };
+            assert!(params.matches(&series));
+
+            let params = ListSeriesParams {
+                underlying: Some("btc".to_string()),
+                ..Default::default()
+            };
+            assert!(!params.matches(&series));
+        }
+
+        #[test]
+        fn test_matches_payoff_type() {
+            let series = create_test_series();
+            let params = ListSeriesParams {
+                payoff_type: Some(PayoffType::Call),
+                ..Default::default()
+            };
+            assert!(params.matches(&series));
+
+            let params = ListSeriesParams {
+                payoff_type: Some(PayoffType::Put),
+                ..Default::default()
+            };
+            assert!(!params.matches(&series));
+        }
+
+        #[test]
+        fn test_matches_oracle_partial() {
+            let series = create_test_series();
+            let params = ListSeriesParams {
+                oracle_source: Some("GECKO".to_string()),
+                ..Default::default()
+            };
+            assert!(params.matches(&series));
+        }
+
+        #[test]
+        fn test_matches_search_term() {
+            let series = create_test_series();
+
+            // Match title
+            let params = ListSeriesParams {
+                search_term: Some("call".to_string()),
+                ..Default::default()
+            };
+            assert!(params.matches(&series));
+
+            // Match description
+            let params = ListSeriesParams {
+                search_term: Some("test".to_string()),
+                ..Default::default()
+            };
+            assert!(params.matches(&series));
+
+            // Match ID
+            let params = ListSeriesParams {
+                search_term: Some("id".to_string()),
+                ..Default::default()
+            };
+            assert!(params.matches(&series));
+
+            // No match
+            let params = ListSeriesParams {
+                search_term: Some("nomatch".to_string()),
+                ..Default::default()
+            };
+            assert!(!params.matches(&series));
+        }
     }
 
-    #[test]
-    fn test_matches_payoff_type() {
-        let series = create_test_series();
-        let params = ListSeriesParams {
-            payoff_type: Some(PayoffType::Call),
-            ..Default::default()
-        };
-        assert!(params.matches(&series));
+    mod pagination_params {
+        use super::*;
 
-        let params = ListSeriesParams {
-            payoff_type: Some(PayoffType::Put),
-            ..Default::default()
-        };
-        assert!(!params.matches(&series));
-    }
+        #[test]
+        fn test_apply_pagination() {
+            let items = vec![1, 2, 3, 4, 5];
 
-    #[test]
-    fn test_matches_oracle_partial() {
-        let series = create_test_series();
-        let params = ListSeriesParams {
-            oracle_source: Some("GECKO".to_string()),
-            ..Default::default()
-        };
-        assert!(params.matches(&series));
-    }
+            // No pagination
+            let result: Vec<_> = PaginationParams::apply(None, items.clone().into_iter()).collect();
+            assert_eq!(result, items);
 
-    #[test]
-    fn test_matches_search_term() {
-        let series = create_test_series();
+            // Limit only
+            let pagination = Some(PaginationParams {
+                limit: Some(2),
+                ..Default::default()
+            });
+            let result: Vec<_> =
+                PaginationParams::apply(pagination.as_ref(), items.clone().into_iter()).collect();
+            assert_eq!(result, vec![1, 2]);
 
-        // Match title
-        let params = ListSeriesParams {
-            search_term: Some("call".to_string()),
-            ..Default::default()
-        };
-        assert!(params.matches(&series));
+            // Offset only
+            let pagination = Some(PaginationParams {
+                offset: Some(2),
+                ..Default::default()
+            });
+            let result: Vec<_> =
+                PaginationParams::apply(pagination.as_ref(), items.clone().into_iter()).collect();
+            assert_eq!(result, vec![3, 4, 5]);
 
-        // Match description
-        let params = ListSeriesParams {
-            search_term: Some("test".to_string()),
-            ..Default::default()
-        };
-        assert!(params.matches(&series));
-
-        // Match ID
-        let params = ListSeriesParams {
-            search_term: Some("id".to_string()),
-            ..Default::default()
-        };
-        assert!(params.matches(&series));
-
-        // No match
-        let params = ListSeriesParams {
-            search_term: Some("nomatch".to_string()),
-            ..Default::default()
-        };
-        assert!(!params.matches(&series));
+            // Limit and offset
+            let pagination = Some(PaginationParams {
+                limit: Some(2),
+                offset: Some(1),
+                ..Default::default()
+            });
+            let result: Vec<_> =
+                PaginationParams::apply(pagination.as_ref(), items.clone().into_iter()).collect();
+            assert_eq!(result, vec![2, 3]);
+        }
     }
 }

@@ -7,7 +7,7 @@ use shared::{
 use crate::{
     errors::RegistryError,
     memory::SERIES_STORE,
-    params::{AddSeriesParams, ListSeriesParams},
+    params::{AddSeriesParams, ListSeriesParams, PaginationParams},
     results::AddSeriesResult,
     utils::canonical_id_part,
 };
@@ -101,21 +101,24 @@ pub fn get_series(series_id: SeriesId) -> Option<Series> {
     SERIES_STORE.with(|store| store.borrow().get(&series_id).cloned())
 }
 
-/// Returns a list of all registered derivative series, optionally filtered.
+/// Returns a list of all registered derivative series, optionally filtered and paginated.
 #[query]
 pub fn list_series_with(params: ListSeriesParams) -> Vec<Series> {
     SERIES_STORE.with(|store| {
-        store
-            .borrow()
-            .values()
-            .filter(|s| params.matches(s))
-            .cloned()
-            .collect()
+        let series = store.borrow();
+
+        let iter = series.values().filter(|s| params.matches(s)).cloned();
+
+        PaginationParams::apply(params.pagination.as_ref(), iter).collect()
     })
 }
 
-/// Returns a list of all registered derivative series.
+/// Returns a list of all registered derivative series, optionally paginated.
 #[query]
-pub fn list_series() -> Vec<Series> {
-    list_series_with(ListSeriesParams::default())
+pub fn list_series(pagination: PaginationParams) -> Vec<Series> {
+    let mut params = ListSeriesParams::default();
+
+    params.pagination = Some(pagination);
+
+    list_series_with(params)
 }

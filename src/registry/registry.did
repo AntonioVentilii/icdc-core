@@ -13,11 +13,13 @@ type ListSeriesParams = record {
 	strike : opt nat64;
 	creator : opt principal;
 	payoff_type : opt PayoffType;
+	pagination : opt PaginationParams;
 	settlement_asset : opt SettlementAsset;
 	underlying : opt text;
 	search_term : opt text;
 	oracle_source : opt text
 };
+type PaginationParams = record { offset : opt nat64; limit : opt nat64 };
 type PayoffType = variant { Put; Binary; Call };
 type RegistryError = variant {
 	DescriptionTooLong;
@@ -61,8 +63,8 @@ service : {
 	// * `Some(Series)` if the series exists in the registry.
 	// * `None` otherwise.
 	get_series : (text) -> (opt Series) query;
-	// Returns a list of all registered derivative series.
-	list_series : () -> (vec Series) query;
-	// Returns a list of all registered derivative series, optionally filtered.
+	// Returns a list of all registered derivative series, optionally paginated.
+	list_series : (PaginationParams) -> (vec Series) query;
+	// Returns a list of all registered derivative series, optionally filtered and paginated.
 	list_series_with : (ListSeriesParams) -> (vec Series) query
 }
