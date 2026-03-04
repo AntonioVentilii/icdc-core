@@ -1,40 +1,64 @@
-# Clearing
+# ICDC Core Project - Status & Roadmap
 
-## High Priority
+## ✅ Completed (Done)
 
-1. **Fix Multi-Asset Margin Model**: Currently `MarginAccount.required_margin` is a single `u128`. It must be per-asset (e.g., `BTreeMap<Asset, u128>`) or otherwise accommodate multi-asset collateral/settlement accurately.
-2. **Access Control & Security**:
-   - Guard `submit_matched_trade` so it can only be called by authorized exchanges or controllers.
-   - Implement pre-check solvency in `settle_series` before initiating any transfers (verify total required from payers and pool capacity).
-   - Implement signatures for `PositionProof` in `freeze_position_for_transfer`.
-3. **Automation**:
-   - Add a cron job (using `ic_cdk_timers`) to periodically register new supported series from the registry `list_series` method.
-   - Add a cron job to "refresh" user balances from ledgers periodically.
+### Architecture & Foundation
 
-## Improvements & Optimization
+- [x] **Multi-Canister Structure**: Separated Registry and Clearing canisters for scalability and neutrality.
+- [x] **Shared Type Library**: Centralised `shared` crate for common data structures and constants.
+- [x] **Stable Memory Persistence**: Integrated `ic-stable-structures` in all canisters for safe upgrades.
+- [x] **Advanced Pagination**: Implemented cursor-based pagination for Registry queries.
 
-1. **Explicit Fees**: Ensure fees are consistent across all transfer types and clearly documented/logged.
-2. **Security Audit**: Perform a full review of the asynchronous flows to ensure no re-entrancy or race conditions remain.
-3. **Better Error Variants**: Refine `SettlementError` and `TradeError` to be more descriptive (e.g., for settlement price mismatches).
+### Clearing Engine
 
-# Registry
+- [x] **Idempotency Pattern**: Implemented "Plan-Execute-Finalise" 3-step logic for safe async transfers.
+- [x] **Multi-Asset Accounts**: `MarginAccount` supports multiple assets (ledger-based).
+- [x] **Trade Execution**: Matched trade submission with margin validation and internal position updates.
+- [x] **Settlement Infrastructure**: Robust, resumable settlement logic for expiring series.
+- [x] **Event Logging**: In-memory event log for all significant state changes.
 
-1. **Access Control**: Restrict `add_series` to authorized principals (controllers or via a governance model).
-2. **Rate Limiting**: Consider limiting the number of requests per principal to prevent spam.
+### Series Registry
 
-# Architecture & Ideology (Reference)
+- [x] **Series Lifecycle**: Functions for adding, retrieving, and listing derivative series.
+- [x] **Deterministic Identifiers**: Canonical `SeriesId` generation to prevent duplicates.
+- [x] **Oracle Metadata**: Support for tracking authorized oracles per series.
 
-### Idempotency - The Pattern (Standardised)
+---
 
-The 3-step pattern implemented in `settle_series`, `deposit_collateral`, and `withdraw_collateral` is the canonical way to handle async transfers:
+## 🚧 In Progress / Missing (High Priority)
 
-- **Phase A — Plan**: Deterministic, no awaits, stored in stable state.
-- **Phase B — Execute**: Async, resumable, uses ledger idempotency (`created_at_time`).
-- **Phase C — Finalise**: Atomic state transition once all transfers are confirmed.
+### Access Control & Security
 
-### Key Rules
+- [ ] **Authorized Creators**: Restrict `add_series` to specific principals or roles.
+- [ ] **Authorized Exchanges**: Gated `submit_matched_trade` so only trusted exchange canisters can submit trades.
+- [ ] **Cryptographic Signatures**: Implement signing for `PositionProof` in `freeze_position_for_transfer` (currently using empty bytes).
+- [ ] **Pre-check Solvency**: Add comprehensive solvency checks in `settle_series` before starting transfers.
 
-- **Persist progress** after each successful payment to avoid double-payouts on traps.
-- **Ledger-level idempotency** is mandatory.
-- **Finalisation must be idempotent** and bring internal accounting into alignment with on-ledger reality.
-- **Freeze canonical risk state** (margin accounts) during execution phases where possible.
+### Margin Logic
+
+- [ ] **Multi-Asset Margin Map**: Refactor `required_margin` from a single `u128` to a per-asset requirement.
+- [ ] **Portfolio Margin**: Implement basic portfolio netting across different series of the same underlying.
+
+### Automation
+
+- [ ] **Registry Sync**: Add timers to Clearing canisters to auto-register new series from the Registry.
+- [ ] **Balance Refreshers**: Timers to periodically pull/verify balances from external ledgers.
+
+---
+
+## 💡 Suggestions & Future Improvements (Roadmap)
+
+### 1. Observability
+
+- **[SUGGESTION] Prometheus Metrics**: Export internal state (open interest, total collateral locked, trade frequency) for monitoring.
+- **[SUGGESTION] Structured Event Sharding**: Move the `EVENTS` log from memory-only to a dedicated archive canister once it reaches a certain size.
+
+### 2. Risk Management
+
+- **[SUGGESTION] Insurance Fund**: Allocate a small fee from settlements to a clearing-wide insurance fund to cover bankruptcies during liquidation.
+- **[SUGGESTION] Liquidation Engine**: Implement an automated "backstop" liquidator for accounts that fall below maintenance margin.
+
+### 3. Developer Experience
+
+- **[SUGGESTION] Official SDK**: Create a TypeScript/Rust client library to make it easy for new Exchanges to integrate with the Clearing Engine.
+- **[SUGGESTION] Integration Test Suite**: A comprehensive shell-script or Rust-based local deployment test that simulates a full cycle (Registry -> Multi-Trade -> Settlement).
