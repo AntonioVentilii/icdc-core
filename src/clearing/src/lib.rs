@@ -13,6 +13,7 @@ use ic_cdk_macros::{post_upgrade, pre_upgrade};
 use shared::types::{Series, SeriesId};
 
 use crate::types::{
+    http::{HeaderField, HttpRequest, HttpResponse},
     margin::Position,
     params::{
         DepositCollateralParams, FreezePositionForTransferParams, GetMarginAccountParams,
@@ -23,6 +24,7 @@ use crate::types::{
         SettleSeriesResult, SubmitMatchedTradeResult, WithdrawCollateralResult,
     },
     state::PositionProof,
+    stats::Stats,
 };
 
 #[pre_upgrade]

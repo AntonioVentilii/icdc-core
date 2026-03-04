@@ -1,6 +1,6 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
-use shared::types::{PayoffType, Series, SeriesId, SettlementAsset};
+use shared::types::{OracleMetadata, PayoffType, Series, SeriesId, SettlementAsset};
 
 /// Input parameters for registering a new derivative series.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -161,7 +161,7 @@ pub struct AddOracleParams {
     /// Unique identifier for the oracle (e.g., "COINGECKO").
     pub oracle_id: String,
     /// Initial information about the oracle.
-    pub metadata: shared::types::OracleMetadata,
+    pub metadata: OracleMetadata,
     /// Initial list of authorised principals.
     pub authorized_principals: Vec<candid::Principal>,
 }
@@ -172,7 +172,7 @@ pub struct UpdateOracleMetadataParams {
     /// The unique identifier of the oracle to update.
     pub oracle_id: String,
     /// The updated metadata.
-    pub metadata: shared::types::OracleMetadata,
+    pub metadata: OracleMetadata,
 }
 
 /// Input parameters for managing authorised principals of an oracle.

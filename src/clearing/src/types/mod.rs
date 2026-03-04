@@ -1,11 +1,13 @@
 pub mod account;
 pub mod errors;
 pub mod event;
+pub mod http;
 pub mod margin;
 pub mod params;
 pub mod payment;
 pub mod plans;
 pub mod results;
 pub mod state;
+pub mod stats;
 pub mod trade;
 pub mod user;

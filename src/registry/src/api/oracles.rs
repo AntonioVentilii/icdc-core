@@ -1,9 +1,10 @@
 use ic_cdk::api::is_controller;
 use ic_cdk_macros::{query, update};
+use shared::types::Oracle;
 
 use crate::{
     errors::OracleError,
-    guards::caller_is_not_anonymous,
+    guards::{caller_is_controller, caller_is_not_anonymous},
     memory::ORACLE_STORE,
     params::{AddOracleParams, ManageOraclePrincipalsParams, UpdateOracleMetadataParams},
     results::OracleResult,
@@ -11,13 +12,10 @@ use crate::{
 };
 
 /// Registers a new price oracle in the registry.
-#[update(guard = "caller_is_not_anonymous")]
+#[update(guard = "caller_is_controller")]
 pub fn add_oracle(params: AddOracleParams) -> OracleResult {
     let result: Result<(), OracleError> = {
         let caller = ic_cdk::caller();
-        if !is_controller(&caller) {
-            return OracleResult::Err(OracleError::UnauthorizedOracleManager);
-        }
 
         let oracle_id = canonical_id_part(&params.oracle_id);
 
@@ -28,7 +26,7 @@ pub fn add_oracle(params: AddOracleParams) -> OracleResult {
                 return Err(OracleError::OracleAlreadyExists);
             }
 
-            let oracle = shared::types::Oracle {
+            let oracle = Oracle {
                 oracle_id: oracle_id.clone(),
                 metadata: params.metadata,
                 authorized_principals: params.authorized_principals.into_iter().collect(),
@@ -101,7 +99,7 @@ pub fn manage_oracle_principals(params: ManageOraclePrincipalsParams) -> OracleR
 
 /// Retrieves the details of a specific oracle by its ID.
 #[query]
-pub fn get_oracle(oracle_id: String) -> Option<shared::types::Oracle> {
+pub fn get_oracle(oracle_id: String) -> Option<Oracle> {
     ORACLE_STORE.with(|store| store.borrow().get(&oracle_id).cloned())
 }
 
