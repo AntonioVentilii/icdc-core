@@ -141,6 +141,20 @@ dfx canister call clearing get_margin_account "(record { refresh = null })"
 # Switch back to default identity
 dfx identity use default
 
+# Register oracle
+echo "🚀 Registering oracle VICI_ORACLE_V1..."
+dfx canister call registry add_oracle "(
+  record {
+    oracle_id = \"VICI_ORACLE_V1\";
+    metadata = record {
+      name = \"Vici Oracle\";
+      description = opt \"Automated test oracle\";
+      website = null;
+    };
+    authorized_principals = vec { principal \"$PRINCIPAL\" };
+  }
+)"
+
 # Register series
 RESULT=$(dfx canister call registry add_series "(
   record {
@@ -148,11 +162,13 @@ RESULT=$(dfx canister call registry add_series "(
     payoff_type = variant { Binary };
     settlement_asset = variant { Icp };
     underlying = \"TEST_${TIMESTAMP}\";
-    expiry = 1_782_816_000 : nat64;
+    expiry_ns = 1_782_816_000_000_000_000 : nat64;
     oracle_source = \"VICI_ORACLE_V1\";
+    title = \"Test Series\";
+    description = \"Automated test series description\";
   },
 )")
-SERIES_ID=$(echo "$RESULT" | grep -oE '"[a-f0-9]{64}"' | tr -d '"')
+SERIES_ID=$(echo "$RESULT" | grep -oE '"[a-f0-9]{64}"' | head -n 1 | tr -d '"')
 if [ -z "$SERIES_ID" ]; then
   echo "❌ Failed to extract Series ID"
   echo "Full response:"

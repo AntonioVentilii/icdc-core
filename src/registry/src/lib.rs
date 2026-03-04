@@ -3,6 +3,7 @@
 
 pub mod api;
 pub mod errors;
+pub mod guards;
 pub mod memory;
 pub mod params;
 pub mod results;
@@ -13,8 +14,12 @@ use ic_cdk_macros::{post_upgrade, pre_upgrade};
 use shared::types::{Series, SeriesId};
 
 pub use crate::{
-    params::{AddSeriesParams, ListSeriesParams, PaginationParams},
-    results::{AddSeriesResult, SeriesPage},
+    errors::{OracleError, SeriesError},
+    params::{
+        AddOracleParams, AddSeriesParams, ListSeriesParams, ManageOraclePrincipalsParams,
+        PaginationParams, UpdateOracleMetadataParams,
+    },
+    results::{AddSeriesResult, OracleResult, SeriesPage},
 };
 
 #[pre_upgrade]

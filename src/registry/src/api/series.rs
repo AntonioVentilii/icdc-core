@@ -7,12 +7,12 @@ use shared::{
 };
 
 use crate::{
-    errors::RegistryError,
+    guards::caller_is_not_anonymous,
     memory::SERIES_STORE,
     params::{AddSeriesParams, ListSeriesParams, PaginationParams},
     results::AddSeriesResult,
     utils::canonical_id_part,
-    SeriesPage,
+    SeriesError, SeriesPage,
 };
 
 /// Adds a new derivative series to the registry.
@@ -25,11 +25,11 @@ use crate::{
 ///
 /// # Returns
 /// * [`AddSeriesResult::Ok`] containing the new [`SeriesId`] on success.
-/// * [`AddSeriesResult::Err`] with [`RegistryError::SeriesAlreadyExists`] if the series is already
+/// * [`AddSeriesResult::Err`] with [`SeriesError::SeriesAlreadyExists`] if the series is already
 ///   registered.
-#[update]
+#[update(guard = "caller_is_not_anonymous")]
 pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
-    let result: Result<SeriesId, RegistryError> = {
+    let result: Result<SeriesId, SeriesError> = {
         let AddSeriesParams {
             underlying,
             expiry_ns,
@@ -42,11 +42,11 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
         } = params;
 
         if title.chars().count() > MAX_SERIES_TITLE_LEN {
-            return Err(RegistryError::TitleTooLong).into();
+            return Err(SeriesError::TitleTooLong).into();
         }
 
         if description.chars().count() > MAX_SERIES_DESCRIPTION_LEN {
-            return Err(RegistryError::DescriptionTooLong).into();
+            return Err(SeriesError::DescriptionTooLong).into();
         }
 
         let underlying = canonical_id_part(&underlying);
@@ -79,7 +79,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
             let mut store = store.borrow_mut();
 
             if store.contains_key(&series_id) {
-                return Err(RegistryError::SeriesAlreadyExists);
+                return Err(SeriesError::SeriesAlreadyExists);
             }
 
             store.insert(series_id.clone(), series);
@@ -132,7 +132,10 @@ pub fn list_series_with(params: ListSeriesParams) -> SeriesPage {
 /// Returns a paginated page of all registered derivative series.
 #[query]
 pub fn list_series(pagination: PaginationParams) -> SeriesPage {
-    let mut params = ListSeriesParams::default();
-    params.pagination = Some(pagination);
+    let params = ListSeriesParams {
+        pagination: Some(pagination),
+        ..Default::default()
+    };
+
     list_series_with(params)
 }

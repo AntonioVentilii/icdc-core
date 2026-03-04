@@ -163,8 +163,8 @@ service : {
 	// 3. Paying out collateral to users with net profits.
 	// 4. Finalising internal margin account balances and releasing locked collateral.
 	//
-	// This method is gated to canister controllers and is intended to be called by an off-chain oracle
-	// or automation.
+	// This method is gated to canister controllers or the designated [`oracle_principal`] for the
+	// series. It is intended to be called by an off-chain oracle or automation.
 	settle_series : (SettleSeriesParams) -> (SettleSeriesResult);
 	// Submits a matched trade from an exchange for clearing.
 	//

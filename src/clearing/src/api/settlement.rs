@@ -1,3 +1,5 @@
+use candid::Principal;
+use ic_cdk::api::is_controller;
 use ic_cdk_macros::update;
 use shared::types::Asset;
 
@@ -6,12 +8,12 @@ use crate::{
         asset::{handler::get_handler, params::AssetTransferParams},
         types::AssetAmount,
     },
-    guards::caller_is_controller,
-    memory::{MARGIN_ACCOUNTS, POSITIONS, SERIES, SETTLEMENT_PLANS},
+    guards::caller_is_not_anonymous,
+    memory::{MARGIN_ACCOUNTS, POSITIONS, REGISTRY_CANISTER, SERIES, SETTLEMENT_PLANS},
     payoffs::get_settlement_value,
     types::{
         account::LedgerAccount,
-        errors::{LedgerError, SettlementError},
+        errors::{CommonError, LedgerError, SettlementError},
         params::SettleSeriesParams,
         plans::{PlanStatus, SettlementPlan, SettlementPlanParams},
         results::SettleSeriesResult,
@@ -27,15 +29,50 @@ use crate::{
 /// 3. Paying out collateral to users with net profits.
 /// 4. Finalising internal margin account balances and releasing locked collateral.
 ///
-/// This method is gated to canister controllers and is intended to be called by an off-chain oracle
-/// or automation.
-#[update(guard = "caller_is_controller")]
+/// This method is gated to canister controllers or the designated [`oracle_principal`] for the
+/// series. It is intended to be called by an off-chain oracle or automation.
+#[update(guard = "caller_is_not_anonymous")]
 pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
     let result: Result<(), SettlementError> = (async {
         let SettleSeriesParams {
             series_id,
             settlement_price,
         } = params;
+
+        // ---------- Authorization ----------
+        let caller = ic_cdk::caller();
+
+        let ser = SERIES.with(|s| {
+            s.borrow()
+                .get(&series_id)
+                .cloned()
+                .ok_or(SettlementError::Common(CommonError::Unauthorized))
+        })?;
+
+        if !is_controller(&caller) {
+            let registry_canister = REGISTRY_CANISTER.with(|r| *r.borrow());
+
+            if registry_canister == Principal::anonymous() {
+                return Err(SettlementError::Common(CommonError::RegistryNotSet));
+            }
+
+            let (is_authorized,): (bool,) = ic_cdk::call(
+                registry_canister,
+                "is_oracle_authorized",
+                (ser.oracle_source.clone(), caller),
+            )
+            .await
+            .map_err(|(code, msg)| {
+                SettlementError::Common(CommonError::Internal(format!(
+                    "Registry call failed: {:?} - {}",
+                    code, msg
+                )))
+            })?;
+
+            if !is_authorized {
+                return Err(SettlementError::Common(CommonError::Unauthorized));
+            }
+        }
 
         // ---------- Phase A: build or resume plan ----------
         let mut plan = if let Some(existing) =

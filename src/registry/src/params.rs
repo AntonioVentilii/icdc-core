@@ -46,7 +46,7 @@ impl PaginationParams {
         // Default to u64::MAX if no limit is provided ("give them all").
         let limit = params.and_then(|p| p.limit).unwrap_or(u64::MAX) as usize;
 
-        // Pre-allocate the vector with a sensible cap (100) to prevent 
+        // Pre-allocate the vector with a sensible cap (100) to prevent
         // massive allocations if the requested limit is extremely high.
         let mut items = Vec::with_capacity(std::cmp::min(limit, 100));
         let mut next_cursor = None;
@@ -153,6 +153,37 @@ impl ListSeriesParams {
 
         true
     }
+}
+
+/// Input parameters for registering a new price oracle.
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct AddOracleParams {
+    /// Unique identifier for the oracle (e.g., "COINGECKO").
+    pub oracle_id: String,
+    /// Initial information about the oracle.
+    pub metadata: shared::types::OracleMetadata,
+    /// Initial list of authorised principals.
+    pub authorized_principals: Vec<candid::Principal>,
+}
+
+/// Input parameters for updating an existing oracle's metadata.
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct UpdateOracleMetadataParams {
+    /// The unique identifier of the oracle to update.
+    pub oracle_id: String,
+    /// The updated metadata.
+    pub metadata: shared::types::OracleMetadata,
+}
+
+/// Input parameters for managing authorised principals of an oracle.
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct ManageOraclePrincipalsParams {
+    /// The unique identifier of the oracle.
+    pub oracle_id: String,
+    /// Principals to be added to the authorised list.
+    pub add_principals: Vec<candid::Principal>,
+    /// Principals to be removed from the authorised list.
+    pub remove_principals: Vec<candid::Principal>,
 }
 
 #[cfg(test)]

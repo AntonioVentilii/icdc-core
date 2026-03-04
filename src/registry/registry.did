@@ -1,3 +1,8 @@
+type AddOracleParams = record {
+	metadata : OracleMetadata;
+	authorized_principals : vec principal;
+	oracle_id : text
+};
 type AddSeriesParams = record {
 	title : text;
 	strike : opt nat64;
@@ -8,7 +13,7 @@ type AddSeriesParams = record {
 	description : text;
 	oracle_source : text
 };
-type AddSeriesResult = variant { Ok : text; Err : RegistryError };
+type AddSeriesResult = variant { Ok : text; Err : SeriesError };
 type ListSeriesParams = record {
 	strike : opt nat64;
 	creator : opt principal;
@@ -19,13 +24,31 @@ type ListSeriesParams = record {
 	search_term : opt text;
 	oracle_source : opt text
 };
+type ManageOraclePrincipalsParams = record {
+	add_principals : vec principal;
+	remove_principals : vec principal;
+	oracle_id : text
+};
+type Oracle = record {
+	manager : principal;
+	registered_at_ns : nat64;
+	metadata : OracleMetadata;
+	authorized_principals : vec principal;
+	oracle_id : text
+};
+type OracleError = variant {
+	UnauthorizedOracleManager;
+	OracleAlreadyExists;
+	OracleNotFound
+};
+type OracleMetadata = record {
+	name : text;
+	description : opt text;
+	website : opt text
+};
+type OracleResult = variant { Ok; Err : OracleError };
 type PaginationParams = record { cursor : opt text; limit : opt nat64 };
 type PayoffType = variant { Put; Binary; Call };
-type RegistryError = variant {
-	DescriptionTooLong;
-	TitleTooLong;
-	SeriesAlreadyExists
-};
 type Series = record {
 	title : text;
 	strike : opt nat64;
@@ -39,9 +62,20 @@ type Series = record {
 	created_at_ns : nat64;
 	oracle_source : text
 };
+type SeriesError = variant {
+	DescriptionTooLong;
+	TitleTooLong;
+	SeriesAlreadyExists
+};
 type SeriesPage = record { next_cursor : opt text; items : vec Series };
 type SettlementAsset = variant { Icp; CkUsdc };
+type UpdateOracleMetadataParams = record {
+	metadata : OracleMetadata;
+	oracle_id : text
+};
 service : {
+	// Registers a new price oracle in the registry.
+	add_oracle : (AddOracleParams) -> (OracleResult);
 	// Adds a new derivative series to the registry.
 	//
 	// This method generates a canonical [`SeriesId`] for the provided parameters.
@@ -52,9 +86,11 @@ service : {
 	//
 	// # Returns
 	// * [`AddSeriesResult::Ok`] containing the new [`SeriesId`] on success.
-	// * [`AddSeriesResult::Err`] with [`RegistryError::SeriesAlreadyExists`] if the series is already
+	// * [`AddSeriesResult::Err`] with [`SeriesError::SeriesAlreadyExists`] if the series is already
 	// registered.
 	add_series : (AddSeriesParams) -> (AddSeriesResult);
+	// Retrieves the details of a specific oracle by its ID.
+	get_oracle : (text) -> (opt Oracle) query;
 	// Retrieves a specific [`Series`] by its [`SeriesId`].
 	//
 	// # Arguments
@@ -64,8 +100,14 @@ service : {
 	// * `Some(Series)` if the series exists in the registry.
 	// * `None` otherwise.
 	get_series : (text) -> (opt Series) query;
+	// Checks if a principal is authorized to push settlement data for a given oracle.
+	is_oracle_authorized : (text, principal) -> (bool) query;
 	// Returns a paginated page of all registered derivative series.
 	list_series : (PaginationParams) -> (SeriesPage) query;
 	// Returns a paginated page of registered derivative series, optionally filtered.
-	list_series_with : (ListSeriesParams) -> (SeriesPage) query
+	list_series_with : (ListSeriesParams) -> (SeriesPage) query;
+	// Adds or removes authorised principals for an oracle.
+	manage_oracle_principals : (ManageOraclePrincipalsParams) -> (OracleResult);
+	// Updates the metadata of an existing oracle.
+	update_oracle_metadata : (UpdateOracleMetadataParams) -> (OracleResult)
 }
