@@ -56,6 +56,7 @@
 ### 2. Risk Management
 
 - **[SUGGESTION] Insurance Fund**: Allocate a small fee from settlements to a clearing-wide insurance fund to cover bankruptcies during liquidation.
+- **[SUGGESTION] Risk Waterfall**: Implement a structured "risk waterfall" including default funds and mutualised risk sharing.
 - **[SUGGESTION] Liquidation Engine**: Implement an automated "backstop" liquidator for accounts that fall below maintenance margin.
 
 ### 3. Developer Experience

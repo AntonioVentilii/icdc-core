@@ -14,8 +14,16 @@ The project is divided into two main functional areas:
 
 - **Standardised Clearing**: Standardised interfaces for trade submission and position netting.
 - **Position Portability**: A unique novation protocol that allows positions to move between different clearing canisters without vendor lock-in.
-- **Async Safety**: Implements a robust 3-step idempotency pattern for all ledger interactions.
+- **Async Safety**: Implements a robust 3-step idempotency pattern (`Plan-Execute-Finalise`) for all ledger interactions.
 - **Multi-Asset Support**: Built-in support for multiple ledger-based collateral assets.
+
+## ⚖️ Design Philosophy: Why a CCP?
+
+Unlike many DeFi protocols that tokenise positions (e.g., ERC20 options), ICDC follows a **Central Counterparty (CCP)** model typical of mature fiat derivatives infrastructure.
+
+- **Risk Centralisation**: By keeping positions internal to the clearing canister rather than tokenising them, we enable complex portfolio netting, efficient margin calculations, and sophisticated risk management that "detached" tokens cannot support.
+- **Portability via Novation**: Instead of free-market token transfers, we support position portability through a controlled **Novation Protocol**, preserving risk integrity across the ecosystem.
+- **Neutrality**: The clearing engine remains independent of UIs, exchanges, and specific token logic, serving as a pure risk engine for any platform.
 
 ## 🛠 Getting Started
 
