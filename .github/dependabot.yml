@@ -21,6 +21,11 @@ updates:
       prefix-development: 'chore(cargo-deps-dev): '
     cooldown:
       default-days: 30
+    groups:
+      ic-cdk-kit:
+        patterns:
+          - 'ic-cdk'
+          - 'ic-cdk-macros'
 
   - package-ecosystem: rust-toolchain
     directory: '/'
