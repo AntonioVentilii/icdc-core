@@ -9,6 +9,7 @@ pub mod params;
 pub mod results;
 pub mod utils;
 
+use candid::Principal;
 use ic_cdk::export_candid;
 use ic_cdk_macros::{post_upgrade, pre_upgrade};
 use shared::types::{Oracle, Series, SeriesId};

@@ -7,7 +7,7 @@ use shared::{
 };
 
 use crate::{
-    guards::caller_is_not_anonymous,
+    guards::caller_is_authorized_creator,
     memory::SERIES_STORE,
     params::{AddSeriesParams, ListSeriesParams, PaginationParams},
     results::AddSeriesResult,
@@ -27,7 +27,7 @@ use crate::{
 /// * [`AddSeriesResult::Ok`] containing the new [`SeriesId`] on success.
 /// * [`AddSeriesResult::Err`] with [`SeriesError::SeriesAlreadyExists`] if the series is already
 ///   registered.
-#[update(guard = "caller_is_not_anonymous")]
+#[update(guard = "caller_is_authorized_creator")]
 pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
     let result: Result<SeriesId, SeriesError> = {
         let AddSeriesParams {

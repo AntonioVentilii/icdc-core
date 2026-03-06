@@ -10,6 +10,8 @@ pub enum SeriesError {
     TitleTooLong,
     /// Returned when the provided description exceeds the maximum allowed length.
     DescriptionTooLong,
+    /// Returned when the caller is not authorized to add a series.
+    Unauthorized,
 }
 
 /// Errors that can occur during oracle-related operations.
