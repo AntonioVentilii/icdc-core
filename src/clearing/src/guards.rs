@@ -13,6 +13,7 @@ pub fn caller_is_not_anonymous() -> Result<(), String> {
 /// Guard function to ensure the caller is one of the canister controllers.
 pub fn caller_is_controller() -> Result<(), String> {
     let caller = caller();
+
     if is_controller(&caller) {
         Ok(())
     } else {

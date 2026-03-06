@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use candid::Nat;
+use ic_cdk::api::is_controller;
 use ic_cdk_macros::query;
 use shared::types::Asset;
 
@@ -159,7 +160,7 @@ pub fn http_request(req: HttpRequest) -> HttpResponse {
         };
     }
 
-    if !ic_cdk::api::is_controller(&ic_cdk::caller()) {
+    if !is_controller(&ic_cdk::caller()) {
         return HttpResponse {
             status_code: 403,
             headers: vec![],
