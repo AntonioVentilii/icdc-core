@@ -180,7 +180,9 @@ pub async fn cancel_limit_order(params: CancelLimitOrderParams) -> SubmitMatched
 }
 
 /// Submits a matched trade from an exchange for clearing.
-#[update(guard = "caller_is_not_anonymous")]
+///
+/// TODO: until we implement an allowed list of exchange canisters, this is gated to controllers
+#[update(guard = "caller_is_controller")]
 pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMatchedTradeResult {
     let result = internal_execute_trade(ExecuteTradeParams {
         trade_id: params.trade_id,
