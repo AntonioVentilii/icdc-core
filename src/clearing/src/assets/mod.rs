@@ -1,3 +1,3 @@
-pub mod asset;
-pub mod icrc;
-pub mod types;
+pub(crate) mod asset;
+pub(crate) mod icrc;
+pub(crate) mod types;

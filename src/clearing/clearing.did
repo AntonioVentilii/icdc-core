@@ -1,5 +1,13 @@
 type AcceptPositionTransferResult = variant { Ok : bool; Err : TradeError };
 type Asset = variant { Icrc : principal };
+type BlockCollateralParams = record { asset : Asset; amount : nat };
+type BlockCollateralResult = variant { Ok; Err : BlockingError };
+type BlockingError = variant {
+	InsufficientAvailableBalance : record { requested : nat; available : nat };
+	MathOverflow;
+	InsufficientReservedBalance : record { requested : nat; "reserved" : nat }
+};
+type CancelLimitOrderParams = record { order_id : text };
 type CommonError = variant {
 	Internal : text;
 	MathOverflow;
@@ -44,6 +52,7 @@ type LedgerError = variant {
 };
 type MarginAccount = record {
 	required_margin : nat;
+	reserved_balances : vec record { Asset; nat };
 	user : principal;
 	balances : vec record { Asset; nat }
 };
@@ -89,6 +98,7 @@ type SettlementError = variant {
 	Ledger : LedgerError;
 	Common : CommonError
 };
+type Side = variant { Buy; Sell };
 type Stats = record {
 	total_users : nat64;
 	margin_balances : vec record { Asset; nat };
@@ -98,27 +108,42 @@ type Stats = record {
 	open_interest : nat;
 	event_counts : vec record { text; nat64 }
 };
+type SubmitLimitOrderParams = record {
+	qty : int;
+	series_id : text;
+	side : Side;
+	order_id : text;
+	price : nat64
+};
+type SubmitMarketOrderParams = record {
+	trade_id : text;
+	matching_order_id : text
+};
 type SubmitMatchedTradeParams = record {
 	qty : int;
 	trade_id : text;
 	series_id : text;
 	seller : principal;
+	buyer_unblock_amount : opt nat;
 	buyer : principal;
-	price : nat64
+	price : nat64;
+	seller_unblock_amount : opt nat
 };
 type SubmitMatchedTradeResult = variant { Ok : bool; Err : TradeError };
 type TradeError = variant {
+	OrderNotFound : text;
 	RegistryError : text;
 	InsufficientMargin : record {
 		balance : nat;
 		user : principal;
 		required : nat
 	};
+	NotOrderCreator;
 	SeriesNotFound : text;
 	Common : CommonError
 };
 type WithdrawCollateralError = variant {
-	InsufficientExcessMargin : record { requested : nat; current : nat };
+	InsufficientExcessMargin : record { requested : nat; available : nat };
 	MathOverflow;
 	Ledger : LedgerError
 };
@@ -134,6 +159,12 @@ service : {
 	// This method validates the series and increases the target user's position based on the provided
 	// proof. This method is gated to canister controllers.
 	accept_position_transfer : (PositionProof) -> (AcceptPositionTransferResult);
+	// Blocks (reserves) collateral in the user's margin account.
+	block_collateral : (BlockCollateralParams) -> (BlockCollateralResult);
+	// Cancels an existing limit order and releases the reserved collateral.
+	//
+	// Only the creator of the order can cancel it.
+	cancel_limit_order : (CancelLimitOrderParams) -> (SubmitMatchedTradeResult);
 	// Deposits collateral into the user's margin account.
 	//
 	// This is a multi-phase operation:
@@ -195,21 +226,20 @@ service : {
 	//
 	// This method is gated to canister controllers.
 	stats : () -> (Stats) query;
+	// Submits a limit order for the caller.
+	//
+	// This atomically blocks the required collateral for the order.
+	submit_limit_order : (SubmitLimitOrderParams) -> (SubmitMatchedTradeResult);
+	// Submits a market order to match an existing limit order.
+	//
+	// The caller is the taker.
+	submit_market_order : (SubmitMarketOrderParams) -> (SubmitMatchedTradeResult);
 	// Submits a matched trade from an exchange for clearing.
-	//
-	// This method validates the series registration, calculates margin requirements,
-	// checks for sufficient collateral, and updates the positions of both buyer and seller.
-	//
-	// # Arguments
-	// * `params` - The trade details including ID, series, buyer, seller, quantity, and price.
-	//
-	// # Returns
-	// * [`SubmitMatchedTradeResult::Ok(true)`] if the trade was successfully processed or was a
-	// duplicate.
-	// * [`SubmitMatchedTradeResult::Err`] if margin is insufficient or another error occurs.
 	submit_matched_trade : (SubmitMatchedTradeParams) -> (
 		SubmitMatchedTradeResult
 	);
+	// Unblocks (releases) collateral in the user's margin account.
+	unblock_collateral : (BlockCollateralParams) -> (BlockCollateralResult);
 	// Withdraws collateral from the user's margin account to an external address.
 	//
 	// This is a multi-phase operation:

@@ -14,15 +14,88 @@ use crate::{
     memory::{DEPOSIT_PLANS, MARGIN_ACCOUNTS, WITHDRAWAL_PLANS},
     types::{
         account::LedgerAccount,
-        errors::{DepositCollateralError, LedgerError, WithdrawCollateralError},
+        errors::{BlockingError, DepositCollateralError, LedgerError, WithdrawCollateralError},
         margin::MarginAccount,
-        params::{DepositCollateralParams, WithdrawCollateralParams},
+        params::{
+            BlockCollateralParams, DepositCollateralParams, UnblockCollateralParams,
+            WithdrawCollateralParams,
+        },
         plans::{DepositPlan, DepositPlanParams, PlanStatus, WithdrawalPlan, WithdrawalPlanParams},
-        results::{DepositCollateralResult, WithdrawCollateralResult},
+        results::{
+            BlockCollateralResult, DepositCollateralResult, UnblockCollateralResult,
+            WithdrawCollateralResult,
+        },
         user::User,
     },
     utils::asset::is_supported_asset,
 };
+
+/// Blocks (reserves) collateral in the user's margin account.
+#[update(guard = "caller_is_not_anonymous")]
+pub fn block_collateral(params: BlockCollateralParams) -> BlockCollateralResult {
+    let result: Result<(), BlockingError> = (|| {
+        let user: User = ic_cdk::caller().into();
+        let BlockCollateralParams { amount, asset } = params;
+
+        let amount_u128: u128 = amount
+            .0
+            .try_into()
+            .map_err(|_| BlockingError::MathOverflow)?;
+
+        MARGIN_ACCOUNTS.with(|accounts| {
+            let mut accounts = accounts.borrow_mut();
+            let account = accounts.entry(user).or_insert(MarginAccount {
+                user,
+                balances: BTreeMap::new(),
+                reserved_balances: BTreeMap::new(),
+                required_margin: 0,
+            });
+
+            account
+                .reserve_balance(asset, amount_u128)
+                .map_err(|available| BlockingError::InsufficientAvailableBalance {
+                    available,
+                    requested: amount_u128,
+                })
+        })
+    })();
+
+    result.into()
+}
+
+/// Unblocks (releases) collateral in the user's margin account.
+#[update(guard = "caller_is_not_anonymous")]
+pub fn unblock_collateral(params: UnblockCollateralParams) -> UnblockCollateralResult {
+    let result: Result<(), BlockingError> = (|| {
+        let user: User = ic_cdk::caller().into();
+        let UnblockCollateralParams { amount, asset } = params;
+
+        let amount_u128: u128 = amount
+            .0
+            .try_into()
+            .map_err(|_| BlockingError::MathOverflow)?;
+
+        MARGIN_ACCOUNTS.with(|accounts| {
+            let mut accounts = accounts.borrow_mut();
+            let account =
+                accounts
+                    .get_mut(&user)
+                    .ok_or(BlockingError::InsufficientReservedBalance {
+                        reserved: 0,
+                        requested: amount_u128,
+                    })?;
+
+            account
+                .release_balance(asset, amount_u128)
+                .map_err(|reserved| BlockingError::InsufficientReservedBalance {
+                    reserved,
+                    requested: amount_u128,
+                })
+        })
+    })();
+
+    result.into()
+}
 
 /// Deposits collateral into the user's margin account.
 ///
@@ -124,6 +197,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
                 let account = accounts.entry(user).or_insert(MarginAccount {
                     user,
                     balances: BTreeMap::new(),
+                    reserved_balances: BTreeMap::new(),
                     required_margin: 0,
                 });
                 let current = account.get_balance(&asset);
@@ -203,17 +277,20 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                 let account = accounts.entry(user).or_insert(MarginAccount {
                     user,
                     balances: BTreeMap::new(),
+                    reserved_balances: BTreeMap::new(),
                     required_margin: 0,
                 });
 
-                let current = account.get_balance(&asset);
+                let available = account.get_available_balance(&asset);
 
-                if current < amount_u128 {
+                if available < amount_u128 {
                     return Err(WithdrawCollateralError::InsufficientExcessMargin {
-                        current,
+                        available,
                         requested: amount_u128,
                     });
                 }
+
+                let current = account.get_balance(&asset);
 
                 account.set_balance(asset.clone(), current - amount_u128);
 
@@ -264,6 +341,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                             let account = accounts.entry(user).or_insert(MarginAccount {
                                 user,
                                 balances: BTreeMap::new(),
+                                reserved_balances: BTreeMap::new(),
                                 required_margin: 0,
                             });
                             let current = account.get_balance(&asset);

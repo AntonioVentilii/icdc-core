@@ -13,7 +13,7 @@ use crate::{
         margin::{MarginAccount, Position},
         plans::{DepositPlan, SettlementPlan, WithdrawalPlan},
         state::StableState,
-        trade::{TradeId, TransferId},
+        trade::{LimitOrder, OrderId, TradeId, TransferId},
         user::{DepositKey, User, WithdrawalKey},
     },
     PositionProof,
@@ -29,6 +29,7 @@ thread_local! {
     pub static DEPOSIT_PLANS: RefCell<BTreeMap<DepositKey, DepositPlan>> = const { RefCell::new(BTreeMap::new()) };
     pub static WITHDRAWAL_PLANS: RefCell<BTreeMap<WithdrawalKey, WithdrawalPlan>> = const { RefCell::new(BTreeMap::new()) };
     pub static EXECUTED_TRADES: RefCell<BTreeMap<TradeId, u64>> = const { RefCell::new(BTreeMap::new()) };
+    pub static LIMIT_ORDERS: RefCell<BTreeMap<OrderId, LimitOrder>> = const { RefCell::new(BTreeMap::new()) };
     pub static FROZEN_TRANSFERS: RefCell<BTreeMap<TransferId, PositionProof>> = const { RefCell::new(BTreeMap::new()) };
     pub static ACCEPTED_TRANSFERS: RefCell<BTreeMap<TransferId, bool>> = const { RefCell::new(BTreeMap::new()) };
     pub static SETTLEMENT_PLANS: RefCell<BTreeMap<SeriesId, SettlementPlan>> = const { RefCell::new(BTreeMap::new()) };
@@ -52,6 +53,7 @@ pub fn save_state() {
         ACCEPTED_TRANSFERS.with(|t| t.borrow().clone());
     let settlement_plans: BTreeMap<SeriesId, SettlementPlan> =
         SETTLEMENT_PLANS.with(|s| s.borrow().clone());
+    let limit_orders: BTreeMap<OrderId, LimitOrder> = LIMIT_ORDERS.with(|l| l.borrow().clone());
 
     let state = StableState {
         positions,
@@ -66,6 +68,7 @@ pub fn save_state() {
         frozen_transfers,
         accepted_transfers,
         settlement_plans,
+        limit_orders,
     };
 
     storage::stable_save((state,)).expect("Save failed");
@@ -87,6 +90,7 @@ pub fn restore_state() {
         frozen_transfers,
         accepted_transfers,
         settlement_plans,
+        limit_orders,
     } = state;
 
     POSITIONS.with(|p| {
@@ -107,6 +111,7 @@ pub fn restore_state() {
     FROZEN_TRANSFERS.with(|t| *t.borrow_mut() = frozen_transfers);
     ACCEPTED_TRANSFERS.with(|t| *t.borrow_mut() = accepted_transfers);
     SETTLEMENT_PLANS.with(|s| *s.borrow_mut() = settlement_plans);
+    LIMIT_ORDERS.with(|l| *l.borrow_mut() = limit_orders);
 }
 
 /// Returns the principal of the ICP ledger.

@@ -1,5 +1,8 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
+use shared::types::SeriesId;
+
+use crate::types::user::User;
 
 /// A unique identifier for a matched trade.
 #[derive(
@@ -7,8 +10,33 @@ use serde::Serialize;
 )]
 pub struct TradeId(String);
 
+/// A unique identifier for a limit order.
+#[derive(
+    CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
+pub struct OrderId(String);
+
 /// A unique identifier for a position transfer operation.
 #[derive(
     CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
 pub struct TransferId(String);
+
+/// Represents the side of an order or trade.
+#[derive(CandidType, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Side {
+    Buy,
+    Sell,
+}
+
+/// Represents a limit order stored in the clearing canister.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct LimitOrder {
+    pub order_id: OrderId,
+    pub creator: User,
+    pub series_id: SeriesId,
+    pub side: Side,
+    pub qty: i128,
+    pub price: u64,
+    pub block_index: u128, // Amount blocked in collateral
+}

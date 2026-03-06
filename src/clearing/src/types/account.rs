@@ -11,13 +11,3 @@ pub enum LedgerAccount {
     /// An external account identified by principal and optional subaccount.
     External(Principal, Option<[u8; 32]>),
 }
-impl LedgerAccount {
-    /// Returns the [`Principal`] associated with this account.
-    pub fn principal(&self) -> Principal {
-        match self {
-            LedgerAccount::UserClearing(u) => u.principal(),
-            LedgerAccount::CanisterMain => ic_cdk::id(),
-            LedgerAccount::External(p, _) => *p,
-        }
-    }
-}

@@ -3,11 +3,45 @@ use serde::Serialize;
 
 use crate::types::{
     errors::{
-        DepositCollateralError, MarginAccountError, SettlementError, TradeError,
+        BlockingError, DepositCollateralError, MarginAccountError, SettlementError, TradeError,
         WithdrawCollateralError,
     },
     margin::MarginAccount,
 };
+
+/// Result of a collateral blocking operation.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub enum BlockCollateralResult {
+    /// Collateral was successfully blocked.
+    Ok,
+    /// Failed to block collateral.
+    Err(BlockingError),
+}
+impl From<Result<(), BlockingError>> for BlockCollateralResult {
+    fn from(value: Result<(), BlockingError>) -> Self {
+        match value {
+            Ok(_) => BlockCollateralResult::Ok,
+            Err(e) => BlockCollateralResult::Err(e),
+        }
+    }
+}
+
+/// Result of a collateral unblocking operation.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub enum UnblockCollateralResult {
+    /// Collateral was successfully unblocked.
+    Ok,
+    /// Failed to unblock collateral.
+    Err(BlockingError),
+}
+impl From<Result<(), BlockingError>> for UnblockCollateralResult {
+    fn from(value: Result<(), BlockingError>) -> Self {
+        match value {
+            Ok(_) => UnblockCollateralResult::Ok,
+            Err(e) => UnblockCollateralResult::Err(e),
+        }
+    }
+}
 
 /// Result of a collateral deposit operation.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]

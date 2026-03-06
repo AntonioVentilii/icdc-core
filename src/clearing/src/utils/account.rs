@@ -1,24 +1,16 @@
 use candid::Principal;
 use sha2::{Digest, Sha256};
-use shared::types::SettlementAsset;
-
-use crate::memory::{ckusdc_ledger, icp_ledger};
-
-/// Returns the ledger canister principal for a given [`SettlementAsset`].
-pub fn get_ledger_for_asset(asset: &SettlementAsset) -> Principal {
-    match asset {
-        SettlementAsset::Icp => icp_ledger(),
-        SettlementAsset::CkUsdc => ckusdc_ledger(),
-    }
-}
 
 /// Derives the subaccount for a user in the current canister.
-pub fn derive_user_subaccount(user: Principal) -> [u8; 32] {
+pub(crate) fn derive_user_subaccount(user: Principal) -> [u8; 32] {
     derive_user_subaccount_for_canister(ic_cdk::id(), user)
 }
 
 /// Derives a consistent subaccount for a user in a target canister using a salt.
-pub fn derive_user_subaccount_for_canister(canister_id: Principal, user: Principal) -> [u8; 32] {
+pub(crate) fn derive_user_subaccount_for_canister(
+    canister_id: Principal,
+    user: Principal,
+) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(b"collateral");
     hasher.update(canister_id.as_slice());

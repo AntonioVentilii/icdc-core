@@ -51,12 +51,12 @@ pub async fn get_margin_account(params: GetMarginAccountParams) -> GetMarginAcco
         let refresh = refresh.unwrap_or(false);
 
         // Always read required_margin from internal state (risk state)
-        let required_margin_u128 = MARGIN_ACCOUNTS.with(|accounts| {
+        let (required_margin_u128, reserved_balances) = MARGIN_ACCOUNTS.with(|accounts| {
             accounts
                 .borrow()
                 .get(&user)
-                .map(|m| m.required_margin)
-                .unwrap_or(0)
+                .map(|m| (m.required_margin, m.reserved_balances.clone()))
+                .unwrap_or((0, BTreeMap::new()))
         });
 
         // If not refreshing, just return cached state (no await)
@@ -101,6 +101,7 @@ pub async fn get_margin_account(params: GetMarginAccountParams) -> GetMarginAcco
             let acct = accounts.entry(user).or_insert(MarginAccount {
                 user,
                 balances: BTreeMap::new(),
+                reserved_balances: BTreeMap::new(),
                 required_margin: 0,
             });
 
@@ -111,6 +112,7 @@ pub async fn get_margin_account(params: GetMarginAccountParams) -> GetMarginAcco
         Ok(MarginAccount {
             user,
             balances,
+            reserved_balances,
             required_margin: required_margin_u128,
         })
     })

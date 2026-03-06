@@ -29,7 +29,7 @@
 
 ### Access Control & Security
 
-- [ ] **Authorized Creators**: Restrict `add_series` to specific principals or roles.
+- [x] **Authorized Creators**: Restrict `add_series` to specific principals or roles.
 - [ ] **Authorized Exchanges**: Gated `submit_matched_trade` so only trusted exchange canisters can submit trades.
 - [ ] **Cryptographic Signatures**: Implement signing for `PositionProof` in `freeze_position_for_transfer` (currently using empty bytes).
 - [ ] **Pre-check Solvency**: Add comprehensive solvency checks in `settle_series` before starting transfers.
@@ -50,8 +50,8 @@
 
 ### 1. Observability
 
-- **[SUGGESTION] Prometheus Metrics**: Export internal state (open interest, total collateral locked, trade frequency) for monitoring.
-- **[SUGGESTION] Structured Event Sharding**: Move the `EVENTS` log from memory-only to a dedicated archive canister once it reaches a certain size.
+- [x] **Prometheus Metrics**: Export internal state (open interest, total collateral locked, trade frequency) for monitoring.
+- [ ] **Structured Event Sharding**: Move the `EVENTS` log from memory-only to a dedicated archive canister once it reaches a certain size.
 
 ### 2. Risk Management
 
@@ -59,7 +59,13 @@
 - **[SUGGESTION] Risk Waterfall**: Implement a structured "risk waterfall" including default funds and mutualised risk sharing.
 - **[SUGGESTION] Liquidation Engine**: Implement an automated "backstop" liquidator for accounts that fall below maintenance margin.
 
-### 3. Developer Experience
+### 4. Advanced Collateral Management
 
-- **[SUGGESTION] Official SDK**: Create a TypeScript/Rust client library to make it easy for new Exchanges to integrate with the Clearing Engine.
-- **[SUGGESTION] Integration Test Suite**: A comprehensive shell-script or Rust-based local deployment test that simulates a full cycle (Registry -> Multi-Trade -> Settlement).
+- **[SUGGESTION] Third-party Blocking**: Allow authorized external canisters (e.g., Auction engines, Governance, or Bridges) to use the `block_collateral` / `unblock` primitives to lock user funds for specialized workflows.
+- **[SUGGESTION] Order-less Liquidity Locking**: Let users manually lock a portion of their collateral as "guaranteed liquidity" to earn a fee share or premium from the clearing engine's insurance fund.
+- **[SUGGESTION] Cross-chain Proofs**: Issue signed proofs of blocked collateral that can be verified on other chains/canisters for atomic swaps.
+
+### 5. Delegated Authority
+
+- **[SUGGESTION] User-Authorized Agents**: Implement a "Session Key" or "Agent" pattern where a user can authorize another principal to call `submit_limit_order_for`, `cancel_limit_order_for`, or `block_collateral_for` on their behalf.
+- **[SUGGESTION] Scoped Permissions**: Allow users to restrict agents to specific series, maximum order sizes, or maximum total blocked collateral.

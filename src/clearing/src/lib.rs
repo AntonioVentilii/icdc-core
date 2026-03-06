@@ -3,6 +3,7 @@ pub mod assets;
 pub mod guards;
 pub mod memory;
 pub mod payoffs;
+pub mod trade;
 pub mod traits;
 pub mod types;
 pub mod utils;
@@ -16,12 +17,15 @@ use crate::types::{
     http::{HttpRequest, HttpResponse},
     margin::Position,
     params::{
-        DepositCollateralParams, FreezePositionForTransferParams, GetMarginAccountParams,
-        GetPositionParams, SettleSeriesParams, SubmitMatchedTradeParams, WithdrawCollateralParams,
+        BlockCollateralParams, CancelLimitOrderParams, DepositCollateralParams,
+        FreezePositionForTransferParams, GetMarginAccountParams, GetPositionParams,
+        SettleSeriesParams, SubmitLimitOrderParams, SubmitMarketOrderParams,
+        SubmitMatchedTradeParams, UnblockCollateralParams, WithdrawCollateralParams,
     },
     results::{
-        AcceptPositionTransferResult, DepositCollateralResult, GetMarginAccountResult,
-        SettleSeriesResult, SubmitMatchedTradeResult, WithdrawCollateralResult,
+        AcceptPositionTransferResult, BlockCollateralResult, DepositCollateralResult,
+        GetMarginAccountResult, SettleSeriesResult, SubmitMatchedTradeResult,
+        UnblockCollateralResult, WithdrawCollateralResult,
     },
     state::PositionProof,
     stats::Stats,

@@ -8,7 +8,7 @@ use crate::types::{
     event::Event,
     margin::{MarginAccount, Position},
     plans::{DepositPlan, SettlementPlan, WithdrawalPlan},
-    trade::{TradeId, TransferId},
+    trade::{LimitOrder, OrderId, TradeId, TransferId},
     user::{DepositKey, User, WithdrawalKey},
 };
 
@@ -56,4 +56,6 @@ pub struct StableState {
     pub accepted_transfers: BTreeMap<TransferId, bool>,
     /// Active plans for series settlement.
     pub settlement_plans: BTreeMap<SeriesId, SettlementPlan>,
+    /// Active limit orders.
+    pub limit_orders: BTreeMap<OrderId, LimitOrder>,
 }

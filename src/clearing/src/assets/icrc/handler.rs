@@ -75,28 +75,7 @@ impl IcrcHandler {
 
         let to_account = self.resolve_account(params.to);
 
-        let amount_u128 = match params.amount {
-            AssetAmount::Fixed(a) => a,
-            AssetAmount::DeductAll => {
-                let balance = self
-                    .balance_of(AssetBalanceOfParams {
-                        asset: params.asset,
-                        account: LedgerAccount::External(
-                            from_account.owner,
-                            from_account.subaccount,
-                        ),
-                    })
-                    .await?;
-                let fee = self.get_fee(params.asset).await?;
-                if balance <= fee {
-                    return Err(LedgerError::InsufficientBalance {
-                        balance,
-                        required: fee,
-                    });
-                }
-                balance - fee
-            }
-        };
+        let AssetAmount::Fixed(amount_u128) = params.amount;
 
         let icrc_args = TransferArg {
             from_subaccount: from_account.subaccount,
@@ -135,28 +114,7 @@ impl IcrcHandler {
         let from_account = self.resolve_account(params.from);
         let to_account = self.resolve_account(params.to);
 
-        let amount_u128 = match params.amount {
-            AssetAmount::Fixed(a) => a,
-            AssetAmount::DeductAll => {
-                let balance = self
-                    .balance_of(AssetBalanceOfParams {
-                        asset: params.asset,
-                        account: LedgerAccount::External(
-                            from_account.owner,
-                            from_account.subaccount,
-                        ),
-                    })
-                    .await?;
-                let fee = self.get_fee(params.asset).await?;
-                if balance <= fee {
-                    return Err(LedgerError::InsufficientBalance {
-                        balance,
-                        required: fee,
-                    });
-                }
-                balance - fee
-            }
-        };
+        let AssetAmount::Fixed(amount_u128) = params.amount;
 
         let icrc_args = TransferFromArgs {
             spender_subaccount: spender_account.subaccount,

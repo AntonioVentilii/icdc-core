@@ -2,7 +2,7 @@ use candid::CandidType;
 use serde::{Deserialize, Serialize};
 use shared::types::SeriesId;
 
-use crate::types::user::User;
+use crate::types::{trade::OrderId, user::User};
 
 /// Generic errors that can occur across multiple modules.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -61,7 +61,7 @@ pub enum WithdrawCollateralError {
     /// The user does not have enough excess margin to withdraw the requested amount.
     InsufficientExcessMargin {
         /// Current excess margin available for withdrawal.
-        current: u128,
+        available: u128,
         /// The amount requested to be withdrawn.
         requested: u128,
     },
@@ -98,6 +98,10 @@ pub enum TradeError {
     },
     /// Failed to communicate with the registry canister.
     RegistryError(String),
+    /// The specified order was not found.
+    OrderNotFound(OrderId),
+    /// The caller is not the creator of the order.
+    NotOrderCreator,
 }
 
 /// Errors occurring during derivative series settlement.
@@ -110,5 +114,26 @@ pub enum SettlementError {
     /// The series uses an unsupported settlement asset.
     UnsupportedSettlementAsset,
     /// Overflow during settlement calculation.
+    MathOverflow,
+}
+
+/// Errors occurring during collateral blocking or unblocking.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub enum BlockingError {
+    /// The user does not have enough available balance to block the requested amount.
+    InsufficientAvailableBalance {
+        /// Current available balance.
+        available: u128,
+        /// The amount requested to be blocked.
+        requested: u128,
+    },
+    /// The user does not have enough reserved balance to unblock the requested amount.
+    InsufficientReservedBalance {
+        /// Current reserved balance.
+        reserved: u128,
+        /// The amount requested to be unblocked.
+        requested: u128,
+    },
+    /// Overflow during calculation.
     MathOverflow,
 }

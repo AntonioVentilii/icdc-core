@@ -1,51 +1,47 @@
 use std::collections::BTreeMap;
 
-use ic_cdk::api::time;
 use ic_cdk_macros::update;
 
 use crate::{
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
-        ACCEPTED_TRANSFERS, EVENTS, EXECUTED_TRADES, FROZEN_TRANSFERS, MARGIN_ACCOUNTS,
-        NEXT_EVENT_ID, POSITIONS,
+        ACCEPTED_TRANSFERS, EXECUTED_TRADES, FROZEN_TRANSFERS, LIMIT_ORDERS, MARGIN_ACCOUNTS,
+        POSITIONS,
     },
     payoffs::get_required_margin,
+    trade::{service::internal_execute_trade, types::ExecuteTradeParams},
     types::{
         errors::TradeError,
-        event::{Event, EventType},
         margin::{MarginAccount, Position},
-        params::{FreezePositionForTransferParams, SubmitMatchedTradeParams},
+        params::{
+            CancelLimitOrderParams, FreezePositionForTransferParams, SubmitLimitOrderParams,
+            SubmitMarketOrderParams, SubmitMatchedTradeParams,
+        },
         results::{AcceptPositionTransferResult, SubmitMatchedTradeResult},
         state::PositionProof,
+        trade::{LimitOrder, Side},
+        user::User,
     },
     utils::series::ensure_series_registered,
 };
 
-/// Submits a matched trade from an exchange for clearing.
+/// Submits a limit order for the caller.
 ///
-/// This method validates the series registration, calculates margin requirements,
-/// checks for sufficient collateral, and updates the positions of both buyer and seller.
-///
-/// # Arguments
-/// * `params` - The trade details including ID, series, buyer, seller, quantity, and price.
-///
-/// # Returns
-/// * [`SubmitMatchedTradeResult::Ok(true)`] if the trade was successfully processed or was a
-///   duplicate.
-/// * [`SubmitMatchedTradeResult::Err`] if margin is insufficient or another error occurs.
+/// This atomically blocks the required collateral for the order.
 #[update(guard = "caller_is_not_anonymous")]
-pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMatchedTradeResult {
+pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatchedTradeResult {
     let result: Result<bool, TradeError> = (async {
-        let SubmitMatchedTradeParams {
-            trade_id,
+        let caller: User = ic_cdk::caller().into();
+
+        let SubmitLimitOrderParams {
+            order_id,
             series_id,
-            buyer,
-            seller,
+            side,
             qty,
             price,
         } = params;
 
-        if EXECUTED_TRADES.with(|m| m.borrow().contains_key(&trade_id)) {
+        if LIMIT_ORDERS.with(|m| m.borrow().contains_key(&order_id)) {
             return Ok(true);
         }
 
@@ -53,164 +49,150 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
 
         let settlement_asset = series.settlement_asset.to_asset();
 
-        // Calculate margin requirements for the updated positions
-        // We need to know the old requirements to calculate the delta
-        let (
-            buyer_delta_i128,
-            seller_delta_i128,
-            new_buyer_qty,
-            new_buyer_margin,
-            new_seller_qty,
-            new_seller_margin,
-        ) = POSITIONS.with(|positions| {
-            let positions = positions.borrow();
+        // Calculate required margin for this order (worst case)
+        let required_margin = get_required_margin(&series, price, qty);
 
-            let old_buyer_margin = positions
-                .get(&(buyer, series_id.clone()))
-                .map(|p| p.locked_collateral)
-                .unwrap_or(0);
-            let old_seller_margin = positions
-                .get(&(seller, series_id.clone()))
-                .map(|p| p.locked_collateral)
-                .unwrap_or(0);
-
-            // New quantities
-            let new_buyer_qty = positions
-                .get(&(buyer, series_id.clone()))
-                .map(|p| p.net_qty)
-                .unwrap_or(0)
-                + qty;
-            let new_seller_qty = positions
-                .get(&(seller, series_id.clone()))
-                .map(|p| p.net_qty)
-                .unwrap_or(0)
-                - qty;
-
-            // New margins
-            let new_buyer_margin = get_required_margin(&series, price, new_buyer_qty);
-            let new_seller_margin = get_required_margin(&series, price, new_seller_qty);
-
-            (
-                (new_buyer_margin as i128) - (old_buyer_margin as i128),
-                (new_seller_margin as i128) - (old_seller_margin as i128),
-                new_buyer_qty,
-                new_buyer_margin,
-                new_seller_qty,
-                new_seller_margin,
-            )
-        });
-
-        let buyer_delta = buyer_delta_i128;
-        let seller_delta = seller_delta_i128;
-
-        // Phase B: apply state changes (no awaits)
         MARGIN_ACCOUNTS.with(|accounts| {
             let mut accounts = accounts.borrow_mut();
-
-            // Check Buyer
-            let buyer_acc = accounts.entry(buyer).or_insert(MarginAccount {
-                user: buyer,
+            let acc = accounts.entry(caller).or_insert(MarginAccount {
+                user: caller,
                 balances: BTreeMap::new(),
+                reserved_balances: BTreeMap::new(),
                 required_margin: 0,
             });
-            let buyer_collateral = buyer_acc.get_balance(&settlement_asset);
-            let final_buyer_required = if buyer_delta > 0 {
-                buyer_acc.required_margin + (buyer_delta as u128)
-            } else {
-                buyer_acc
-                    .required_margin
-                    .saturating_sub(buyer_delta.unsigned_abs())
-            };
 
-            if final_buyer_required > buyer_collateral {
-                return Err(TradeError::InsufficientMargin {
-                    user: buyer,
-                    balance: buyer_collateral,
-                    required: final_buyer_required,
-                });
-            }
+            acc.reserve_balance(settlement_asset.clone(), required_margin)
+                .map_err(|available| TradeError::InsufficientMargin {
+                    user: caller,
+                    balance: available,
+                    required: required_margin,
+                })?;
 
-            // Check Seller
-            let seller_acc = accounts.entry(seller).or_insert(MarginAccount {
-                user: seller,
-                balances: BTreeMap::new(),
-                required_margin: 0,
+            LIMIT_ORDERS.with(|m| {
+                m.borrow_mut().insert(
+                    order_id.clone(),
+                    LimitOrder {
+                        order_id,
+                        creator: caller,
+                        series_id,
+                        side,
+                        qty,
+                        price,
+                        block_index: required_margin,
+                    },
+                );
             });
-            let seller_collateral = seller_acc.get_balance(&settlement_asset);
-            let final_seller_required = if seller_delta > 0 {
-                seller_acc.required_margin + (seller_delta as u128)
-            } else {
-                seller_acc
-                    .required_margin
-                    .saturating_sub(seller_delta.unsigned_abs())
-            };
 
-            if final_seller_required > seller_collateral {
-                return Err(TradeError::InsufficientMargin {
-                    user: seller,
-                    balance: seller_collateral,
-                    required: final_seller_required,
-                });
-            }
+            Ok(true)
+        })
+    })
+    .await;
 
-            // Apply changes
-            accounts.get_mut(&buyer).unwrap().required_margin = final_buyer_required;
-            accounts.get_mut(&seller).unwrap().required_margin = final_seller_required;
+    result.into()
+}
 
-            Ok(())
+/// Submits a market order to match an existing limit order.
+///
+/// The caller is the taker.
+#[update(guard = "caller_is_not_anonymous")]
+pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatchedTradeResult {
+    let result: Result<bool, TradeError> = (async {
+        let taker: User = ic_cdk::caller().into();
+
+        let SubmitMarketOrderParams {
+            trade_id,
+            matching_order_id,
+        } = params;
+
+        if EXECUTED_TRADES.with(|m| m.borrow().contains_key(&trade_id)) {
+            return Ok(true);
+        }
+
+        let order = LIMIT_ORDERS.with(|m| {
+            m.borrow_mut()
+                .remove(&matching_order_id)
+                .ok_or(TradeError::OrderNotFound(matching_order_id.clone()))
         })?;
 
-        POSITIONS.with(|positions| {
-            let mut positions = positions.borrow_mut();
+        let (buyer, seller, b_unblock, s_unblock) = match order.side {
+            Side::Buy => (order.creator, taker, Some(order.block_index), None),
+            Side::Sell => (taker, order.creator, None, Some(order.block_index)),
+        };
 
-            let b_pos = positions
-                .entry((buyer, series_id.clone()))
-                .or_insert(Position {
-                    user: buyer,
-                    series_id: series_id.clone(),
-                    net_qty: 0,
-                    locked_collateral: 0,
-                });
-            b_pos.net_qty = new_buyer_qty;
-            b_pos.locked_collateral = new_buyer_margin;
+        internal_execute_trade(ExecuteTradeParams {
+            trade_id,
+            series_id: order.series_id,
+            buyer,
+            seller,
+            qty: order.qty,
+            price: order.price,
+            buyer_unblock_amount: b_unblock,
+            seller_unblock_amount: s_unblock,
+        })
+        .await
+    })
+    .await;
 
-            let s_pos = positions
-                .entry((seller, series_id.clone()))
-                .or_insert(Position {
-                    user: seller,
-                    series_id: series_id.clone(),
-                    net_qty: 0,
-                    locked_collateral: 0,
-                });
-            s_pos.net_qty = new_seller_qty;
-            s_pos.locked_collateral = new_seller_margin;
-        });
+    result.into()
+}
 
-        let event_id = NEXT_EVENT_ID.with(|id| {
-            let mut id = id.borrow_mut();
-            let current = *id;
-            *id += 1;
-            current
-        });
+/// Cancels an existing limit order and releases the reserved collateral.
+///
+/// Only the creator of the order can cancel it.
+#[update(guard = "caller_is_not_anonymous")]
+pub async fn cancel_limit_order(params: CancelLimitOrderParams) -> SubmitMatchedTradeResult {
+    let result: Result<bool, TradeError> = (async {
+        let caller: User = ic_cdk::caller().into();
 
-        EVENTS.with(|events| {
-            events.borrow_mut().push(Event {
-                event_id,
-                clearing_id: ic_cdk::id(),
-                series_id: series_id.clone(),
-                user: buyer,
-                qty,
-                price,
-                event_type: EventType::Executed,
-                timestamp: time(),
-            });
-        });
+        let order_id = params.order_id;
 
-        EXECUTED_TRADES.with(|m| {
-            m.borrow_mut().insert(trade_id, event_id);
+        let order = LIMIT_ORDERS.with(|m| {
+            let mut m = m.borrow_mut();
+
+            if let Some(o) = m.get(&order_id) {
+                if o.creator != caller {
+                    return Err(TradeError::NotOrderCreator);
+                }
+                Ok(m.remove(&order_id).unwrap())
+            } else {
+                Err(TradeError::OrderNotFound(order_id))
+            }
+        })?;
+
+        let series = ensure_series_registered(&order.series_id).await?;
+
+        let settlement_asset = series.settlement_asset.to_asset();
+
+        MARGIN_ACCOUNTS.with(|accounts| {
+            let mut accounts = accounts.borrow_mut();
+            if let Some(acc) = accounts.get_mut(&caller) {
+                let _ = acc.release_balance(settlement_asset, order.block_index);
+            }
         });
 
         Ok(true)
+    })
+    .await;
+
+    result.into()
+}
+
+/// Submits a matched trade from an exchange for clearing.
+#[update(guard = "caller_is_not_anonymous")]
+pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMatchedTradeResult {
+    let result = internal_execute_trade(ExecuteTradeParams {
+        trade_id: params.trade_id,
+        series_id: params.series_id,
+        buyer: params.buyer,
+        seller: params.seller,
+        qty: params.qty,
+        price: params.price,
+        buyer_unblock_amount: params
+            .buyer_unblock_amount
+            .map(|n| n.0.try_into().unwrap_or(0)),
+        seller_unblock_amount: params
+            .seller_unblock_amount
+            .map(|n| n.0.try_into().unwrap_or(0)),
     })
     .await;
 
