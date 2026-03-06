@@ -3,18 +3,20 @@ use std::collections::BTreeMap;
 use ic_cdk_macros::{query, update};
 use shared::types::{Asset, SeriesId};
 
+use super::{
+    errors::MarginAccountError,
+    params::{GetMarginAccountParams, GetPositionParams},
+};
 use crate::{
     assets::asset::{handler::get_handler, params::AssetBalanceOfParams},
     guards::caller_is_not_anonymous,
     memory::{MARGIN_ACCOUNTS, POSITIONS},
     types::{
         account::LedgerAccount,
-        errors::MarginAccountError,
         margin::{MarginAccount, Position},
-        params::{GetMarginAccountParams, GetPositionParams},
-        results::GetMarginAccountResult,
         user::User,
     },
+    GetMarginAccountResult,
 };
 
 /// Retrieves the current user's margin account details (query only).

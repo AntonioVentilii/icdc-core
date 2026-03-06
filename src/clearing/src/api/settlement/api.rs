@@ -3,6 +3,7 @@ use ic_cdk::api::is_controller;
 use ic_cdk_macros::update;
 use shared::types::Asset;
 
+use super::{errors::SettlementError, params::SettleSeriesParams, results::SettleSeriesResult};
 use crate::{
     assets::{
         asset::{handler::get_handler, params::AssetTransferParams},
@@ -13,10 +14,8 @@ use crate::{
     payoffs::get_settlement_value,
     types::{
         account::LedgerAccount,
-        errors::{CommonError, LedgerError, SettlementError},
-        params::SettleSeriesParams,
+        errors::{CommonError, LedgerError},
         plans::{PlanStatus, SettlementPlan, SettlementPlanParams},
-        results::SettleSeriesResult,
         user::User,
     },
 };

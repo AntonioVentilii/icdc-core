@@ -2,6 +2,14 @@ use std::collections::BTreeMap;
 
 use ic_cdk_macros::update;
 
+use super::{
+    errors::TradeError,
+    params::{
+        CancelLimitOrderParams, FreezePositionForTransferParams, SubmitLimitOrderParams,
+        SubmitMarketOrderParams, SubmitMatchedTradeParams,
+    },
+    results::{AcceptPositionTransferResult, SubmitMatchedTradeResult},
+};
 use crate::{
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
@@ -11,13 +19,7 @@ use crate::{
     payoffs::get_required_margin,
     trade::{service::internal_execute_trade, types::ExecuteTradeParams},
     types::{
-        errors::TradeError,
         margin::{MarginAccount, Position},
-        params::{
-            CancelLimitOrderParams, FreezePositionForTransferParams, SubmitLimitOrderParams,
-            SubmitMarketOrderParams, SubmitMatchedTradeParams,
-        },
-        results::{AcceptPositionTransferResult, SubmitMatchedTradeResult},
         state::PositionProof,
         trade::{LimitOrder, Side},
         user::User,

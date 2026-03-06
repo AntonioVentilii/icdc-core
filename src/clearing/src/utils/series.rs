@@ -2,8 +2,9 @@ use candid::Principal;
 use shared::types::{Series, SeriesId};
 
 use crate::{
+    api::trade::errors::TradeError,
     memory::{REGISTRY_CANISTER, SERIES},
-    types::errors::{CommonError, TradeError},
+    types::errors::CommonError,
     utils::asset::is_supported_asset,
 };
 

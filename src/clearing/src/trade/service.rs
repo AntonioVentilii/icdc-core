@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
 use crate::{
+    api::trade::errors::TradeError,
     memory::{EVENTS, EXECUTED_TRADES, MARGIN_ACCOUNTS, NEXT_EVENT_ID, POSITIONS},
     payoffs::get_required_margin,
     trade::types::ExecuteTradeParams,
     types::{
-        errors::TradeError,
         event::{Event, EventType},
         margin::{MarginAccount, Position},
     },

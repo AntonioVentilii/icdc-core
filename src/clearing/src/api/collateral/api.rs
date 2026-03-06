@@ -2,6 +2,17 @@ use std::collections::BTreeMap;
 
 use ic_cdk_macros::update;
 
+use super::{
+    errors::{BlockingError, DepositCollateralError, WithdrawCollateralError},
+    params::{
+        BlockCollateralParams, DepositCollateralParams, UnblockCollateralParams,
+        WithdrawCollateralParams,
+    },
+    results::{
+        BlockCollateralResult, DepositCollateralResult, UnblockCollateralResult,
+        WithdrawCollateralResult,
+    },
+};
 use crate::{
     assets::{
         asset::{
@@ -14,17 +25,9 @@ use crate::{
     memory::{DEPOSIT_PLANS, MARGIN_ACCOUNTS, WITHDRAWAL_PLANS},
     types::{
         account::LedgerAccount,
-        errors::{BlockingError, DepositCollateralError, LedgerError, WithdrawCollateralError},
+        errors::LedgerError,
         margin::MarginAccount,
-        params::{
-            BlockCollateralParams, DepositCollateralParams, UnblockCollateralParams,
-            WithdrawCollateralParams,
-        },
         plans::{DepositPlan, DepositPlanParams, PlanStatus, WithdrawalPlan, WithdrawalPlanParams},
-        results::{
-            BlockCollateralResult, DepositCollateralResult, UnblockCollateralResult,
-            WithdrawCollateralResult,
-        },
         user::User,
     },
     utils::asset::is_supported_asset,
