@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euxo pipefail
+set -euo pipefail
 
 echo "Checks whether all Cargo dependencies are taken from the workspace"
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euxo pipefail
+set -euo pipefail
 
 # Ensure that a minter id exists:
 dfx identity get-principal --identity minter 2>/dev/null || dfx identity new minter --storage-mode=plaintext
