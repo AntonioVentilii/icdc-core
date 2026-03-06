@@ -6,7 +6,11 @@
 		"test:unit": "scripts/test.unit.sh",
 		"test": "npm run test:unit",
 		"format": "prettier --write . && ./scripts/format.sh",
+		"format:rust": "./scripts/format.rust.sh",
 		"lint": "prettier --check . && ./scripts/lint.sh",
+		"lint:rust": "./scripts/lint.rust.sh",
+		"quality": "npm run format && npm run lint",
+		"quality:rust": "npm run format:rust && npm run lint:rust",
 		"did": "./scripts/did.sh && npm run format && npm run lint",
 		"deploy:prod": "dfx deploy --ic --upgrade-unchanged",
 		"deploy:staging": "dfx deploy --network staging --upgrade-unchanged"
