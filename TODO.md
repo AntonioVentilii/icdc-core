@@ -33,7 +33,7 @@
 - [x] **Authorized Creators**: Restrict `add_series` to specific principals or roles.
 - [ ] **Authorized Exchanges**: Gated `submit_matched_trade` so only trusted exchange canisters can submit trades.
 - [ ] **Cryptographic Signatures**: Implement signing for `PositionProof` in `freeze_position_for_transfer` (currently using empty bytes).
-- [ ] **Pre-check Solvency**: Add comprehensive solvency checks in `settle_series` before starting transfers.
+- [x] **Pre-check Solvency**: Add comprehensive solvency checks in `settle_series` before starting transfers.
 
 ### Margin Logic
 

@@ -1,7 +1,7 @@
 use candid::Principal;
 use ic_cdk::api::is_controller;
 use ic_cdk_macros::update;
-use shared::types::Asset;
+use shared::types::{Asset, Price, Series};
 
 use super::{errors::SettlementError, params::SettleSeriesParams, results::SettleSeriesResult};
 use crate::{
@@ -125,19 +125,18 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 .await
                 .map_err(SettlementError::Ledger)?;
 
+            // Pre-flight check: ensure system-wide and user-level solvency before any state
+            // changes. This acts as a fail-fast circuit breaker to prevent partial
+            // settlements (bad debt) and guarantees that the canister only executes if
+            // all payers are covered.
+            check_settlement_solvency(&ser, &settlement_price, &positions_to_settle, fee)?;
+
             // Compute net payers/receivers + accounting updates
             let mut payers: Vec<(User, u128)> = Vec::new();
             let mut receivers: Vec<(User, u128)> = Vec::new();
             let mut accounting_updates: Vec<(User, i8, u128, u128)> = Vec::new(); // (user, sign, profit_loss, margin_to_release)
 
             for (user, net_qty, locked_collateral) in positions_to_settle.iter().copied() {
-                let ser = SERIES.with(|s| {
-                    s.borrow()
-                        .get(&series_id)
-                        .cloned()
-                        .expect("Series must exist during settlement")
-                });
-
                 let payoff_u128 = get_settlement_value(&ser, &settlement_price, net_qty);
 
                 let cashflow: i128 = (payoff_u128 as i128) - (locked_collateral as i128);
@@ -331,4 +330,75 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
     .await;
 
     result.into()
+}
+
+/// Validates aggregation and individual solvency for a settlement batch.
+///
+/// 1. Aggregate: sum(payoffs) <= sum(locked_collateral)
+/// 2. Individual: each payer has sufficient internal balance (loss + fee)
+fn check_settlement_solvency(
+    series: &Series,
+    price: &Price,
+    positions: &[(User, i128, u128)],
+    fee: u128,
+) -> Result<(), SettlementError> {
+    let mut total_payoff: u128 = 0;
+
+    let mut total_collateral: u128 = 0;
+
+    let mut payers: Vec<(User, u128)> = Vec::new();
+
+    for (user, net_qty, locked_collateral) in positions.iter().copied() {
+        let payoff = get_settlement_value(series, price, net_qty);
+
+        total_payoff = total_payoff
+            .checked_add(payoff)
+            .ok_or(SettlementError::MathOverflow)?;
+
+        total_collateral = total_collateral
+            .checked_add(locked_collateral)
+            .ok_or(SettlementError::MathOverflow)?;
+
+        if payoff < locked_collateral {
+            // Loser: must cover (locked_collateral - payoff) + fee from internal balance
+            let loss = locked_collateral - payoff;
+            payers.push((user, loss + fee));
+        }
+    }
+
+    // Aggregate check: System must be solvent (total collateral >= total payoff)
+    if total_payoff > total_collateral {
+        return Err(SettlementError::SolvencyViolation {
+            total_payoff,
+            total_collateral,
+        });
+    }
+
+    // Individual check: Every payer must have enough internal balance
+    let settlement_asset = series.settlement_asset.to_asset();
+
+    MARGIN_ACCOUNTS.with(|accounts| {
+        let accounts = accounts.borrow();
+
+        for (user, required) in payers {
+            if let Some(account) = accounts.get(&user) {
+                let balance = account.get_balance(&settlement_asset);
+                if balance < required {
+                    return Err(SettlementError::InsufficientInternalBalance {
+                        user,
+                        balance,
+                        required,
+                    });
+                }
+            } else {
+                return Err(SettlementError::InsufficientInternalBalance {
+                    user,
+                    balance: 0,
+                    required,
+                });
+            }
+        }
+
+        Ok(())
+    })
 }
