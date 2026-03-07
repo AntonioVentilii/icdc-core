@@ -3,6 +3,8 @@ use std::collections::BTreeSet;
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 
+use crate::types::description::Description;
+
 /// Metadata about a price oracle entity.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct OracleMetadata {
@@ -11,7 +13,7 @@ pub struct OracleMetadata {
     /// Optional URL to the oracle's website.
     pub website: Option<String>,
     /// A short description of the oracle's methodology or data sources.
-    pub description: Option<String>,
+    pub description: Option<Description>,
 }
 
 /// Represents an authorised price oracle group.

@@ -1,6 +1,8 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
-use shared::types::{OracleMetadata, PayoffType, Price, Series, SeriesId, SettlementAsset};
+use shared::types::{
+    Description, OracleMetadata, PayoffType, Price, Series, SeriesId, SettlementAsset,
+};
 
 /// Input parameters for registering a new derivative series.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -22,7 +24,7 @@ pub struct AddSeriesParams {
     /// A short, descriptive title for the series.
     pub title: String,
     /// A detailed description of the series.
-    pub description: String,
+    pub description: Description,
 }
 
 /// Parameters for paginating results.
@@ -141,7 +143,11 @@ impl ListSeriesParams {
         if let Some(search_term) = &self.search_term {
             let search_term = search_term.to_lowercase();
             let matches_title = series.title.to_lowercase().contains(&search_term);
-            let matches_description = series.description.to_lowercase().contains(&search_term);
+            let matches_description = series
+                .description
+                .plain
+                .to_lowercase()
+                .contains(&search_term);
             let matches_id = series
                 .series_id
                 .as_str()
@@ -191,7 +197,7 @@ pub struct ManageOraclePrincipalsParams {
 #[cfg(test)]
 mod tests {
     use candid::Principal;
-    use shared::types::{PayoffType, SeriesId, SettlementAsset};
+    use shared::types::{Description, PayoffType, SeriesId, SettlementAsset};
 
     use super::*;
 
@@ -208,7 +214,7 @@ mod tests {
             creator: Principal::anonymous(),
             created_at_ns: 0,
             title: "ICP Call".to_string(),
-            description: "Test description".to_string(),
+            description: Description::plain("Test description"),
         }
     }
 

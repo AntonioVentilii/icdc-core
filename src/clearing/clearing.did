@@ -22,6 +22,11 @@ type DepositCollateralParams = record {
 	amount : nat
 };
 type DepositCollateralResult = variant { Ok; Err : DepositCollateralError };
+type Description = record {
+	html : opt text;
+	markdown : opt text;
+	plain : text
+};
 type Event = record {
 	qty : int;
 	series_id : text;
@@ -112,7 +117,7 @@ type Series = record {
 	series_id : text;
 	settlement_asset : SettlementAsset;
 	underlying : text;
-	description : text;
+	description : Description;
 	created_at_ns : nat64;
 	price_precision : nat8;
 	oracle_source : text
@@ -121,8 +126,14 @@ type SettleSeriesParams = record { series_id : text; settlement_price : Price };
 type SettleSeriesResult = variant { Ok; Err : SettlementError };
 type SettlementAsset = variant { Icp; CkUsdc };
 type SettlementError = variant {
+	InsufficientInternalBalance : record {
+		balance : nat;
+		user : principal;
+		required : nat
+	};
 	UnsupportedSettlementAsset;
 	MathOverflow;
+	SolvencyViolation : record { total_payoff : nat; total_collateral : nat };
 	Ledger : LedgerError;
 	Common : CommonError
 };

@@ -160,7 +160,7 @@ mod tests {
             creator: Principal::anonymous(),
             created_at_ns: 1700000000,
             title: "Test Series".to_string(),
-            description: "A test series for unit testing".to_string(),
+            description: "A test series for unit testing".to_string().into(),
         }
     }
 

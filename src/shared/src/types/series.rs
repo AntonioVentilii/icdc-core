@@ -2,7 +2,7 @@ use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::types::{asset::SettlementAsset, price::Price};
+use crate::types::{asset::SettlementAsset, description::Description, price::Price};
 
 /// A unique identifier for a derivative series.
 /// Encapsulates a hex-encoded string derived from series parameters.
@@ -69,7 +69,7 @@ pub struct Series {
     /// A short, descriptive title for the series.
     pub title: String,
     /// A detailed description of the series.
-    pub description: String,
+    pub description: Description,
 }
 impl Series {
     /// Generates a unique [`SeriesId`] based on the contract parameters.
@@ -239,11 +239,11 @@ mod tests {
             creator: Principal::anonymous(),
             created_at_ns: 1700000000,
             title: "Long ICP Call".to_string(),
-            description: "A vanilla call option on ICP".to_string(),
+            description: Description::plain("A vanilla call option on ICP"),
         };
 
         assert_eq!(series.title, "Long ICP Call");
-        assert_eq!(series.description, "A vanilla call option on ICP");
+        assert_eq!(series.description.plain, "A vanilla call option on ICP");
         assert_eq!(series.creator, Principal::anonymous());
         assert_eq!(series.price_precision, 8);
     }

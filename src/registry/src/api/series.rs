@@ -46,7 +46,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
             return Err(SeriesError::TitleTooLong).into();
         }
 
-        if description.chars().count() > MAX_SERIES_DESCRIPTION_LEN {
+        if description.plain.chars().count() > MAX_SERIES_DESCRIPTION_LEN {
             return Err(SeriesError::DescriptionTooLong).into();
         }
 
