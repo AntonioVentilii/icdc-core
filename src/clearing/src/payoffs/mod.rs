@@ -1,54 +1,82 @@
-use shared::types::{PayoffType, Series};
+mod types;
+mod utils;
+
+use shared::types::{PayoffType, Price, Series};
+
+use crate::payoffs::{types::RoundingMode, utils::scale_price};
 
 /// Calculates the actual payout at settlement based on the series type.
 ///
 /// Returns the amount (in the settlement asset's base units) that the long side
 /// of the position receives.
 ///
+/// NOTE: Payouts are rounded DOWN (Floor) when scaling from system precision
+/// to asset decimals to ensure system solvency.
+///
 /// # Arguments
 /// * `series` - The derivative series details.
 /// * `settlement_price` - The final price from the oracle.
-/// * `qty` - The net quantity of the position (positive for Long, negative for Short).
-pub fn get_settlement_value(series: &Series, settlement_price: u64, qty: i128) -> u128 {
+/// * `qty` - The net quantity of the position (number of series units, positive for Long, negative
+///   for Short).
+pub fn get_settlement_value(series: &Series, settlement_price: &Price, qty: i128) -> u128 {
     let abs_qty = qty.unsigned_abs();
+
+    let asset_decimals = series.settlement_asset.decimals();
+
+    let source_precision = settlement_price.decimals() as u32;
+    let price_value = settlement_price.value() as u128;
+
     match series.payoff_type {
         PayoffType::Binary => {
-            // Binary Options (Digital): 1.0 (100M) if in-the-money, 0 otherwise.
-            // But currently the system uses the settlement price as the "probability" or "index"
-            // where 100M is the max payout.
+            let max_payoff = 10u128.pow(asset_decimals);
+
+            // We use Floor for payouts to be conservative.
+            let scaled_price = scale_price(
+                price_value,
+                asset_decimals,
+                source_precision,
+                RoundingMode::Floor,
+            );
+
             // If qty > 0 (Long), they get: settlement_price
-            // If qty < 0 (Short), they get: (100M - settlement_price)
-            let max_payoff: u128 = 100_000_000;
+            // If qty < 0 (Short), they get: (max_payoff - settlement_price)
             if qty >= 0 {
-                abs_qty * (settlement_price as u128)
+                abs_qty * scaled_price
             } else {
-                abs_qty * (max_payoff.saturating_sub(settlement_price as u128))
+                abs_qty * max_payoff.saturating_sub(scaled_price)
             }
         }
+
         PayoffType::Call => {
             // Vanilla Call: max(S - K, 0)
-            let strike = series.strike.unwrap_or(0);
-            if qty >= 0 {
-                // Long Call
-                abs_qty * (settlement_price.saturating_sub(strike) as u128)
-            } else {
-                // Short Call: The short pays max(S-K, 0).
-                // In this settlement model, we calculate what the user *receives*.
-                // For a short, this calculation might be negative or handle debt.
-                // For now, we return 0 as the "payoff" and the settlement logic handles the rest.
-                0
-            }
+            let strike_price = series.strike.as_ref().map(|p| p.value()).unwrap_or(0);
+
+            let raw_payoff = (settlement_price.value().saturating_sub(strike_price)) as u128;
+
+            let scaled_payoff = scale_price(
+                raw_payoff,
+                asset_decimals,
+                source_precision,
+                RoundingMode::Floor,
+            );
+
+            abs_qty * scaled_payoff
         }
+
         PayoffType::Put => {
             // Vanilla Put: max(K - S, 0)
-            let strike = series.strike.unwrap_or(0);
-            if qty >= 0 {
-                // Long Put
-                abs_qty * (strike.saturating_sub(settlement_price) as u128)
-            } else {
-                // Short Put
-                0
-            }
+            let strike_price = series.strike.as_ref().map(|p| p.value()).unwrap_or(0);
+
+            let raw_payoff = (strike_price.saturating_sub(settlement_price.value())) as u128;
+
+            let scaled_payoff = scale_price(
+                raw_payoff,
+                asset_decimals,
+                source_precision,
+                RoundingMode::Floor,
+            );
+
+            abs_qty * scaled_payoff
         }
     }
 }
@@ -58,31 +86,51 @@ pub fn get_settlement_value(series: &Series, settlement_price: u64, qty: i128) -
 /// This determines how much of the settlement asset must be locked in the user's
 /// margin account to maintain the position.
 ///
+/// NOTE: Margin requirements are rounded UP (Ceiling) when scaling from system
+/// precision to asset decimals to be conservative.
+///
 /// # Arguments
 /// * `series` - The derivative series details.
 /// * `price` - The current market price or entry price.
-/// * `qty` - The net quantity of the position.
-pub fn get_required_margin(series: &Series, price: u64, qty: i128) -> u128 {
+/// * `qty` - The net quantity of the position (number of series units, positive for Long, negative
+///   for Short).
+pub fn get_required_margin(series: &Series, price: &Price, qty: i128) -> u128 {
     let abs_qty = qty.unsigned_abs();
+
+    let asset_decimals = series.settlement_asset.decimals();
+
+    let source_precision = price.decimals() as u32;
+    let price_value = price.value() as u128;
+
+    // We use Ceil for margin to be conservative and ensure enough funds are blocked.
+    let scaled_price = scale_price(
+        price_value,
+        asset_decimals,
+        source_precision,
+        RoundingMode::Ceil,
+    );
+
     match series.payoff_type {
         PayoffType::Binary => {
-            let max_payoff: u128 = 100_000_000;
+            let max_payoff = 10u128.pow(asset_decimals);
+
             if qty > 0 {
                 // Long Binary: Must pay the current price.
-                abs_qty * (price as u128)
+                abs_qty * scaled_price
             } else if qty < 0 {
                 // Short Binary: Must collateralise the remaining payout.
-                abs_qty * (max_payoff.saturating_sub(price as u128))
+                abs_qty * (max_payoff.saturating_sub(scaled_price))
             } else {
                 0
             }
         }
+
         PayoffType::Call | PayoffType::Put => {
             // Placeholder: Vanilla margin model.
             // For Long: usually the full premium (price).
             // For Short: depends on risk, but often strike + buffer or similar.
             // For now, we use price as a placeholder for both sides.
-            abs_qty * (price as u128)
+            abs_qty * scaled_price
         }
     }
 }
@@ -94,14 +142,20 @@ mod tests {
 
     use super::*;
 
-    fn mock_series(payoff_type: PayoffType, strike: Option<u64>) -> Series {
+    fn mock_series(
+        payoff_type: PayoffType,
+        strike: Option<Price>,
+        precision: u8,
+        asset: SettlementAsset,
+    ) -> Series {
         Series {
             series_id: SeriesId::from("test".to_string()),
             underlying: "ICP".to_string(),
             expiry_ns: 0,
             payoff_type,
             strike,
-            settlement_asset: SettlementAsset::Icp,
+            price_precision: precision,
+            settlement_asset: asset,
             oracle_source: "oracle".to_string(),
             creator: Principal::anonymous(),
             created_at_ns: 1700000000,
@@ -111,29 +165,131 @@ mod tests {
     }
 
     #[test]
-    fn test_binary_payoff() {
-        let series = mock_series(PayoffType::Binary, None);
-        // Long 10 units, price 60M -> 600M
-        assert_eq!(get_settlement_value(&series, 60_000_000, 10), 600_000_000);
-        // Short 10 units, price 60M -> (100M - 60M) * 10 = 400M
-        assert_eq!(get_settlement_value(&series, 60_000_000, -10), 400_000_000);
+    fn test_binary_payoff_icp() {
+        let series = mock_series(PayoffType::Binary, None, 8, SettlementAsset::Icp);
+        let price = Price::new(60_000_000, 8);
+        // Price 0.60 (60M). Max 1.0 (100M).
+        assert_eq!(get_settlement_value(&series, &price, 10), 600_000_000);
+        assert_eq!(get_settlement_value(&series, &price, -10), 400_000_000);
+    }
+
+    #[test]
+    fn test_binary_payoff_ckusdc() {
+        let series = mock_series(PayoffType::Binary, None, 8, SettlementAsset::CkUsdc);
+        let price = Price::new(60_000_000, 8);
+        // Price 0.60 (60M). Max 1.0 (1M).
+        // 60M @ 8 precision scaled to 6 is 600k.
+        assert_eq!(get_settlement_value(&series, &price, 10), 6_000_000);
+        assert_eq!(get_settlement_value(&series, &price, -10), 4_000_000);
     }
 
     #[test]
     fn test_call_payoff() {
-        let series = mock_series(PayoffType::Call, Some(100));
-        // Settlement 150 -> Payoff (150-100) = 50
-        assert_eq!(get_settlement_value(&series, 150, 1), 50);
-        // Settlement 80 -> Payoff 0
-        assert_eq!(get_settlement_value(&series, 80, 1), 0);
+        let strike_price = Price::new(100_0000_0000, 8); // $100.00
+        let settle_price = Price::new(150_0000_0000, 8); // $150.00
+
+        let series_icp = mock_series(
+            PayoffType::Call,
+            Some(strike_price.clone()),
+            8,
+            SettlementAsset::Icp,
+        );
+        // ICP: (150 - 100) = 50.00 -> 50_0000_0000
+        assert_eq!(
+            get_settlement_value(&series_icp, &settle_price, 1),
+            5_000_000_000
+        );
+
+        let series_usdc = mock_series(
+            PayoffType::Call,
+            Some(strike_price),
+            8,
+            SettlementAsset::CkUsdc,
+        );
+        // ckUSDC: (150 - 100) = 50.00 -> 50_000_000
+        assert_eq!(
+            get_settlement_value(&series_usdc, &settle_price, 1),
+            50_000_000
+        );
     }
 
     #[test]
     fn test_put_payoff() {
-        let series = mock_series(PayoffType::Put, Some(100));
-        // Settlement 80 -> Payoff (100-80) = 20
-        assert_eq!(get_settlement_value(&series, 80, 1), 20);
-        // Settlement 150 -> Payoff 0
-        assert_eq!(get_settlement_value(&series, 150, 1), 0);
+        let strike_price = Price::new(100_0000_0000, 8); // $100.00
+        let settle_price = Price::new(80_0000_0000, 8); // $80.00
+
+        let series_icp = mock_series(
+            PayoffType::Put,
+            Some(strike_price.clone()),
+            8,
+            SettlementAsset::Icp,
+        );
+        // ICP: (100 - 80) = 20.00 -> 20_0000_0000
+        assert_eq!(
+            get_settlement_value(&series_icp, &settle_price, 1),
+            2_000_000_000
+        );
+
+        let series_usdc = mock_series(
+            PayoffType::Put,
+            Some(strike_price),
+            8,
+            SettlementAsset::CkUsdc,
+        );
+        // ckUSDC: (100 - 80) = 20.00 -> 20_000_000
+        assert_eq!(
+            get_settlement_value(&series_usdc, &settle_price, 1),
+            20_000_000
+        );
+    }
+
+    #[test]
+    fn test_margin_logic() {
+        let price = Price::new(60_000_000, 8); // 0.60 (8 decimals)
+        let series_icp = mock_series(PayoffType::Binary, None, 8, SettlementAsset::Icp);
+        // Long ICP (8 decimals): 0.60 -> 60,000,000
+        assert_eq!(get_required_margin(&series_icp, &price, 1), 60_000_000);
+        // Short ICP (8 decimals): (1.0 - 0.6) = 0.40 -> 40_000_000
+        assert_eq!(get_required_margin(&series_icp, &price, -1), 40_000_000);
+
+        let price_usdc = Price::new(60_000_000, 8);
+        let series_usdc = mock_series(PayoffType::Binary, None, 8, SettlementAsset::CkUsdc);
+        // Long ckUSDC (6 decimals): 0.60 -> 600,000
+        assert_eq!(get_required_margin(&series_usdc, &price_usdc, 1), 600_000);
+        // Short ckUSDC (6 decimals): (1.0 - 0.6) = 0.40 -> 400,000
+        assert_eq!(get_required_margin(&series_usdc, &price_usdc, -1), 400_000);
+    }
+
+    #[test]
+    fn test_rounding_precision() {
+        // Asset: 6 decimals (factor 100)
+        let series_usdc = mock_series(PayoffType::Binary, None, 8, SettlementAsset::CkUsdc);
+
+        // Use an unaligned price to verify proper rounding (conversion between 8 and 6 decimals).
+        // 35,555,555 / 100 = 355,555.55...
+        let unaligned_price = Price::new(35_555_555, 8);
+
+        // Margin (Ceil): (35,555,555 + 99) / 100 = 355,556
+        assert_eq!(
+            get_required_margin(&series_usdc, &unaligned_price, 1),
+            355_556
+        );
+
+        // Settlement (Floor): 35,555,555 / 100 = 355,555
+        assert_eq!(
+            get_settlement_value(&series_usdc, &unaligned_price, 1),
+            355_555
+        );
+    }
+
+    #[test]
+    fn test_custom_precision() {
+        // Case: 10 decimals price precision, 6 decimals asset
+        let series = mock_series(PayoffType::Binary, None, 10, SettlementAsset::CkUsdc);
+
+        // Price: 35.5% -> 3,550,000,000 (10 decimals)
+        // Scaled to 6 decimals: 3,550,000,000 / 10,000 = 355,000
+        let price = Price::new(3_550_000_000, 10);
+        assert_eq!(get_required_margin(&series, &price, 1), 355_000);
     }
 }

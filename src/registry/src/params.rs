@@ -1,6 +1,6 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
-use shared::types::{OracleMetadata, PayoffType, Series, SeriesId, SettlementAsset};
+use shared::types::{OracleMetadata, PayoffType, Price, Series, SeriesId, SettlementAsset};
 
 /// Input parameters for registering a new derivative series.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -12,7 +12,9 @@ pub struct AddSeriesParams {
     /// The payoff model for the series.
     pub payoff_type: PayoffType,
     /// The option strike price, if applicable.
-    pub strike: Option<u64>,
+    pub strike: Option<Price>,
+    /// The number of decimals used for prices and strikes in this series.
+    pub price_precision: u8,
     /// The asset in which the contract is settled.
     pub settlement_asset: SettlementAsset,
     /// The price oracle identifier (case-insensitive, e.g., "Coingecko").
@@ -81,7 +83,7 @@ pub struct ListSeriesParams {
     /// Filter by the payoff model.
     pub payoff_type: Option<PayoffType>,
     /// Filter by the strike price.
-    pub strike: Option<u64>,
+    pub strike: Option<Price>,
     /// Filter by the settlement asset.
     pub settlement_asset: Option<SettlementAsset>,
     /// Filter by the price oracle identifier (case-insensitive, partial match).
@@ -108,8 +110,8 @@ impl ListSeriesParams {
             }
         }
 
-        if let Some(strike) = self.strike {
-            if series.strike != Some(strike) {
+        if let Some(strike) = &self.strike {
+            if series.strike.as_ref() != Some(strike) {
                 return false;
             }
         }
@@ -199,7 +201,8 @@ mod tests {
             underlying: "ICP".to_string(),
             expiry_ns: 1000,
             payoff_type: PayoffType::Call,
-            strike: Some(100),
+            strike: Some(Price::new(100, 8)),
+            price_precision: 8,
             settlement_asset: SettlementAsset::Icp,
             oracle_source: "Coingecko".to_string(),
             creator: Principal::anonymous(),

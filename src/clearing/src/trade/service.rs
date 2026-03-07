@@ -63,8 +63,8 @@ pub(crate) async fn internal_execute_trade(params: ExecuteTradeParams) -> Result
             .unwrap_or(0)
             - qty;
 
-        let new_buyer_margin = get_required_margin(&series, price, new_buyer_qty);
-        let new_seller_margin = get_required_margin(&series, price, new_seller_qty);
+        let new_buyer_margin = get_required_margin(&series, &price, new_buyer_qty);
+        let new_seller_margin = get_required_margin(&series, &price, new_seller_qty);
 
         (
             (new_buyer_margin as i128) - (old_buyer_margin as i128),

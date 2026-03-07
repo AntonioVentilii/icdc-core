@@ -1,6 +1,6 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
-use shared::types::SeriesId;
+use shared::types::{Price, SeriesId};
 
 use crate::types::user::User;
 
@@ -36,7 +36,12 @@ pub struct LimitOrder {
     pub creator: User,
     pub series_id: SeriesId,
     pub side: Side,
+    /// Number of Series Units (contracts), where 1 unit represents exposure to 1.0 of the
+    /// underlying asset. It is positive for buy orders and negative for sell orders.
     pub qty: i128,
-    pub price: u64,
-    pub block_index: u128, // Amount blocked in collateral
+    /// Limit price in the precision defined by the associated series (`series.price_precision`).
+    pub price: Price,
+    /// Amount blocked in collateral (in settlement asset's base units).
+    /// TODO: double-check if the above is true
+    pub block_index: u128,
 }

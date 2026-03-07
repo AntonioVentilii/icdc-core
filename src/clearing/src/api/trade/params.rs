@@ -1,6 +1,6 @@
 use candid::{CandidType, Deserialize, Nat};
 use serde::Serialize;
-use shared::types::SeriesId;
+use shared::types::{Price, SeriesId};
 
 use crate::types::{
     trade::{OrderId, Side, TradeId, TransferId},
@@ -19,7 +19,7 @@ pub struct SubmitLimitOrderParams {
     /// The quantity of the order.
     pub qty: i128,
     /// The limit price of the order.
-    pub price: u64,
+    pub price: Price,
 }
 
 /// Input parameters for submitting a market order (taking an existing limit order).
@@ -45,7 +45,7 @@ pub struct SubmitMatchedTradeParams {
     /// The quantity of the trade.
     pub qty: i128,
     /// The execution price of the trade.
-    pub price: u64,
+    pub price: Price,
     /// Optional amount to atomically unblock for the buyer.
     pub buyer_unblock_amount: Option<Nat>,
     /// Optional amount to atomically unblock for the seller.

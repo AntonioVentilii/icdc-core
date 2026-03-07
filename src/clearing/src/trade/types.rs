@@ -1,4 +1,4 @@
-use shared::types::SeriesId;
+use shared::types::{Price, SeriesId};
 
 use crate::types::{trade::TradeId, user::User};
 
@@ -8,7 +8,7 @@ pub(crate) struct ExecuteTradeParams {
     pub buyer: User,
     pub seller: User,
     pub qty: i128,
-    pub price: u64,
+    pub price: Price,
     pub buyer_unblock_amount: Option<u128>,
     pub seller_unblock_amount: Option<u128>,
 }

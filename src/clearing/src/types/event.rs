@@ -1,6 +1,6 @@
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
-use shared::types::SeriesId;
+use shared::types::{Price, SeriesId};
 
 use crate::types::user::User;
 
@@ -31,7 +31,7 @@ pub struct Event {
     /// The quantity involved in the event.
     pub qty: i128,
     /// The price at which the event occurred (if applicable).
-    pub price: u64,
+    pub price: Price,
     /// The type of the event.
     pub event_type: EventType,
     /// Timestamp in nanoseconds since UNIX epoch.

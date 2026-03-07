@@ -52,7 +52,7 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
         let settlement_asset = series.settlement_asset.to_asset();
 
         // Calculate required margin for this order (worst case)
-        let required_margin = get_required_margin(&series, price, qty);
+        let required_margin = get_required_margin(&series, &price, qty);
 
         MARGIN_ACCOUNTS.with(|accounts| {
             let mut accounts = accounts.borrow_mut();

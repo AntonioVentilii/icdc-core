@@ -138,7 +138,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                         .expect("Series must exist during settlement")
                 });
 
-                let payoff_u128 = get_settlement_value(&ser, settlement_price, net_qty);
+                let payoff_u128 = get_settlement_value(&ser, &settlement_price, net_qty);
 
                 let cashflow: i128 = (payoff_u128 as i128) - (locked_collateral as i128);
 

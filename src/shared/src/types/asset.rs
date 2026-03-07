@@ -27,6 +27,14 @@ impl SettlementAsset {
         }
     }
 
+    /// Returns the number of decimals for this asset.
+    pub fn decimals(&self) -> u32 {
+        match self {
+            SettlementAsset::Icp => 8,
+            SettlementAsset::CkUsdc => 6,
+        }
+    }
+
     /// Converts the settlement asset to its generic [`Asset`] representation.
     pub fn to_asset(&self) -> Asset {
         match self {

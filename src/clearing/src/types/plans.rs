@@ -1,6 +1,6 @@
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
-use shared::types::{Asset, SeriesId};
+use shared::types::{Asset, Price, SeriesId};
 
 use crate::{
     memory::{DEPOSIT_PLANS, SETTLEMENT_PLANS, WITHDRAWAL_PLANS},
@@ -55,7 +55,7 @@ pub struct SettlementPlanParams {
     /// The unique identifier of the derivative series being settled.
     pub series_id: SeriesId,
     /// The final settlement price from the oracle.
-    pub settlement_price: u64,
+    pub settlement_price: Price,
     /// The asset in which the settlement occurs.
     pub settlement_asset: Asset,
     /// The protocol fee applied to the settlement.
@@ -193,7 +193,7 @@ pub struct SettlementPlan {
     /// The unique identifier of the derivative series.
     pub series_id: SeriesId,
     /// The final settlement price.
-    pub settlement_price: u64,
+    pub settlement_price: Price,
     /// The asset used for settlement.
     pub settlement_asset: Asset,
     /// The protocol fee.
