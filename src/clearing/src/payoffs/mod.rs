@@ -24,7 +24,7 @@ pub fn get_settlement_value(series: &Series, settlement_price: &Price, qty: i128
     let asset_decimals = series.settlement_asset.decimals();
 
     let source_precision = settlement_price.decimals() as u32;
-    let price_value = settlement_price.value() as u128;
+    let price_value = settlement_price.value();
 
     match series.payoff_type {
         PayoffType::Binary => {
@@ -51,7 +51,7 @@ pub fn get_settlement_value(series: &Series, settlement_price: &Price, qty: i128
             // Vanilla Call: max(S - K, 0)
             let strike_price = series.strike.as_ref().map(|p| p.value()).unwrap_or(0);
 
-            let raw_payoff = (settlement_price.value().saturating_sub(strike_price)) as u128;
+            let raw_payoff = settlement_price.value().saturating_sub(strike_price);
 
             let scaled_payoff = scale_price(
                 raw_payoff,
@@ -67,7 +67,7 @@ pub fn get_settlement_value(series: &Series, settlement_price: &Price, qty: i128
             // Vanilla Put: max(K - S, 0)
             let strike_price = series.strike.as_ref().map(|p| p.value()).unwrap_or(0);
 
-            let raw_payoff = (strike_price.saturating_sub(settlement_price.value())) as u128;
+            let raw_payoff = strike_price.saturating_sub(settlement_price.value());
 
             let scaled_payoff = scale_price(
                 raw_payoff,
@@ -100,7 +100,7 @@ pub fn get_required_margin(series: &Series, price: &Price, qty: i128) -> u128 {
     let asset_decimals = series.settlement_asset.decimals();
 
     let source_precision = price.decimals() as u32;
-    let price_value = price.value() as u128;
+    let price_value = price.value();
 
     // We use Ceil for margin to be conservative and ensure enough funds are blocked.
     let scaled_price = scale_price(

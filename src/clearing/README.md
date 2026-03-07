@@ -26,6 +26,7 @@ The canister follows a strict **Plan-Execute-Finalise** pattern for all sensitiv
 ## API Overview
 
 - `submit_matched_trade(params)`: Submits a trade for clearing.
+- `get_orders()` / `get_trade_history()`: Queries active orders and past trades.
 - `deposit_collateral(params)` / `withdraw_collateral(params)`: Manages user funds.
 - `settle_series(params)`: Initiates settlement for an expired series.
 - `freeze_position_for_transfer(params)`: Prepares a position to be moved to another clearing house.

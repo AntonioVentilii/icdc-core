@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use ic_cdk_macros::update;
+use ic_cdk_macros::{query, update};
 
 use super::{
     errors::TradeError,
@@ -13,12 +13,13 @@ use super::{
 use crate::{
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
-        ACCEPTED_TRANSFERS, EXECUTED_TRADES, FROZEN_TRANSFERS, LIMIT_ORDERS, MARGIN_ACCOUNTS,
-        POSITIONS,
+        ACCEPTED_TRANSFERS, EVENTS, EXECUTED_TRADES, FROZEN_TRANSFERS, LIMIT_ORDERS,
+        MARGIN_ACCOUNTS, POSITIONS,
     },
     payoffs::get_required_margin,
     trade::{service::internal_execute_trade, types::ExecuteTradeParams},
     types::{
+        event::{Event, EventType},
         margin::{MarginAccount, Position},
         state::PositionProof,
         trade::{LimitOrder, Side},
@@ -283,4 +284,34 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
     .await;
 
     result.into()
+}
+
+/// Retrieves all active limit orders for the caller.
+#[query(guard = "caller_is_not_anonymous")]
+pub fn get_orders() -> Vec<LimitOrder> {
+    let caller: User = ic_cdk::caller().into();
+
+    LIMIT_ORDERS.with(|orders| {
+        orders
+            .borrow()
+            .values()
+            .filter(|o| o.creator == caller)
+            .cloned()
+            .collect()
+    })
+}
+
+/// Retrieves the trade history (executed trades) for the caller.
+#[query(guard = "caller_is_not_anonymous")]
+pub fn get_trade_history() -> Vec<Event> {
+    let caller: User = ic_cdk::caller().into();
+
+    EVENTS.with(|events| {
+        events
+            .borrow()
+            .iter()
+            .filter(|e| e.user == caller && matches!(e.event_type, EventType::Executed))
+            .cloned()
+            .collect()
+    })
 }

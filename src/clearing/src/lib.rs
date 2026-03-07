@@ -28,10 +28,12 @@ use crate::{
         },
     },
     types::{
+        event::Event,
         http::{HttpRequest, HttpResponse},
         margin::Position,
         state::PositionProof,
         stats::Stats,
+        trade::LimitOrder,
     },
 };
 

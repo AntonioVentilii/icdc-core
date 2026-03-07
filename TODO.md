@@ -14,6 +14,7 @@
 - [x] **Idempotency Pattern**: Implemented "Plan-Execute-Finalise" 3-step logic for safe async transfers.
 - [x] **Multi-Asset Accounts**: `MarginAccount` supports multiple assets (ledger-based).
 - [x] **Trade Execution**: Matched trade submission with margin validation and internal position updates.
+- [x] **New Query Endpoints**: Added `get_orders` and `get_trade_history` for user observability.
 - [x] **Settlement Infrastructure**: Robust, resumable settlement logic for expiring series.
 - [x] **Event Logging**: In-memory event log for all significant state changes.
 
@@ -43,6 +44,14 @@
 
 - [ ] **Registry Sync**: Add timers to Clearing canisters to auto-register new series from the Registry.
 - [ ] **Balance Refreshers**: Timers to periodically pull/verify balances from external ledgers.
+
+### Tech Debt
+
+- [ ] **Code Cleanup**: Refactor and document complex functions, especially in `settle_series`.
+- [ ] **Testing**: Expand unit and integration tests, especially for edge cases in settlement and margin calculations.
+- [ ] **Documentation**: Add comprehensive docstrings and external documentation for all public APIs and complex internal logic.
+- [ ] **Unbounded Vectors**: Replace all `Vec` with bounded collections to prevent DoS from unbounded growth (e.g., in `EVENTS`).
+- [ ] **Pagination for Results**: Implement pagination for `get_orders` and `get_trade_history` to handle large datasets.
 
 ---
 

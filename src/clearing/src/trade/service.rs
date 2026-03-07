@@ -187,12 +187,28 @@ pub(crate) async fn internal_execute_trade(params: ExecuteTradeParams) -> Result
     });
 
     EVENTS.with(|events| {
-        events.borrow_mut().push(Event {
+        let mut events = events.borrow_mut();
+        // Buyer Event
+        events.push(Event {
             event_id,
             clearing_id: ic_cdk::id(),
             series_id: series_id.clone(),
             user: buyer,
             qty,
+            price: price.clone(),
+            event_type: EventType::Executed,
+            timestamp: ic_cdk::api::time(),
+        });
+
+        // Seller Event (using same event_id or should it be different? Usually history shows the
+        // interaction) We use the same event_id as it's the same trade, but now indexed for
+        // both users.
+        events.push(Event {
+            event_id,
+            clearing_id: ic_cdk::id(),
+            series_id: series_id.clone(),
+            user: seller,
+            qty: -qty, // Negative for seller
             price,
             event_type: EventType::Executed,
             timestamp: ic_cdk::api::time(),

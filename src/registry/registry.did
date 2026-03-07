@@ -15,7 +15,7 @@ type AddSeriesParams = record {
 	oracle_source : text
 };
 type AddSeriesResult = variant { Ok : text; Err : SeriesError };
-type DecimalValue = record { decimals : nat8; value : nat64 };
+type DecimalValue = record { decimals : nat8; value : nat };
 type ListSeriesParams = record {
 	strike : opt Price;
 	creator : opt principal;

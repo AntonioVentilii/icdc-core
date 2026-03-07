@@ -18,7 +18,7 @@ pub struct Price {
 
 impl Price {
     /// Creates a new Price instance with just the numeric part.
-    pub fn new(value: u64, decimals: u8) -> Self {
+    pub fn new(value: u128, decimals: u8) -> Self {
         Self {
             decimal: DecimalValue::new(value, decimals),
             timestamp: None,
@@ -27,7 +27,7 @@ impl Price {
     }
 
     /// Convenience getter for the numeric value.
-    pub fn value(&self) -> u64 {
+    pub fn value(&self) -> u128 {
         self.decimal.value
     }
 
@@ -37,8 +37,8 @@ impl Price {
     }
 }
 
-impl From<(u64, u8)> for Price {
-    fn from((value, decimals): (u64, u8)) -> Self {
+impl From<(u128, u8)> for Price {
+    fn from((value, decimals): (u128, u8)) -> Self {
         Self::new(value, decimals)
     }
 }

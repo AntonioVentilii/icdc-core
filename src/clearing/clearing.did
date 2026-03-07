@@ -14,7 +14,7 @@ type CommonError = variant {
 	Unauthorized;
 	RegistryNotSet
 };
-type DecimalValue = record { decimals : nat8; value : nat64 };
+type DecimalValue = record { decimals : nat8; value : nat };
 type DepositCollateralError = variant { MathOverflow; Ledger : LedgerError };
 type DepositCollateralParams = record {
 	deposit_id : text;
@@ -22,6 +22,17 @@ type DepositCollateralParams = record {
 	amount : nat
 };
 type DepositCollateralResult = variant { Ok; Err : DepositCollateralError };
+type Event = record {
+	qty : int;
+	series_id : text;
+	user : principal;
+	timestamp : nat64;
+	event_id : nat64;
+	price : Price;
+	event_type : EventType;
+	clearing_id : principal
+};
+type EventType = variant { OrderPlaced; Executed; Liquidated; Settled };
 type FreezePositionForTransferParams = record {
 	series_id : text;
 	user : principal;
@@ -50,6 +61,15 @@ type LedgerError = variant {
 	MathOverflow;
 	CallError : record { method : text; code : int32; message : text };
 	UnsupportedLedger
+};
+type LimitOrder = record {
+	qty : int;
+	creator : principal;
+	block_index : nat;
+	series_id : text;
+	side : Side;
+	order_id : text;
+	price : Price
 };
 type MarginAccount = record {
 	required_margin : nat;
@@ -202,10 +222,14 @@ service : {
 	//
 	// This does not refresh balances from external ledgers.
 	get_margin_account_query : () -> (GetMarginAccountResult) query;
+	// Retrieves all active limit orders for the caller.
+	get_orders : () -> (vec LimitOrder) query;
 	// Retrieves a specific position for the caller.
 	get_position : (GetPositionParams) -> (opt Position) query;
 	// Retrieves all open positions for the caller.
 	get_positions : () -> (vec record { text; Position }) query;
+	// Retrieves the trade history (executed trades) for the caller.
+	get_trade_history : () -> (vec Event) query;
 	http_request : (HttpRequest) -> (HttpResponse) query;
 	// Returns a list of all derivative series currently cached in the clearing canister.
 	list_series : () -> (vec Series) query;
