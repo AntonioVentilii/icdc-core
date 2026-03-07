@@ -71,6 +71,7 @@ type LimitOrder = record {
 	order_id : text;
 	price : Price
 };
+type ListOrdersParams = record { series_id : opt text };
 type MarginAccount = record {
 	required_margin : nat;
 	reserved_balances : vec record { Asset; nat };
@@ -231,6 +232,8 @@ service : {
 	// Retrieves the trade history (executed trades) for the caller.
 	get_trade_history : () -> (vec Event) query;
 	http_request : (HttpRequest) -> (HttpResponse) query;
+	// Returns a list of all active limit orders, potentially filtered by series.
+	list_orders : (ListOrdersParams) -> (vec LimitOrder) query;
 	// Returns a list of all derivative series currently cached in the clearing canister.
 	list_series : () -> (vec Series) query;
 	// Exports internal state as Prometheus metrics.

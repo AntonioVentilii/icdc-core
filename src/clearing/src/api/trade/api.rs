@@ -5,8 +5,8 @@ use ic_cdk_macros::{query, update};
 use super::{
     errors::TradeError,
     params::{
-        CancelLimitOrderParams, FreezePositionForTransferParams, SubmitLimitOrderParams,
-        SubmitMarketOrderParams, SubmitMatchedTradeParams,
+        CancelLimitOrderParams, FreezePositionForTransferParams, ListOrdersParams,
+        SubmitLimitOrderParams, SubmitMarketOrderParams, SubmitMatchedTradeParams,
     },
     results::{AcceptPositionTransferResult, SubmitMatchedTradeResult},
 };
@@ -313,5 +313,22 @@ pub fn get_trade_history() -> Vec<Event> {
             .filter(|e| e.user == caller && matches!(e.event_type, EventType::Executed))
             .cloned()
             .collect()
+    })
+}
+
+/// Returns a list of all active limit orders, potentially filtered by series.
+#[query]
+pub fn list_orders(params: ListOrdersParams) -> Vec<LimitOrder> {
+    LIMIT_ORDERS.with(|orders| {
+        let orders = orders.borrow();
+
+        match params.series_id {
+            Some(series_id) => orders
+                .values()
+                .filter(|o| o.series_id == series_id)
+                .cloned()
+                .collect(),
+            None => orders.values().cloned().collect(),
+        }
     })
 }

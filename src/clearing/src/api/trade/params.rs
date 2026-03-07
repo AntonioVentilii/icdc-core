@@ -69,3 +69,10 @@ pub struct CancelLimitOrderParams {
     /// Unique identifier for the order to cancel.
     pub order_id: OrderId,
 }
+
+/// Input parameters for listing active limit orders.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct ListOrdersParams {
+    /// Optional series identifier to filter orders.
+    pub series_id: Option<SeriesId>,
+}
