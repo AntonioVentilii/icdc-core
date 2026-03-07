@@ -2,7 +2,10 @@ use std::collections::BTreeMap;
 
 use candid::{CandidType, Principal};
 use serde::Deserialize;
-use shared::types::{Series, SeriesId};
+use shared::{
+    constants::DEFAULT_INSURANCE_FEE_RATIO,
+    types::{Series, SeriesId},
+};
 
 use crate::types::{
     event::Event,
@@ -29,9 +32,25 @@ pub struct PositionProof {
     pub signature: Vec<u8>,
 }
 
+/// Global configuration for the Clearing canister.
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct ClearingConfig {
+    /// The global insurance fund fee ratio in basis points (1 bp = 0.01%).
+    pub insurance_fund_fee_ratio: u16,
+}
+impl Default for ClearingConfig {
+    fn default() -> Self {
+        Self {
+            insurance_fund_fee_ratio: DEFAULT_INSURANCE_FEE_RATIO,
+        }
+    }
+}
+
 /// Represents the complete state of the clearing canister for persistence.
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct StableState {
+    /// The global configuration.
+    pub config: ClearingConfig,
     /// All active positions in the system.
     pub positions: Vec<Position>,
     /// Mapping of users to their margin accounts.
@@ -58,4 +77,8 @@ pub struct StableState {
     pub settlement_plans: BTreeMap<SeriesId, SettlementPlan>,
     /// Active limit orders.
     pub limit_orders: BTreeMap<OrderId, LimitOrder>,
+    /// Accumulated fees in the insurance fund, per asset.
+    pub insurance_fund: BTreeMap<shared::types::Asset, u128>,
+    /// Accumulated fees in the treasury (main fund), per asset.
+    pub treasury: BTreeMap<shared::types::Asset, u128>,
 }

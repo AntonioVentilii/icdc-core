@@ -1,4 +1,4 @@
-use candid::Principal;
+use candid::{Nat, Principal};
 use ic_cdk_macros::{post_upgrade, pre_upgrade};
 use shared::types::{Series, SeriesId};
 
@@ -7,6 +7,10 @@ use crate::{
         account::{
             params::{GetMarginAccountParams, GetPositionParams},
             results::GetMarginAccountResult,
+        },
+        admin::{
+            params::WithdrawFundParams,
+            results::{AdminResult, GetFundsResult},
         },
         collateral::{
             params::{
@@ -31,7 +35,7 @@ use crate::{
         event::Event,
         http::{HttpRequest, HttpResponse},
         margin::Position,
-        state::PositionProof,
+        state::{ClearingConfig, PositionProof},
         stats::Stats,
         trade::LimitOrder,
     },

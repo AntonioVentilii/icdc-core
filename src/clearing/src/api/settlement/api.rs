@@ -10,7 +10,10 @@ use crate::{
         types::AssetAmount,
     },
     guards::caller_is_not_anonymous,
-    memory::{MARGIN_ACCOUNTS, POSITIONS, REGISTRY_CANISTER, SERIES, SETTLEMENT_PLANS},
+    memory::{
+        CONFIG, INSURANCE_FUND, MARGIN_ACCOUNTS, POSITIONS, REGISTRY_CANISTER, SERIES,
+        SETTLEMENT_PLANS, TREASURY,
+    },
     payoffs::get_settlement_value,
     types::{
         account::LedgerAccount,
@@ -32,6 +35,8 @@ use crate::{
 /// series. It is intended to be called by an off-chain oracle or automation.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
+    let insurance_fund_fee_ratio = CONFIG.with(|c| c.borrow().insurance_fund_fee_ratio);
+
     let result: Result<(), SettlementError> = (async {
         let SettleSeriesParams {
             series_id,
@@ -125,40 +130,48 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 .await
                 .map_err(SettlementError::Ledger)?;
 
-            // Pre-flight check: ensure system-wide and user-level solvency before any state
-            // changes. This acts as a fail-fast circuit breaker to prevent partial
             // settlements (bad debt) and guarantees that the canister only executes if
             // all payers are covered.
-            check_settlement_solvency(&ser, &settlement_price, &positions_to_settle, fee)?;
+            check_settlement_solvency(
+                &ser,
+                &settlement_price,
+                &positions_to_settle,
+                fee,
+                insurance_fund_fee_ratio,
+            )?;
 
             // Compute net payers/receivers + accounting updates
             let mut payers: Vec<(User, u128)> = Vec::new();
             let mut receivers: Vec<(User, u128)> = Vec::new();
-            let mut accounting_updates: Vec<(User, i8, u128, u128)> = Vec::new(); // (user, sign, profit_loss, margin_to_release)
+            let mut accounting_updates: Vec<(User, i128, i8, u128, u128)> = Vec::new(); // (user, net_qty, sign, profit_loss, margin_to_release)
+            let mut total_insurance_fee: u128 = 0;
 
             for (user, net_qty, locked_collateral) in positions_to_settle.iter().copied() {
                 let payoff_u128 = get_settlement_value(&ser, &settlement_price, net_qty);
+                let insurance_fee = (payoff_u128 * (insurance_fund_fee_ratio as u128)) / 10000;
+                total_insurance_fee += insurance_fee;
 
                 let cashflow: i128 = (payoff_u128 as i128) - (locked_collateral as i128);
 
                 if cashflow < 0 {
                     let amount = cashflow.unsigned_abs();
                     payers.push((user, amount));
-                    accounting_updates.push((user, -1, amount, locked_collateral));
+                    accounting_updates.push((user, net_qty, -1, amount, locked_collateral));
                 } else if cashflow > 0 {
                     let amount = cashflow.unsigned_abs();
                     receivers.push((user, amount));
-                    accounting_updates.push((user, 1, amount, locked_collateral));
+                    accounting_updates.push((user, net_qty, 1, amount, locked_collateral));
                 } else {
-                    accounting_updates.push((user, 0, 0, locked_collateral));
+                    accounting_updates.push((user, net_qty, 0, 0, locked_collateral));
                 }
             }
 
             SettlementPlan::get_or_create(SettlementPlanParams {
                 series_id: series_id.clone(),
-                settlement_price,
+                settlement_price: settlement_price.clone(),
                 settlement_asset: settlement_asset_val,
                 fee,
+                insurance_fee: total_insurance_fee,
                 positions: positions_to_settle
                     .iter()
                     .map(|(u, q, _)| (*u, *q))
@@ -280,25 +293,36 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
                 while plan.accounting_cursor < plan.accounting_updates.len() {
                     let idx = plan.accounting_cursor;
-                    let (user, sign, amount_u128, margin_release) = plan.accounting_updates[idx];
+                    let (user, net_qty, sign, amount_u128, margin_release) =
+                        plan.accounting_updates[idx];
 
                     if let Some(account) = accounts.get_mut(&user) {
                         let current = account.get_balance(&settlement_asset_val);
 
                         match sign {
                             1 => {
-                                // Winner: profit - fee
-                                let net_increase = amount_u128.saturating_sub(fee);
+                                // Winner: profit - ledger fee - insurance fee
+                                let payoff_u128 =
+                                    get_settlement_value(&ser, &settlement_price, net_qty);
+                                let insurance_fee =
+                                    (payoff_u128 * (insurance_fund_fee_ratio as u128)) / 10000;
+
+                                let net_increase = amount_u128.saturating_sub(fee + insurance_fee);
                                 account.set_balance(
                                     settlement_asset_val.clone(),
                                     current + net_increase,
                                 );
                             }
                             -1 => {
-                                // Loser: debt + fee
+                                // Loser: debt + ledger fee + insurance fee
+                                let payoff_u128 =
+                                    get_settlement_value(&ser, &settlement_price, net_qty);
+                                let insurance_fee =
+                                    (payoff_u128 * (insurance_fund_fee_ratio as u128)) / 10000;
+
                                 account.set_balance(
                                     settlement_asset_val.clone(),
-                                    current.saturating_sub(amount_u128 + fee),
+                                    current.saturating_sub(amount_u128 + fee + insurance_fee),
                                 );
                             }
                             _ => {} // sign == 0 => no balance change
@@ -318,6 +342,24 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             });
 
             plan.accounting_applied = true;
+
+            // Distribute collected insurance fees: 50% to Insurance Fund, 50% to Treasury
+            let insurance_fee_total = plan.insurance_fee;
+            let half = insurance_fee_total / 2;
+            let other_half = insurance_fee_total - half;
+
+            INSURANCE_FUND.with(|f| {
+                let mut f = f.borrow_mut();
+                let current = f.get(&settlement_asset_val).cloned().unwrap_or(0);
+                f.insert(settlement_asset_val.clone(), current + half);
+            });
+
+            TREASURY.with(|f| {
+                let mut f = f.borrow_mut();
+                let current = f.get(&settlement_asset_val).cloned().unwrap_or(0);
+                f.insert(settlement_asset_val.clone(), current + other_half);
+            });
+
             SETTLEMENT_PLANS.with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
         }
 
@@ -340,7 +382,8 @@ fn check_settlement_solvency(
     series: &Series,
     price: &Price,
     positions: &[(User, i128, u128)],
-    fee: u128,
+    ledger_fee: u128,
+    insurance_fund_fee_ratio: u16,
 ) -> Result<(), SettlementError> {
     let mut total_payoff: u128 = 0;
 
@@ -359,10 +402,23 @@ fn check_settlement_solvency(
             .checked_add(locked_collateral)
             .ok_or(SettlementError::MathOverflow)?;
 
+        let insurance_fee = (payoff * (insurance_fund_fee_ratio as u128)) / 10000;
+
         if payoff < locked_collateral {
-            // Loser: must cover (locked_collateral - payoff) + fee from internal balance
+            // Loser: must cover (locked_collateral - payoff) + ledger_fee + insurance_fee from
+            // internal balance
             let loss = locked_collateral - payoff;
-            payers.push((user, loss + fee));
+            payers.push((user, loss + ledger_fee + insurance_fee));
+        } else {
+            // Winner: must at least cover ledger_fee + insurance_fee from internal balance
+            // if their payoff doesn't fully cover it.
+            // Actually, for winners, the payoff is paid OUT.
+            // But they also pay a fee. So they receive payoff - ledger_fee - insurance_fee.
+            // If payoff < ledger_fee + insurance_fee, they need to cover the difference.
+            let total_fee = ledger_fee + insurance_fee;
+            if payoff < total_fee {
+                payers.push((user, total_fee - payoff));
+            }
         }
     }
 

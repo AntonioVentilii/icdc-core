@@ -60,14 +60,16 @@ pub struct SettlementPlanParams {
     pub settlement_asset: Asset,
     /// The protocol fee applied to the settlement.
     pub fee: u128,
+    /// The insurance fee collected for this settlement session.
+    pub insurance_fee: u128,
     /// A list of positions involved in the settlement.
     pub positions: Vec<(User, i128)>,
     /// Users who owe collateral for the settlement.
     pub payers: Vec<(User, u128)>,
     /// Users who are owed collateral for the settlement.
     pub receivers: Vec<(User, u128)>,
-    /// Internal accounting updates required for the settlement.
-    pub accounting_updates: Vec<(User, i8, u128, u128)>,
+    /// List of accounting updates: (user, net_qty, sign, profit_loss, margin_to_release).
+    pub accounting_updates: Vec<(User, i128, i8, u128, u128)>,
 }
 
 /// A plan for processing a collateral deposit in the background.
@@ -198,14 +200,16 @@ pub struct SettlementPlan {
     pub settlement_asset: Asset,
     /// The protocol fee.
     pub fee: u128,
+    /// The insurance fee.
+    pub insurance_fee: u128,
     /// Detailed position snapshots at the time of settlement.
     pub positions: Vec<(User, i128)>,
     /// List of payers and their respective owed amounts.
     pub payers: Vec<(User, u128)>,
     /// List of receivers and their respective owed amounts.
     pub receivers: Vec<(User, u128)>,
-    /// List of accounting updates: (user, sign, profit_loss, margin_to_release).
-    pub accounting_updates: Vec<(User, i8, u128, u128)>,
+    /// List of accounting updates: (user, net_qty, sign, profit_loss, margin_to_release).
+    pub accounting_updates: Vec<(User, i128, i8, u128, u128)>,
     /// Tracks progress through the payers list.
     pub payer_cursor: usize,
     /// Tracks progress through the receivers list.
@@ -244,6 +248,7 @@ impl SettlementPlan {
                 settlement_price,
                 settlement_asset,
                 fee,
+                insurance_fee,
                 positions,
                 payers,
                 receivers,
@@ -266,6 +271,7 @@ impl SettlementPlan {
                 settlement_price,
                 settlement_asset,
                 fee,
+                insurance_fee,
                 positions,
                 payers: payers.clone(),
                 receivers: receivers.clone(),

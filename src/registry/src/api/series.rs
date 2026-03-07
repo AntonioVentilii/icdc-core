@@ -29,69 +29,67 @@ use crate::{
 ///   registered.
 #[update(guard = "caller_is_authorized_creator")]
 pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
-    let result: Result<SeriesId, SeriesError> = {
-        let AddSeriesParams {
-            underlying,
-            expiry_ns,
-            payoff_type,
-            strike,
-            price_precision,
-            settlement_asset,
-            oracle_source,
-            title,
-            description,
-        } = params;
+    let AddSeriesParams {
+        underlying,
+        expiry_ns,
+        payoff_type,
+        strike,
+        price_precision,
+        settlement_asset,
+        oracle_source,
+        title,
+        description,
+    } = params;
 
-        if title.chars().count() > MAX_SERIES_TITLE_LEN {
-            return Err(SeriesError::TitleTooLong).into();
-        }
+    if title.chars().count() > MAX_SERIES_TITLE_LEN {
+        return Err(SeriesError::TitleTooLong).into();
+    }
 
-        if description.plain.chars().count() > MAX_SERIES_DESCRIPTION_LEN {
-            return Err(SeriesError::DescriptionTooLong).into();
-        }
+    if description.plain.chars().count() > MAX_SERIES_DESCRIPTION_LEN {
+        return Err(SeriesError::DescriptionTooLong).into();
+    }
 
-        let underlying = canonical_id_part(&underlying);
-        let oracle_source = canonical_id_part(&oracle_source);
+    let underlying = canonical_id_part(&underlying);
+    let oracle_source = canonical_id_part(&oracle_source);
 
-        let series_id = Series::generate_id(
-            &underlying,
-            expiry_ns,
-            &payoff_type,
-            strike.as_ref(),
-            price_precision,
-            &settlement_asset,
-            &oracle_source,
-        );
+    let series_id = Series::generate_id(
+        &underlying,
+        expiry_ns,
+        &payoff_type,
+        strike.as_ref(),
+        price_precision,
+        &settlement_asset,
+        &oracle_source,
+    );
 
-        let series = Series {
-            series_id: series_id.clone(),
-            underlying,
-            expiry_ns,
-            payoff_type,
-            strike,
-            price_precision,
-            settlement_asset,
-            oracle_source,
-            creator: ic_cdk::caller(),
-            created_at_ns: ic_cdk::api::time(),
-            title,
-            description,
-        };
-
-        SERIES_STORE.with(|store| {
-            let mut store = store.borrow_mut();
-
-            if store.contains_key(&series_id) {
-                return Err(SeriesError::SeriesAlreadyExists);
-            }
-
-            store.insert(series_id.clone(), series);
-
-            Ok(series_id)
-        })
+    let series = Series {
+        series_id: series_id.clone(),
+        underlying,
+        expiry_ns,
+        payoff_type,
+        strike,
+        price_precision,
+        settlement_asset,
+        oracle_source,
+        creator: ic_cdk::caller(),
+        created_at_ns: ic_cdk::api::time(),
+        title,
+        description,
     };
 
-    result.into()
+    let res = SERIES_STORE.with(|store| {
+        let mut store = store.borrow_mut();
+
+        if store.contains_key(&series_id) {
+            return Err(SeriesError::SeriesAlreadyExists);
+        }
+
+        store.insert(series_id.clone(), series);
+
+        Ok(series_id)
+    });
+
+    res.into()
 }
 
 /// Retrieves a specific [`Series`] by its [`SeriesId`].

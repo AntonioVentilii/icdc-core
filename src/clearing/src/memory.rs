@@ -4,7 +4,7 @@ use candid::Principal;
 use ic_cdk::storage;
 use shared::{
     constants::{CKUSDC_LEDGER, ICP_LEDGER},
-    types::{Series, SeriesId},
+    types::{Asset, Series, SeriesId},
 };
 
 use crate::{
@@ -12,7 +12,7 @@ use crate::{
         event::Event,
         margin::{MarginAccount, Position},
         plans::{DepositPlan, SettlementPlan, WithdrawalPlan},
-        state::StableState,
+        state::{ClearingConfig, StableState},
         trade::{LimitOrder, OrderId, TradeId, TransferId},
         user::{DepositKey, User, WithdrawalKey},
     },
@@ -20,6 +20,7 @@ use crate::{
 };
 
 thread_local! {
+      pub static CONFIG: RefCell<ClearingConfig> = const { RefCell::new(ClearingConfig { insurance_fund_fee_ratio: 10 }) };
     pub static POSITIONS: RefCell<BTreeMap<(User, SeriesId), Position>> = const { RefCell::new(BTreeMap::new()) };
     pub static MARGIN_ACCOUNTS: RefCell<BTreeMap<User, MarginAccount>> = const { RefCell::new(BTreeMap::new()) };
     pub static SERIES: RefCell<BTreeMap<SeriesId, Series>> = const { RefCell::new(BTreeMap::new()) };
@@ -33,9 +34,12 @@ thread_local! {
     pub static FROZEN_TRANSFERS: RefCell<BTreeMap<TransferId, PositionProof>> = const { RefCell::new(BTreeMap::new()) };
     pub static ACCEPTED_TRANSFERS: RefCell<BTreeMap<TransferId, bool>> = const { RefCell::new(BTreeMap::new()) };
     pub static SETTLEMENT_PLANS: RefCell<BTreeMap<SeriesId, SettlementPlan>> = const { RefCell::new(BTreeMap::new()) };
+    pub static INSURANCE_FUND: RefCell<BTreeMap<Asset, u128>> = const { RefCell::new(BTreeMap::new()) };
+    pub static TREASURY: RefCell<BTreeMap<Asset, u128>> = const { RefCell::new(BTreeMap::new()) };
 }
 
 pub fn save_state() {
+    let config: ClearingConfig = CONFIG.with(|c: &RefCell<ClearingConfig>| c.borrow().clone());
     let positions: Vec<Position> = POSITIONS.with(|p| p.borrow().values().cloned().collect());
     let accounts: BTreeMap<User, MarginAccount> = MARGIN_ACCOUNTS.with(|a| a.borrow().clone());
     let series: BTreeMap<SeriesId, Series> = SERIES.with(|s| s.borrow().clone());
@@ -54,8 +58,11 @@ pub fn save_state() {
     let settlement_plans: BTreeMap<SeriesId, SettlementPlan> =
         SETTLEMENT_PLANS.with(|s| s.borrow().clone());
     let limit_orders: BTreeMap<OrderId, LimitOrder> = LIMIT_ORDERS.with(|l| l.borrow().clone());
+    let insurance_fund: BTreeMap<Asset, u128> = INSURANCE_FUND.with(|f| f.borrow().clone());
+    let treasury: BTreeMap<Asset, u128> = TREASURY.with(|f| f.borrow().clone());
 
     let state = StableState {
+        config,
         positions,
         accounts,
         series,
@@ -69,6 +76,8 @@ pub fn save_state() {
         accepted_transfers,
         settlement_plans,
         limit_orders,
+        insurance_fund,
+        treasury,
     };
 
     storage::stable_save((state,)).expect("Save failed");
@@ -78,6 +87,7 @@ pub fn restore_state() {
     let (state,): (StableState,) = storage::stable_restore().expect("Restore failed");
 
     let StableState {
+        config,
         positions,
         accounts,
         series,
@@ -91,6 +101,8 @@ pub fn restore_state() {
         accepted_transfers,
         settlement_plans,
         limit_orders,
+        insurance_fund,
+        treasury,
     } = state;
 
     POSITIONS.with(|p| {
@@ -100,6 +112,7 @@ pub fn restore_state() {
         }
     });
 
+    CONFIG.with(|c| *c.borrow_mut() = config);
     MARGIN_ACCOUNTS.with(|w| *w.borrow_mut() = accounts);
     SERIES.with(|s| *s.borrow_mut() = series);
     EVENTS.with(|e| *e.borrow_mut() = events);
@@ -112,6 +125,8 @@ pub fn restore_state() {
     ACCEPTED_TRANSFERS.with(|t| *t.borrow_mut() = accepted_transfers);
     SETTLEMENT_PLANS.with(|s| *s.borrow_mut() = settlement_plans);
     LIMIT_ORDERS.with(|l| *l.borrow_mut() = limit_orders);
+    INSURANCE_FUND.with(|f| *f.borrow_mut() = insurance_fund);
+    TREASURY.with(|f| *f.borrow_mut() = treasury);
 }
 
 /// Returns the principal of the ICP ledger.

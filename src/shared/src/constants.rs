@@ -25,3 +25,6 @@ pub const CKUSDC_LEDGER: &str = "yfumr-cyaaa-aaaar-qaela-cai";
 pub const MAX_SERIES_TITLE_LEN: usize = 128;
 /// Maximum length of a series description in characters.
 pub const MAX_SERIES_DESCRIPTION_LEN: usize = 1024;
+
+/// Default insurance fund fee ratio in basis points (10 bps = 0.1%).
+pub const DEFAULT_INSURANCE_FEE_RATIO: u16 = 10;
