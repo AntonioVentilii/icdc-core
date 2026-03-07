@@ -47,9 +47,6 @@ jobs:
   candid:
     name: Generate Candid
     runs-on: ubuntu-24.04
-    concurrency:
-      group: release-candid-${{ github.ref }}
-      cancel-in-progress: true
     permissions:
       contents: read
     strategy:
