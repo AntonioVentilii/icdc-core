@@ -232,6 +232,7 @@ pub(crate) fn prepare_settlement_impl(
 ) -> Result<SettlementPlan, SettlementError> {
     let mut total_insurance_fee: u128 = 0;
     let mut total_protocol_fee: u128 = 0;
+    let mut total_net_payoff: u128 = 0;
 
     // Gather positions for settlement and compute payoffs/fees.
     let positions_to_settle = POSITIONS.with(|positions| {
@@ -255,6 +256,11 @@ pub(crate) fn prepare_settlement_impl(
             total_insurance_fee += i_fee;
             total_protocol_fee += p_fee;
 
+            // Only positive cashflows represent outflows from the system equity pool.
+            if cashflow > 0 {
+                total_net_payoff += cashflow as u128;
+            }
+
             results.push(SettlementPosition {
                 user: *user,
                 net_qty: pos.net_qty,
@@ -266,7 +272,9 @@ pub(crate) fn prepare_settlement_impl(
     });
 
     // Perform solvency check before any state modifications.
-    check_settlement_solvency(ser, settlement_price, &positions_to_settle)?;
+    // Uses the aggregate net payoff (post-fee) — fees stay in the system
+    // (TREASURY + INSURANCE_FUND) so they don't reduce system equity.
+    check_settlement_solvency(total_net_payoff)?;
 
     // Now that solvency is verified, atomically remove positions and build the plan.
     POSITIONS.with(|positions| {
@@ -288,24 +296,12 @@ pub(crate) fn prepare_settlement_impl(
 
 /// Validates aggregate solvency for a settlement batch.
 ///
-/// Under the new architecture, we only need to ensure the system is solvent
-/// in aggregate (sum of payoffs <= total collateral value in system).
+/// Ensures that the total **net** payoff (post-fee, i.e. the amount actually paid
+/// out to users) does not exceed total system equity.  Fees are credited to the
+/// TREASURY and INSURANCE_FUND and therefore remain inside the system.
 /// Individual user insolvency is handled by the liquidator.
-fn check_settlement_solvency(
-    series: &Series,
-    price: &Price,
-    positions: &[SettlementPosition],
-) -> Result<(), SettlementError> {
-    let mut total_payoff: u128 = 0;
-
-    for pos in positions {
-        let payoff = get_settlement_value(series, price, pos.net_qty);
-        total_payoff = total_payoff
-            .checked_add(payoff)
-            .ok_or(SettlementError::MathOverflow)?;
-    }
-
-    // Verify system solvency by comparing aggregated payouts against system equity
+fn check_settlement_solvency(total_net_payoff: u128) -> Result<(), SettlementError> {
+    // Verify system solvency by comparing net payouts against system equity.
     let total_system_equity_usd = ACCOUNT_STATES.with(|accounts| {
         let accounts = accounts.borrow();
         let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
@@ -315,9 +311,9 @@ fn check_settlement_solvency(
             .sum::<u128>()
     });
 
-    if total_payoff > total_system_equity_usd {
+    if total_net_payoff > total_system_equity_usd {
         return Err(SettlementError::SolvencyViolation {
-            total_payoff,
+            total_net_payoff,
             total_collateral_usd: total_system_equity_usd,
         });
     }
@@ -390,11 +386,11 @@ mod tests {
 
         assert!(result.is_err());
         if let Err(SettlementError::SolvencyViolation {
-            total_payoff,
+            total_net_payoff,
             total_collateral_usd,
         }) = result
         {
-            assert_eq!(total_payoff, 100_000_000); // 100 USD (6 decimals)
+            assert_eq!(total_net_payoff, 100_000_000); // 100 USD net (no fees)
             assert_eq!(total_collateral_usd, 50_000_000); // 50 USD
         } else {
             panic!("Expected SolvencyViolation, got {:?}", result);
@@ -563,7 +559,7 @@ mod tests {
                         .saturating_sub(pos.reserved_margin_usd);
                 }
                 plan.accounting_cursor += 1;
-                if plan.accounting_cursor % 100 == 0 {
+                if plan.accounting_cursor.is_multiple_of(100) {
                     break;
                 }
             }
@@ -604,7 +600,7 @@ mod tests {
                         .saturating_sub(pos.reserved_margin_usd);
                 }
                 plan.accounting_cursor += 1;
-                if plan.accounting_cursor % 100 == 0 {
+                if plan.accounting_cursor.is_multiple_of(100) {
                     break;
                 }
             }
@@ -665,5 +661,84 @@ mod tests {
 
         // Cleanup
         SETTLEMENT_PLANS.with(|m| m.borrow_mut().remove(&series_id));
+    }
+
+    /// Validates that the solvency check uses net payoffs (post-fee), not gross.
+    ///
+    /// Scenario: gross payoff = 100 USD, fees = 2% → net payoff = 98 USD.
+    /// System equity = 99.9 USD.  With the old gross check this would fail;
+    /// with the corrected net check it succeeds because 98 < 99.9.
+    #[test]
+    fn test_solvency_check_uses_net_payoffs() {
+        let user_p = Principal::from_slice(&[42]);
+        let user = User(user_p);
+        let series_id = SeriesId::from("net_payoff_test".to_string());
+
+        let series = Series {
+            series_id: series_id.clone(),
+            underlying: "BTC".to_string(),
+            expiry_ns: 2000000000,
+            payoff_type: PayoffType::Call,
+            strike: Some(Price::new(100, 0)),
+            price_precision: 0,
+            payout_unit: PayoutUnit::usd(),
+            oracle_source: "oracle".to_string(),
+            creator: Principal::anonymous(),
+            created_at_ns: 1000000000,
+            title: "Test".to_string(),
+            description: Description::plain("Net payoff solvency test"),
+        };
+
+        // Settlement price 200 → gross payoff = 200 - 100 = 100 USD = 100_000_000
+        let settlement_price = Price::new(200, 0);
+
+        POSITIONS.with(|pos| {
+            let mut pos = pos.borrow_mut();
+            pos.clear();
+            pos.insert(
+                (user, series_id.clone()),
+                Position {
+                    user,
+                    series_id: series_id.clone(),
+                    net_qty: 1,
+                    reserved_margin_usd: 10,
+                },
+            );
+        });
+
+        // System equity = 99.9 USD = 99_900_000 (less than 100 gross, more than 98 net)
+        ACCOUNT_STATES.with(|acc| {
+            let mut acc = acc.borrow_mut();
+            acc.clear();
+            let mut a = AccountState::new(user);
+            a.cash_balance_usd = 99_900_000;
+            acc.insert(user, a);
+        });
+
+        COLLATERAL_ASSETS.with(|c| c.borrow_mut().clear());
+
+        // Fee ratios: insurance 100 bps (1%) + protocol 100 bps (1%) = 2% total
+        // Gross payoff = 100_000_000. Fees = 2_000_000. Net = 98_000_000.
+        // 98_000_000 < 99_900_000 → solvency check passes.
+        let result = prepare_settlement_impl(&series, &series_id, &settlement_price, 100, 100);
+
+        assert!(
+            result.is_ok(),
+            "Expected settlement to succeed (net payoff < equity), got: {:?}",
+            result
+        );
+
+        let plan = result.unwrap();
+        // Verify fees and net cashflow
+        assert_eq!(plan.insurance_fee_usd, 1_000_000); // 1% of 100_000_000
+        assert_eq!(plan.fee_usd, 1_000_000); // 1% of 100_000_000
+        assert_eq!(
+            plan.positions[0].cashflow_usd,
+            100_000_000 - 1_000_000 - 1_000_000 // 98_000_000
+        );
+
+        // Cleanup
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().remove(&series_id));
+        ACCOUNT_STATES.with(|acc| acc.borrow_mut().clear());
     }
 }

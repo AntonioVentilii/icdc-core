@@ -170,7 +170,10 @@ type SettleSeriesResult = variant { Ok; Err : SettlementError; Processing };
 type SettlementError = variant {
 	InconsistentSettlementPrice : record { requested : Price; existing : Price };
 	MathOverflow;
-	SolvencyViolation : record { total_collateral_usd : nat; total_payoff : nat };
+	SolvencyViolation : record {
+		total_net_payoff : nat;
+		total_collateral_usd : nat
+	};
 	Asset : AssetError;
 	Common : CommonError
 };

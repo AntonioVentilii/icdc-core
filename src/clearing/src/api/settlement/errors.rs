@@ -13,9 +13,9 @@ pub enum SettlementError {
     Asset(AssetError),
     /// Overflow during settlement calculation.
     MathOverflow,
-    /// Total payoffs exceed global system collateral value (system insolvency).
+    /// Total net payoffs (post-fee) exceed global system equity (system insolvency).
     SolvencyViolation {
-        total_payoff: u128,
+        total_net_payoff: u128,
         total_collateral_usd: u128,
     },
     /// Settlement price inconsistent with already executing plan.
