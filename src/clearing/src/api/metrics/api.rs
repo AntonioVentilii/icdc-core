@@ -7,7 +7,7 @@ use shared::types::Asset;
 
 use crate::{
     guards::caller_is_controller,
-    memory::{EVENTS, MARGIN_ACCOUNTS, POSITIONS, SERIES},
+    memory::{ckusdc_ledger, icp_ledger, EVENTS, MARGIN_ACCOUNTS, POSITIONS, SERIES},
     types::{
         event::EventType,
         http::{HeaderField, HttpRequest, HttpResponse},
@@ -112,14 +112,16 @@ pub fn metrics() -> String {
     for (asset, balance) in stats.margin_balances {
         let asset_str = match asset {
             Asset::Icrc(p) => {
-                if p == crate::memory::icp_ledger() {
+                if p == icp_ledger() {
                     "ICP".to_string()
-                } else if p == crate::memory::ckusdc_ledger() {
+                } else if p == ckusdc_ledger() {
                     "ckUSDC".to_string()
                 } else {
                     p.to_text()
                 }
             }
+            Asset::NativeEvm(asset) => asset.to_string(),
+            Asset::Erc20(token) => token.to_string(),
         };
         metrics.push_str(&format!(
             "clearing_total_margin_balance{{asset=\"{}\"}} {}\n",
