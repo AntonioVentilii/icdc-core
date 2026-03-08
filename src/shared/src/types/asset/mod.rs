@@ -3,12 +3,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::{
     asset::errors::AssetError,
-    evm::{Chain, ErcToken, EvmAssetRef, NativeEvmAsset},
+    evm::{ErcToken, EvmAssetRef, NativeEvmAsset},
 };
 
 pub mod errors;
 pub mod evm;
-pub mod helpers;
 
 /// Represents a supported asset in the ICDC ecosystem.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]

@@ -72,6 +72,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
         // ---------- Phase B: Execute transfer (async, resumable) ----------
         if plan.receipt.is_none() {
             plan.status = PlanStatus::Executing;
+
             DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
 
             let handler = get_handler(&config.asset).map_err(DepositCollateralError::Asset)?;
@@ -99,6 +100,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
                 }
                 Err(e) => {
                     DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
+
                     return Err(DepositCollateralError::Asset(e));
                 }
             }

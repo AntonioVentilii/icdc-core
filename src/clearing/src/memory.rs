@@ -142,10 +142,10 @@ pub fn restore_state() {
 
 /// Returns the principal of the ICP ledger.
 pub fn icp_ledger() -> Principal {
-    Principal::from_text(ICP_LEDGER).expect("invalid ICP_LEDGER")
+    Principal::from_text(ICP_LEDGER).unwrap_or_else(|_| Principal::anonymous())
 }
 
 /// Returns the principal of the ckUSDC ledger.
 pub fn ckusdc_ledger() -> Principal {
-    Principal::from_text(CKUSDC_LEDGER).expect("invalid CKUSDC_LEDGER")
+    Principal::from_text(CKUSDC_LEDGER).unwrap_or_else(|_| Principal::anonymous())
 }

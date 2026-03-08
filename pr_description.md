@@ -17,10 +17,12 @@ By introducing `vUSD`:
 
 ### 1. Unified Internal Accounting (`clearing`)
 
-- **AccountState refactor**: Replaced `MarginAccount` with `AccountState`.
+- **AccountState refactor**: Replaced `MarginAccount` and decoupled `LEDGER_BALANCES`/`MARGIN_ACCOUNTS` with a unified `AccountState`.
+- **Global Risk State**: Replaced per-asset `reserved_balances` and `required_margin` with a **unified `reserved_margin_usd`**. This enables a robust cross-margin model where all collateral (adjusted for haircuts) backs the total activity.
 - **Cash Balance**: Introduced `cash_balance_usd` (i128) to track realized PnL and credits/debits.
-- **Upfront Collateral Model**: Modified `internal_execute_trade` to deduct the full margin cost (cost for Long, cost for Short) from the user's `cash_balance_usd` at trade time.
+- **Upfront Collateral Model**: Modified `internal_execute_trade` to deduct the full margin cost upfront from the user's `cash_balance_usd`.
 - **USD-based Equity**: Implemented `calculate_equity_usd` which aggregates the USD value of all collateral (with haircuts) plus the internal cash balance.
+- **Atomicity Audit**: Verified that all state-modifying sequences in trade, orders, and withdrawals are **synchronous** (no `await` points between checking and updating state), ensuring on-chain transactional integrity.
 
 ### 2. Settlement API Rewrite
 

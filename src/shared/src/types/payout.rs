@@ -2,8 +2,8 @@ use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    constants::{ICP_LEDGER, VUSD_LEDGER},
-    types::asset::Asset,
+    constants::{CKUSDC_LEDGER, CKUSDT_LEDGER, ICP_LEDGER, VUSD_LEDGER},
+    types::asset::{errors::AssetError, Asset},
 };
 
 #[derive(
@@ -29,19 +29,21 @@ impl PayoutUnit {
     }
 
     /// Converts the economic unit to its canonical ICDP token rail.
-    pub fn to_asset(&self) -> Asset {
+    pub fn to_asset(&self) -> Result<Asset, AssetError> {
         match self {
-            PayoutUnit::Fiat(FiatUnit::Usd) => {
-                Asset::Icrc(Principal::from_text(VUSD_LEDGER).expect("Invalid vUSD principal"))
-            }
-            PayoutUnit::Crypto(CanonicalCryptoUnit::Icp) => {
-                Asset::Icrc(Principal::from_text(ICP_LEDGER).expect("Invalid ICP principal"))
-            }
-            _ => {
-                // For other units, we might not have a default rail yet.
-                // This will be expanded as we add more canonical rails.
-                panic!("No canonical asset rail for {:?}", self);
-            }
+            PayoutUnit::Fiat(FiatUnit::Usd) => Principal::from_text(VUSD_LEDGER)
+                .map(Asset::Icrc)
+                .map_err(|_| AssetError::InvalidAssetId(VUSD_LEDGER.to_string())),
+            PayoutUnit::Crypto(CanonicalCryptoUnit::Icp) => Principal::from_text(ICP_LEDGER)
+                .map(Asset::Icrc)
+                .map_err(|_| AssetError::InvalidAssetId(ICP_LEDGER.to_string())),
+            PayoutUnit::Crypto(CanonicalCryptoUnit::Usdc) => Principal::from_text(CKUSDC_LEDGER)
+                .map(Asset::Icrc)
+                .map_err(|_| AssetError::InvalidAssetId(CKUSDC_LEDGER.to_string())),
+            PayoutUnit::Crypto(CanonicalCryptoUnit::Usdt) => Principal::from_text(CKUSDT_LEDGER)
+                .map(Asset::Icrc)
+                .map_err(|_| AssetError::InvalidAssetId(CKUSDT_LEDGER.to_string())),
+            _ => Err(AssetError::UnsupportedAsset),
         }
     }
 }
@@ -74,6 +76,8 @@ pub enum CanonicalCryptoUnit {
     Btc,
     Eth,
     Icp,
+    Usdc,
+    Usdt,
 }
 
 impl CanonicalCryptoUnit {
@@ -82,6 +86,8 @@ impl CanonicalCryptoUnit {
             CanonicalCryptoUnit::Btc => "BTC",
             CanonicalCryptoUnit::Eth => "ETH",
             CanonicalCryptoUnit::Icp => "ICP",
+            CanonicalCryptoUnit::Usdc => "USDC",
+            CanonicalCryptoUnit::Usdt => "USDT",
         }
     }
 }

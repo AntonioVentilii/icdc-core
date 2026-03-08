@@ -77,6 +77,16 @@ impl NativeEvmAsset {
     pub fn decimals(&self) -> u32 {
         self.decimals as u32
     }
+
+    /// Returns the canonical native asset for a given chain.
+    pub fn native(chain: Chain) -> Self {
+        match chain {
+            Chain::Ethereum | Chain::Base | Chain::Bsc | Chain::Polygon => Self {
+                chain_id: chain.id(),
+                decimals: 18,
+            },
+        }
+    }
 }
 impl fmt::Display for NativeEvmAsset {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -100,6 +110,44 @@ pub struct ErcToken {
 impl ErcToken {
     pub fn decimals(&self) -> u32 {
         self.decimals as u32
+    }
+
+    /// Returns the canonical USDC token for a given chain.
+    pub fn usdc(chain: Chain) -> Self {
+        match chain {
+            Chain::Ethereum => Self {
+                token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string(),
+                chain_id: chain.id(),
+                decimals: 6,
+            },
+            Chain::Base => Self {
+                token_address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913".to_string(),
+                chain_id: chain.id(),
+                decimals: 6,
+            },
+            Chain::Bsc => Self {
+                token_address: "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d".to_string(),
+                chain_id: chain.id(),
+                decimals: 18,
+            },
+            Chain::Polygon => Self {
+                token_address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359".to_string(),
+                chain_id: chain.id(),
+                decimals: 6,
+            },
+        }
+    }
+
+    /// Returns the canonical USDT token for a given chain.
+    pub fn usdt(chain: Chain) -> Result<Self, crate::types::asset::errors::AssetError> {
+        match chain {
+            Chain::Ethereum => Ok(Self {
+                token_address: "0xdAC17F958D2ee523a2206206994597C13D831ec7".to_string(),
+                chain_id: chain.id(),
+                decimals: 6,
+            }),
+            _ => Err(crate::types::asset::errors::AssetError::UnsupportedAsset),
+        }
     }
 }
 impl fmt::Display for ErcToken {

@@ -20,6 +20,8 @@ pub const MONTH_NS: u64 = 30 * DAY_NS;
 pub const ICP_LEDGER: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
 /// Principal ID of the ckUSDC Ledger canister
 pub const CKUSDC_LEDGER: &str = "yfumr-cyaaa-aaaar-qaela-cai";
+/// Principal ID of the ckUSDT Ledger canister
+pub const CKUSDT_LEDGER: &str = "6rdls-viaaa-aaaar-qaelq-cai";
 /// Principal ID of the virtual USD (vUSD) Ledger canister (Internal ghost token)
 pub const VUSD_LEDGER: &str = "ap6gq-taaaa-aaaae-acsaq-cai";
 /// Principal ID of the virtual USD (vUSD) Index canister
