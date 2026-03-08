@@ -2,6 +2,15 @@
 	"clearing": {
 		"staging": "g2or7-caaaa-aaaaj-qqhoa-cai"
 	},
+	"index": {
+		"staging": "5ba7m-cqaaa-aaaaj-qqwvq-cai"
+	},
+	"ledger": {
+		"staging": "5uhob-dyaaa-aaaaj-qqwwa-cai"
+	},
+	"minter": {
+		"staging": "5tgiv-oaaaa-aaaaj-qqwwq-cai"
+	},
 	"registry": {
 		"staging": "g5pxl-pyaaa-aaaaj-qqhoq-cai"
 	}
