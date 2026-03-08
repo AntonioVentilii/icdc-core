@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use ic_cdk_macros::{query, update};
 
 use super::{

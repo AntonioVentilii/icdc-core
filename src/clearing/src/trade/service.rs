@@ -1,13 +1,11 @@
 // Removed unused BTreeMap
 
-use shared::constants::USD_DECIMALS;
-
 use crate::{
     api::trade::errors::TradeError,
     memory::{
         ACCOUNT_STATES, COLLATERAL_ASSETS, EVENTS, EXECUTED_TRADES, NEXT_EVENT_ID, POSITIONS,
     },
-    payoffs::{get_required_margin, scale_price, RoundingMode},
+    payoffs::get_required_margin,
     trade::types::ExecuteTradeParams,
     types::{
         event::{Event, EventType},
@@ -97,8 +95,7 @@ pub(crate) async fn internal_execute_trade(params: ExecuteTradeParams) -> Result
 
             // 2. Release any pre-blocked margin (Limit Order block_index now represents USD)
             if let Some(amt) = buyer_unblock_amount {
-                buyer_acc.reserved_margin_usd =
-                    buyer_acc.reserved_margin_usd.saturating_sub(amt as u128);
+                buyer_acc.reserved_margin_usd = buyer_acc.reserved_margin_usd.saturating_sub(amt);
             }
 
             // Apply delta and check equity
@@ -142,8 +139,7 @@ pub(crate) async fn internal_execute_trade(params: ExecuteTradeParams) -> Result
             seller_acc.cash_balance_usd -= seller_cost;
 
             if let Some(amt) = seller_unblock_amount {
-                seller_acc.reserved_margin_usd =
-                    seller_acc.reserved_margin_usd.saturating_sub(amt as u128);
+                seller_acc.reserved_margin_usd = seller_acc.reserved_margin_usd.saturating_sub(amt);
             }
 
             let target_reserved = if seller_margin_delta > 0 {

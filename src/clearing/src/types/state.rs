@@ -34,7 +34,7 @@ pub struct PositionProof {
 
 /// Global configuration for the Clearing canister.
 #[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct ClearingConfig {
+pub struct Config {
     /// The global insurance fund fee ratio in basis points (1 bp = 0.01%).
     pub insurance_fund_fee_ratio: u16,
     /// The principal of the EVM RPC canister.
@@ -42,7 +42,7 @@ pub struct ClearingConfig {
     /// The principal of the Chain Fusion Signer canister.
     pub signer_canister: Principal,
 }
-impl Default for ClearingConfig {
+impl Default for Config {
     fn default() -> Self {
         Self {
             insurance_fund_fee_ratio: DEFAULT_INSURANCE_FEE_RATIO,
@@ -56,7 +56,7 @@ impl Default for ClearingConfig {
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct StableState {
     /// The global configuration.
-    pub config: ClearingConfig,
+    pub config: Config,
     /// All active positions in the system.
     pub positions: Vec<Position>,
     /// Mapping of users to their account states.

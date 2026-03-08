@@ -1,6 +1,6 @@
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
-use shared::types::{Asset, AssetId, Price, SeriesId};
+use shared::types::{AssetId, Price, SeriesId};
 
 use crate::{
     memory::{DEPOSIT_PLANS, SETTLEMENT_PLANS, WITHDRAWAL_PLANS},

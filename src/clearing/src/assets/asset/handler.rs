@@ -45,6 +45,7 @@ impl AssetHandler {
     }
 
     /// Retrieves the transfer fee for the given asset.
+    #[allow(dead_code)]
     pub async fn get_fee(&self, asset: &Asset) -> Result<u128, AssetError> {
         match self {
             AssetHandler::Icrc(h) => h.get_fee(asset).await,

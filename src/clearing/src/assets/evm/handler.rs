@@ -100,6 +100,7 @@ impl EvmHandler {
         ))
     }
 
+    #[allow(dead_code)]
     pub async fn get_fee(&self, _asset: &Asset) -> Result<u128, AssetError> {
         Ok(21000) // Placeholder for ETH transfer
     }

@@ -12,6 +12,7 @@ pub enum ExternalAssetAccount {
         subaccount: Option<[u8; 32]>,
     },
     /// An EVM address.
+    #[allow(dead_code)]
     Evm(String),
 }
 
@@ -36,6 +37,7 @@ impl AssetAccount {
     }
 
     /// Creates an `AssetAccount` for an EVM address.
+    #[allow(dead_code)]
     pub fn external_evm(address: impl Into<String>) -> Self {
         Self::External(ExternalAssetAccount::Evm(address.into()))
     }

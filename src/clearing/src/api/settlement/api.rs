@@ -5,10 +5,8 @@ use shared::types::{Price, Series};
 
 use super::{errors::SettlementError, params::SettleSeriesParams, results::SettleSeriesResult};
 use crate::{
-    memory::{
-        ACCOUNT_STATES, CONFIG, INSURANCE_FUND, POSITIONS, REGISTRY_CANISTER, SERIES,
-        SETTLEMENT_PLANS, TREASURY,
-    },
+    guards::caller_is_not_anonymous,
+    memory::{ACCOUNT_STATES, CONFIG, POSITIONS, REGISTRY_CANISTER, SERIES, SETTLEMENT_PLANS},
     payoffs::get_settlement_value,
     types::{
         errors::CommonError,
@@ -16,13 +14,6 @@ use crate::{
         user::User,
     },
 };
-
-fn caller_is_not_anonymous() -> Result<(), String> {
-    if ic_cdk::caller() == Principal::anonymous() {
-        return Err("Anonymous caller not allowed".to_string());
-    }
-    Ok(())
-}
 
 /// Settles a derivative series at a specific price.
 ///
@@ -188,9 +179,6 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             plan.accounting_applied = true;
 
             // Distribute collected insurance fees (internal only)
-            let insurance_fee_total = plan.insurance_fee_usd;
-            let half = insurance_fee_total / 2;
-            let other_half = insurance_fee_total - half;
 
             // Since we don't have a single payout asset anymore, we account fees in USD
             // But the insurance fund/treasury are per asset.

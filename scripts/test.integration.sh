@@ -4,7 +4,6 @@ set -euo pipefail
 # --- CONFIGURATION (Default Values) ---
 ALLOWANCE=10000000000     # 100 ICP
 DEPOSIT_AMOUNT=1000000000 # 10 ICP
-LEDGER_FEE=10000          # 0.0001 ICP
 
 # Colors for output
 RED='\033[0;31m'

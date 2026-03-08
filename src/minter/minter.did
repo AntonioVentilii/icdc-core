@@ -1,12 +1,12 @@
-type MinterConfig = record {
-	vusd_ledger : principal;
-	authorized_callers : vec principal
+type Config = record {
+	authorized_callers : vec principal;
+	ledger_canister : principal
 };
-
-type Result = variant { Ok : nat; Err : text };
-
-service : (MinterConfig) -> {
-	get_config : () -> (opt MinterConfig) query;
-	update_config : (MinterConfig) -> ();
-	mint_vusd : (principal, nat) -> (Result)
+type ConfigResult = variant { Ok : Config; Err : text };
+type MintParams = record { to : principal; amount : nat };
+type MintResult = variant { Ok : nat; Err : text };
+service : (Config) -> {
+	config : () -> (ConfigResult) query;
+	mint : (MintParams) -> (MintResult);
+	update_config : (Config) -> ()
 }

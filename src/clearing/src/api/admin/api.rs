@@ -1,6 +1,6 @@
 use candid::{Nat, Principal};
 use ic_cdk_macros::{query, update};
-use shared::types::{AssetId, CollateralAssetConfig};
+use shared::types::CollateralAssetConfig;
 
 use super::{
     params::{FundType, UpdateCollateralAssetParams, WithdrawFundParams},
@@ -13,7 +13,7 @@ use crate::{
     },
     guards::caller_is_controller,
     memory::{COLLATERAL_ASSETS, CONFIG, INSURANCE_FUND, REGISTRY_CANISTER, TREASURY},
-    types::{account::AssetAccount, state::ClearingConfig},
+    types::{account::AssetAccount, state::Config},
 };
 
 /// Sets the principal of the Series Registry canister.
@@ -31,7 +31,7 @@ pub fn set_registry_canister(registry: Principal) {
 ///
 /// This method is gated to canister controllers.
 #[update(guard = "caller_is_controller")]
-pub fn update_config(config: ClearingConfig) {
+pub fn update_config(config: Config) {
     CONFIG.with(|c| {
         *c.borrow_mut() = config;
     });

@@ -1,13 +1,9 @@
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    constants::{CKUSDC_LEDGER, ICP_LEDGER},
-    types::{
-        asset::errors::AssetError,
-        evm::{Chain, ErcToken, EvmAssetRef, NativeEvmAsset},
-        helpers::{native_evm_asset, usdc_token, usdt_token},
-    },
+use crate::types::{
+    asset::errors::AssetError,
+    evm::{Chain, ErcToken, EvmAssetRef, NativeEvmAsset},
 };
 
 pub mod errors;

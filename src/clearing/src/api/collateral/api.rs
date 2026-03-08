@@ -1,9 +1,6 @@
 use candid::Nat;
 use ic_cdk_macros::update;
-use shared::{
-    constants::USD_DECIMALS,
-    types::{asset::errors::AssetError, AssetId},
-};
+use shared::{constants::USD_DECIMALS, types::asset::errors::AssetError};
 
 use super::{
     errors::{DepositCollateralError, WithdrawCollateralError},

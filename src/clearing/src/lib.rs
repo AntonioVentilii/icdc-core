@@ -1,6 +1,7 @@
 use candid::{Nat, Principal};
+use ic_cdk::export_candid;
 use ic_cdk_macros::{post_upgrade, pre_upgrade};
-use shared::types::{Asset, AssetId, CollateralAssetConfig, PayoutUnit, Price, Series, SeriesId};
+use shared::types::{CollateralAssetConfig, Series, SeriesId};
 
 use crate::{
     api::{
@@ -9,18 +10,15 @@ use crate::{
             results::GetAccountStateResult,
         },
         admin::{
-            params::{FundType, UpdateCollateralAssetParams, WithdrawFundParams},
-            results::{AdminError, AdminResult, GetFundsResult},
+            params::{UpdateCollateralAssetParams, WithdrawFundParams},
+            results::{AdminResult, GetFundsResult},
         },
         collateral::{
             params::{DepositCollateralParams, WithdrawCollateralParams},
             results::{DepositCollateralResult, WithdrawCollateralResult},
         },
-        settlement::{
-            errors::SettlementError, params::SettleSeriesParams, results::SettleSeriesResult,
-        },
+        settlement::{params::SettleSeriesParams, results::SettleSeriesResult},
         trade::{
-            errors::TradeError,
             params::{
                 CancelLimitOrderParams, FreezePositionForTransferParams, ListOrdersParams,
                 SubmitLimitOrderParams, SubmitMarketOrderParams, SubmitMatchedTradeParams,
@@ -32,7 +30,7 @@ use crate::{
         event::Event,
         http::{HttpRequest, HttpResponse},
         margin::Position,
-        state::{ClearingConfig, PositionProof},
+        state::{Config, PositionProof},
         stats::Stats,
         trade::LimitOrder,
     },
@@ -63,4 +61,4 @@ fn post_upgrade() {
     memory::restore_state();
 }
 
-ic_cdk::export_candid!();
+export_candid!();

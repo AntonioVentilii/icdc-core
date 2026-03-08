@@ -31,11 +31,6 @@ type AssetError = variant {
 };
 type CancelLimitOrderParams = record { order_id : text };
 type CanonicalCryptoUnit = variant { Btc; Eth; Icp };
-type ClearingConfig = record {
-	insurance_fund_fee_ratio : nat16;
-	signer_canister : principal;
-	evm_rpc : principal
-};
 type CollateralAssetConfig = record {
 	decimals : nat8;
 	haircut_bps : nat16;
@@ -50,6 +45,11 @@ type CommonError = variant {
 	MathOverflow;
 	Unauthorized;
 	RegistryNotSet
+};
+type Config = record {
+	insurance_fund_fee_ratio : nat16;
+	signer_canister : principal;
+	evm_rpc : principal
 };
 type DecimalValue = record { decimals : nat8; value : nat };
 type DepositCollateralError = variant { MathOverflow; Asset : AssetError };
@@ -331,7 +331,7 @@ service : {
 	// Updates the global configuration for the Clearing canister.
 	//
 	// This method is gated to canister controllers.
-	update_config : (ClearingConfig) -> ();
+	update_config : (Config) -> ();
 	// Withdraws collateral from the user's account state to an external address.
 	//
 	// This implements the "Deterministic Withdrawal Policy":
