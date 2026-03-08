@@ -1,4 +1,4 @@
-use candid::CandidType;
+use candid::{CandidType, Nat, Principal};
 use serde::{Deserialize, Serialize};
 use shared::types::{AssetId, Price, SeriesId};
 
@@ -33,7 +33,7 @@ pub struct DepositPlanParams {
     /// The collateral asset being deposited.
     pub asset_id: AssetId,
     /// The amount being deposited.
-    pub amount: candid::Nat,
+    pub amount: Nat,
 }
 
 /// Input parameters for creating a [`WithdrawalPlan`].
@@ -46,9 +46,9 @@ pub struct WithdrawalPlanParams {
     /// The collateral asset being withdrawn.
     pub asset_id: AssetId,
     /// The amount being withdrawn.
-    pub amount: candid::Nat,
+    pub amount: Nat,
     /// The destination principal and optional subaccount.
-    pub to_account: (candid::Principal, Option<[u8; 32]>),
+    pub to_account: (Principal, Option<[u8; 32]>),
 }
 
 /// Input parameters for creating a [`SettlementPlan`].
@@ -87,7 +87,7 @@ pub struct DepositPlan {
     /// The collateral asset being deposited.
     pub asset_id: AssetId,
     /// The amount being deposited.
-    pub amount: candid::Nat,
+    pub amount: Nat,
     /// Current execution status of the plan.
     pub status: PlanStatus,
     /// Idempotency key in nanoseconds for ledger transfers.
@@ -142,9 +142,9 @@ pub struct WithdrawalPlan {
     /// The collateral asset being withdrawn.
     pub asset_id: AssetId,
     /// The amount being withdrawn.
-    pub amount: candid::Nat,
+    pub amount: Nat,
     /// The destination principal and optional subaccount.
-    pub to_account: (candid::Principal, Option<[u8; 32]>),
+    pub to_account: (Principal, Option<[u8; 32]>),
     /// Current execution status of the plan.
     pub status: PlanStatus,
     /// Idempotency key in nanoseconds for ledger transfers.
@@ -276,7 +276,7 @@ pub struct FundWithdrawalPlanParams {
     /// The amount to withdraw.
     pub amount: u128,
     /// The destination principal.
-    pub to: candid::Principal,
+    pub to: Principal,
 }
 
 /// A plan for processing an admin fund withdrawal in the background.
@@ -286,7 +286,7 @@ pub struct FundWithdrawalPlan {
     pub fund_type: FundType,
     pub asset_id: AssetId,
     pub amount: u128,
-    pub to: candid::Principal,
+    pub to: Principal,
     pub status: PlanStatus,
     pub idempotency_ns: PaymentIdempotency,
     pub receipt: Option<PaymentReceipt>,

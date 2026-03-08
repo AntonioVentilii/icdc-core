@@ -1,4 +1,4 @@
-use candid::CandidType;
+use candid::{CandidType, Nat};
 use serde::{Deserialize, Serialize};
 
 /// Mechanism for ensuring idempotency in ledger payments.
@@ -25,17 +25,17 @@ impl From<u64> for PaymentIdempotency {
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum PaymentReceipt {
     /// The block index in which the transfer was recorded.
-    IcrcBlockIndex(candid::Nat),
+    IcrcBlockIndex(Nat),
 }
 impl PaymentReceipt {
-    pub fn block_index(&self) -> candid::Nat {
+    pub fn block_index(&self) -> Nat {
         match self {
             PaymentReceipt::IcrcBlockIndex(index) => index.clone(),
         }
     }
 }
-impl From<candid::Nat> for PaymentReceipt {
-    fn from(value: candid::Nat) -> Self {
+impl From<Nat> for PaymentReceipt {
+    fn from(value: Nat) -> Self {
         PaymentReceipt::IcrcBlockIndex(value)
     }
 }

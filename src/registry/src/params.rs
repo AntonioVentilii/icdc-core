@@ -1,4 +1,4 @@
-use candid::{CandidType, Deserialize};
+use candid::{CandidType, Deserialize, Principal};
 use serde::Serialize;
 use shared::types::{Description, OracleMetadata, PayoffType, PayoutUnit, Price, Series, SeriesId};
 
@@ -89,7 +89,7 @@ pub struct ListSeriesParams {
     /// Filter by the price oracle identifier (case-insensitive, partial match).
     pub oracle_source: Option<String>,
     /// Filter by the principal identifier of the creator.
-    pub creator: Option<candid::Principal>,
+    pub creator: Option<Principal>,
     /// Filter by a search term in the title or description (case-insensitive, partial match).
     pub search_term: Option<String>,
     /// Optional pagination parameters.
@@ -169,7 +169,7 @@ pub struct AddOracleParams {
     /// Initial information about the oracle.
     pub metadata: OracleMetadata,
     /// Initial list of authorised principals.
-    pub authorized_principals: Vec<candid::Principal>,
+    pub authorized_principals: Vec<Principal>,
 }
 
 /// Input parameters for updating an existing oracle's metadata.
@@ -187,9 +187,9 @@ pub struct ManageOraclePrincipalsParams {
     /// The unique identifier of the oracle.
     pub oracle_id: String,
     /// Principals to be added to the authorised list.
-    pub add_principals: Vec<candid::Principal>,
+    pub add_principals: Vec<Principal>,
     /// Principals to be removed from the authorised list.
-    pub remove_principals: Vec<candid::Principal>,
+    pub remove_principals: Vec<Principal>,
 }
 
 #[cfg(test)]
