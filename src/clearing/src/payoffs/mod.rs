@@ -53,9 +53,20 @@ pub fn get_settlement_value(series: &Series, settlement_price: &Price, qty: i128
 
         PayoffType::Call => {
             // Vanilla Call: max(S - K, 0)
-            let strike_price = series.strike.as_ref().map(|p| p.value()).unwrap_or(0);
+            let strike_price_value = series
+                .strike
+                .as_ref()
+                .map(|p| {
+                    scale_price(
+                        p.value(),
+                        source_precision,
+                        p.decimals() as u32,
+                        RoundingMode::Floor,
+                    )
+                })
+                .unwrap_or(0);
 
-            let raw_payoff = settlement_price.value().saturating_sub(strike_price);
+            let raw_payoff = settlement_price.value().saturating_sub(strike_price_value);
 
             let scaled_payoff = scale_price(
                 raw_payoff,
@@ -69,9 +80,20 @@ pub fn get_settlement_value(series: &Series, settlement_price: &Price, qty: i128
 
         PayoffType::Put => {
             // Vanilla Put: max(K - S, 0)
-            let strike_price = series.strike.as_ref().map(|p| p.value()).unwrap_or(0);
+            let strike_price_value = series
+                .strike
+                .as_ref()
+                .map(|p| {
+                    scale_price(
+                        p.value(),
+                        source_precision,
+                        p.decimals() as u32,
+                        RoundingMode::Floor,
+                    )
+                })
+                .unwrap_or(0);
 
-            let raw_payoff = strike_price.saturating_sub(settlement_price.value());
+            let raw_payoff = strike_price_value.saturating_sub(settlement_price.value());
 
             let scaled_payoff = scale_price(
                 raw_payoff,
@@ -141,14 +163,17 @@ pub fn get_required_margin(series: &Series, price: &Price, qty: i128) -> u128 {
             // - Long: Full premium (current price).
             // - Short: Seller must collateralise up to the strike price to ensure solvency.
             if qty < 0 {
-                let strike_price = series.strike.as_ref().map(|p| p.value()).unwrap_or(0);
-                let scaled_strike = scale_price(
-                    strike_price,
-                    asset_decimals,
-                    source_precision,
-                    RoundingMode::Ceil,
-                );
-                abs_qty * scaled_strike
+                if let Some(ref strike) = series.strike {
+                    let scaled_strike = scale_price(
+                        strike.value(),
+                        asset_decimals,
+                        strike.decimals() as u32,
+                        RoundingMode::Ceil,
+                    );
+                    abs_qty * scaled_strike
+                } else {
+                    0
+                }
             } else {
                 abs_qty * scaled_price
             }
@@ -291,5 +316,40 @@ mod tests {
         // Scaled to 6 decimals: 3,550,000,000 / 10,000 = 355,000
         let price = Price::new(3_550_000_000, 10);
         assert_eq!(get_required_margin(&series, &price, 1), 355_000);
+    }
+
+    #[test]
+    fn test_mismatched_precision() {
+        // Strike: $100.00 (6 decimals) -> 100,000,000
+        let strike_price = Price::new(100_000_000, 6);
+        // Settle: $150.00 (8 decimals) -> 15,000,000,000
+        let settle_price = Price::new(15_000_000_000, 8);
+
+        let series = mock_series(
+            PayoffType::Call,
+            Some(strike_price),
+            6,
+            shared::types::PayoutUnit::usd(),
+        );
+
+        // (150.00 - 100.00) = 50.00 -> 50,000,000 in USD (6 decimals)
+        assert_eq!(get_settlement_value(&series, &settle_price, 1), 50_000_000);
+
+        // Margin for Short Put with mismatched precision
+        // Strike: $100.00 (6 decimals)
+        // Asset: USD (6 decimals)
+        let put_series = mock_series(
+            PayoffType::Put,
+            Some(Price::new(100_000_000, 6)),
+            6,
+            shared::types::PayoutUnit::usd(),
+        );
+        let current_price = Price::new(80_000_000, 8); // $0.80
+
+        // Short Put margin should be the strike ($100.00) in asset decimals (6)
+        assert_eq!(
+            get_required_margin(&put_series, &current_price, -1),
+            100_000_000
+        );
     }
 }
