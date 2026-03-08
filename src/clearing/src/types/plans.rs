@@ -58,6 +58,8 @@ pub struct SettlementPlanParams {
     pub series_id: SeriesId,
     /// The final settlement price from the oracle.
     pub settlement_price: Price,
+    /// The oracle source identifier for authorization.
+    pub oracle_source: String,
     /// The protocol fee applied to the settlement (in USD units).
     pub fee: u128,
     /// The insurance fee collected for this settlement session (in USD units).
@@ -199,6 +201,8 @@ pub struct SettlementPlan {
     pub series_id: SeriesId,
     /// The final settlement price.
     pub settlement_price: Price,
+    /// The oracle source identifier for authorization.
+    pub oracle_source: String,
     /// The protocol fee (in USD units).
     pub fee_usd: u128,
     /// The insurance fee (in USD units).
@@ -224,6 +228,7 @@ impl SettlementPlan {
             let SettlementPlanParams {
                 series_id,
                 settlement_price,
+                oracle_source,
                 fee: fee_usd,
                 insurance_fee: insurance_fee_usd,
                 positions,
@@ -240,6 +245,7 @@ impl SettlementPlan {
             let plan = SettlementPlan {
                 series_id,
                 settlement_price,
+                oracle_source,
                 fee_usd,
                 insurance_fee_usd,
                 positions,

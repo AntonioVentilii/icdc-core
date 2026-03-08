@@ -43,19 +43,28 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             settlement_price,
         } = params;
 
-        // ---------- Authorization ----------
         let caller = ic_cdk::caller();
 
-        let ser = SERIES.with(|s| {
-            s.borrow()
-                .get(&series_id)
-                .cloned()
-                .ok_or(SettlementError::Common(CommonError::Unauthorized))
-        })?;
+        // ---------- Authorization & Plan Retrieval ----------
+        // 1. Check if a plan already exists
+        let existing_plan = SETTLEMENT_PLANS.with(|m| m.borrow().get(&series_id).cloned());
 
+        let oracle_source = if let Some(ref plan) = existing_plan {
+            // If resuming, use the oracle source from the plan
+            plan.oracle_source.clone()
+        } else {
+            // If new, must have the series data to authorize
+            SERIES.with(|s| {
+                s.borrow()
+                    .get(&series_id)
+                    .map(|ser| ser.oracle_source.clone())
+                    .ok_or(SettlementError::Common(CommonError::Unauthorized))
+            })?
+        };
+
+        // 2. Perform authorization check
         if !is_controller(&caller) {
             let registry_canister = REGISTRY_CANISTER.with(|r| *r.borrow());
-
             if registry_canister == Principal::anonymous() {
                 return Err(SettlementError::Common(CommonError::RegistryNotSet));
             }
@@ -63,7 +72,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             let (is_authorized,): (bool,) = ic_cdk::call(
                 registry_canister,
                 "is_oracle_authorized",
-                (ser.oracle_source.clone(), caller),
+                (oracle_source, caller),
             )
             .await
             .map_err(|(code, msg)| {
@@ -79,9 +88,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
         }
 
         // ---------- Phase A: build or resume plan ----------
-        let mut plan = if let Some(existing) =
-            SETTLEMENT_PLANS.with(|m| m.borrow().get(&series_id).cloned())
-        {
+        let mut plan = if let Some(existing) = existing_plan {
             if existing.status == PlanStatus::Finalised {
                 return Ok(());
             }
@@ -94,6 +101,14 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             }
             existing
         } else {
+            // We need the full series object for prepare_settlement_impl
+            let ser = SERIES.with(|s| {
+                s.borrow()
+                    .get(&series_id)
+                    .cloned()
+                    .ok_or(SettlementError::Common(CommonError::Unauthorized))
+            })?;
+
             prepare_settlement_impl(
                 &ser,
                 &series_id,
@@ -133,7 +148,6 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                     plan.accounting_cursor += 1;
 
                     // Idiomatic chunking: we process in slices to avoid instruction limits.
-                    // If we've processed 100 items, we yield and wait for the next call.
                     if plan.accounting_cursor % 100 == 0 {
                         break;
                     }
@@ -142,7 +156,6 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 if plan.accounting_cursor == plan.positions.len() {
                     plan.accounting_applied = true;
 
-                    // Distribute collected fees (internal USD accounting)
                     let insurance_fee_total = plan.insurance_fee_usd;
                     let protocol_fee_total = plan.fee_usd;
 
@@ -166,7 +179,10 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
         // ---------- Phase C: finalise ----------
         if plan.accounting_applied {
             plan.status = PlanStatus::Finalised;
-            SETTLEMENT_PLANS.with(|m| m.borrow_mut().insert(series_id, plan));
+            SETTLEMENT_PLANS.with(|m| m.borrow_mut().insert(series_id.clone(), plan));
+
+            // Clean up: remove the series from active series list
+            SERIES.with(|s| s.borrow_mut().remove(&series_id));
         }
 
         Ok(())
@@ -235,6 +251,7 @@ pub(crate) fn prepare_settlement_impl(
     Ok(SettlementPlan::get_or_create(SettlementPlanParams {
         series_id: series_id.clone(),
         settlement_price: settlement_price.clone(),
+        oracle_source: ser.oracle_source.clone(),
         fee: total_protocol_fee,
         insurance_fee: total_insurance_fee,
         positions: positions_to_settle,
