@@ -95,40 +95,26 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             }
             existing
         } else {
-            let (positions_to_settle, positions_for_plan) = SERIES.with(|s| {
-                let _ = s
-                    .borrow()
-                    .get(&series_id)
-                    .cloned()
-                    .ok_or(SettlementError::Common(CommonError::Internal(
-                        "Series not found".to_string(),
-                    )))?;
+            // Gather positions for settlement without removing them yet.
+            let positions_to_settle = POSITIONS.with(|positions| {
+                let positions = positions.borrow();
+                positions
+                    .iter()
+                    .filter(|((_, sid), _)| sid == &series_id)
+                    .map(|((u, _), pos)| (*u, pos.net_qty, pos.reserved_margin_usd))
+                    .collect::<Vec<(User, i128, u128)>>()
+            });
 
-                POSITIONS.with(|positions| {
-                    let mut positions = positions.borrow_mut();
-
-                    let users: Vec<User> = positions
-                        .keys()
-                        .filter(|(_, sid)| sid == &series_id)
-                        .map(|(u, _)| *u)
-                        .collect();
-
-                    let mut settlement_data = Vec::new();
-                    let mut plan_data = Vec::new();
-                    for user in users {
-                        if let Some(pos) = positions.remove(&(user, series_id.clone())) {
-                            settlement_data.push((user, pos.net_qty, pos.reserved_margin_usd));
-                            plan_data.push((user, pos.net_qty, pos.reserved_margin_usd));
-                        }
-                    }
-                    Ok::<(Vec<(User, i128, u128)>, Vec<(User, i128, u128)>), SettlementError>((
-                        settlement_data,
-                        plan_data,
-                    ))
-                })
-            })?;
-
+            // Perform solvency check before any state modifications.
             check_settlement_solvency(&ser, &settlement_price, &positions_to_settle)?;
+
+            // Now that solvency is verified, atomically remove positions and build the plan.
+            POSITIONS.with(|positions| {
+                let mut positions = positions.borrow_mut();
+                for (user, _, _) in &positions_to_settle {
+                    positions.remove(&(*user, series_id.clone()));
+                }
+            });
 
             // Compute accounting updates using centralized fee utilities
             let mut accounting_updates: Vec<(User, i128)> = Vec::new();
@@ -159,7 +145,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 settlement_price: settlement_price.clone(),
                 fee: total_protocol_fee,
                 insurance_fee: total_insurance_fee,
-                positions: positions_for_plan,
+                positions: positions_to_settle,
                 accounting_updates,
             })
         };
