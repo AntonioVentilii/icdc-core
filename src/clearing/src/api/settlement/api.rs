@@ -17,7 +17,6 @@ use crate::{
     types::{
         errors::CommonError,
         plans::{PlanStatus, SettlementPlan, SettlementPlanParams},
-        user::User,
     },
 };
 
@@ -95,14 +94,44 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             }
             existing
         } else {
-            // Gather positions for settlement without removing them yet.
+            let mut total_insurance_fee: u128 = 0;
+            let mut total_protocol_fee: u128 = 0;
+
+            // Gather positions for settlement and compute payoffs/fees.
             let positions_to_settle = POSITIONS.with(|positions| {
                 let positions = positions.borrow();
-                positions
-                    .iter()
-                    .filter(|((_, sid), _)| sid == &series_id)
-                    .map(|((u, _), pos)| (*u, pos.net_qty, pos.reserved_margin_usd))
-                    .collect::<Vec<(User, i128, u128)>>()
+                let mut results = Vec::new();
+
+                for ((user, sid), pos) in positions.iter() {
+                    if sid != &series_id {
+                        continue;
+                    }
+
+                    let payoff_u128 = get_settlement_value(&ser, &settlement_price, pos.net_qty);
+
+                    let i_fee = crate::payoffs::fees::calculate_settlement_fee(
+                        payoff_u128,
+                        insurance_fund_fee_ratio,
+                    );
+
+                    let p_fee = crate::payoffs::fees::calculate_settlement_fee(
+                        payoff_u128,
+                        protocol_fee_ratio,
+                    );
+
+                    let cashflow: i128 = (payoff_u128 as i128) - (i_fee as i128) - (p_fee as i128);
+
+                    total_insurance_fee += i_fee;
+                    total_protocol_fee += p_fee;
+
+                    results.push(crate::types::plans::SettlementPosition {
+                        user: *user,
+                        net_qty: pos.net_qty,
+                        reserved_margin_usd: pos.reserved_margin_usd,
+                        cashflow_usd: cashflow,
+                    });
+                }
+                results
             });
 
             // Perform solvency check before any state modifications.
@@ -111,34 +140,10 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             // Now that solvency is verified, atomically remove positions and build the plan.
             POSITIONS.with(|positions| {
                 let mut positions = positions.borrow_mut();
-                for (user, _, _) in &positions_to_settle {
-                    positions.remove(&(*user, series_id.clone()));
+                for pos in &positions_to_settle {
+                    positions.remove(&(pos.user, series_id.clone()));
                 }
             });
-
-            // Compute accounting updates using centralized fee utilities
-            let mut accounting_updates: Vec<(User, i128)> = Vec::new();
-            let mut total_insurance_fee: u128 = 0;
-            let mut total_protocol_fee: u128 = 0;
-
-            for (user, net_qty, _) in positions_to_settle.iter().copied() {
-                let payoff_u128 = get_settlement_value(&ser, &settlement_price, net_qty);
-
-                let i_fee = crate::payoffs::fees::calculate_settlement_fee(
-                    payoff_u128,
-                    insurance_fund_fee_ratio,
-                );
-
-                let p_fee =
-                    crate::payoffs::fees::calculate_settlement_fee(payoff_u128, protocol_fee_ratio);
-
-                total_insurance_fee += i_fee;
-                total_protocol_fee += p_fee;
-
-                // Cashflow is payoff - total fees
-                let cashflow: i128 = (payoff_u128 as i128) - (i_fee as i128) - (p_fee as i128);
-                accounting_updates.push((user, cashflow));
-            }
 
             SettlementPlan::get_or_create(SettlementPlanParams {
                 series_id: series_id.clone(),
@@ -146,7 +151,6 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 fee: total_protocol_fee,
                 insurance_fee: total_insurance_fee,
                 positions: positions_to_settle,
-                accounting_updates,
             })
         };
 
@@ -163,19 +167,18 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             ACCOUNT_STATES.with(|accounts| {
                 let mut accounts = accounts.borrow_mut();
 
-                while plan.accounting_cursor < plan.accounting_updates.len() {
+                while plan.accounting_cursor < plan.positions.len() {
                     let idx = plan.accounting_cursor;
-                    let (user, cashflow) = plan.accounting_updates[idx];
+                    let pos = &plan.positions[idx];
 
-                    if let Some(account) = accounts.get_mut(&user) {
+                    if let Some(account) = accounts.get_mut(&pos.user) {
                         // 1. Update cash balance (PnL)
-                        account.cash_balance_usd += cashflow;
+                        account.cash_balance_usd += pos.cashflow_usd;
 
-                        // 2. Release margin (Index matches accounting_updates as both are built
-                        //    from SAME users list in Phase A)
-                        let old_margin = plan.positions[idx].2;
-                        account.reserved_margin_usd =
-                            account.reserved_margin_usd.saturating_sub(old_margin);
+                        // 2. Release margin
+                        account.reserved_margin_usd = account
+                            .reserved_margin_usd
+                            .saturating_sub(pos.reserved_margin_usd);
                     }
 
                     plan.accounting_cursor += 1;
@@ -187,7 +190,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                     }
                 }
 
-                if plan.accounting_cursor == plan.accounting_updates.len() {
+                if plan.accounting_cursor == plan.positions.len() {
                     plan.accounting_applied = true;
 
                     // Distribute collected fees (internal USD accounting)
@@ -232,12 +235,12 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 fn check_settlement_solvency(
     series: &Series,
     price: &Price,
-    positions: &[(User, i128, u128)],
+    positions: &[crate::types::plans::SettlementPosition],
 ) -> Result<(), SettlementError> {
     let mut total_payoff: u128 = 0;
 
-    for (_, net_qty, _) in positions.iter().copied() {
-        let payoff = get_settlement_value(series, price, net_qty);
+    for pos in positions {
+        let payoff = get_settlement_value(series, price, pos.net_qty);
         total_payoff = total_payoff
             .checked_add(payoff)
             .ok_or(SettlementError::MathOverflow)?;

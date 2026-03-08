@@ -57,15 +57,21 @@ pub struct SettlementPlanParams {
     pub series_id: SeriesId,
     /// The final settlement price from the oracle.
     pub settlement_price: Price,
-    /// Users who had positions in this series.
     /// The protocol fee applied to the settlement (in USD units).
     pub fee: u128,
     /// The insurance fee collected for this settlement session (in USD units).
     pub insurance_fee: u128,
-    /// A list of positions involved in the settlement: (user, qty, reserved_margin_usd).
-    pub positions: Vec<(User, i128, u128)>,
-    /// List of accounting updates: (user, cashflow_usd).
-    pub accounting_updates: Vec<(User, i128)>,
+    /// A list of positions involved in the settlement with their accounting data.
+    pub positions: Vec<SettlementPosition>,
+}
+
+/// Snapshot of a single user's position and its settlement accounting.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct SettlementPosition {
+    pub user: User,
+    pub net_qty: i128,
+    pub reserved_margin_usd: u128,
+    pub cashflow_usd: i128,
 }
 
 /// A plan for processing a collateral deposit in the background.
@@ -196,10 +202,8 @@ pub struct SettlementPlan {
     pub fee_usd: u128,
     /// The insurance fee (in USD units).
     pub insurance_fee_usd: u128,
-    /// Detailed position snapshots: (user, qty, reserved_margin_usd).
-    pub positions: Vec<(User, i128, u128)>,
-    /// List of accounting updates: (user, cashflow_usd).
-    pub accounting_updates: Vec<(User, i128)>,
+    /// Detailed position snapshots and accounting updates.
+    pub positions: Vec<SettlementPosition>,
     /// Tracks progress through accounting updates.
     pub accounting_cursor: usize,
     /// Whether all accounting updates have been applied to account states.
@@ -222,8 +226,6 @@ impl SettlementPlan {
                 fee: fee_usd,
                 insurance_fee: insurance_fee_usd,
                 positions,
-                accounting_updates,
-                ..
             } = params;
 
             let key = series_id.clone();
@@ -240,7 +242,6 @@ impl SettlementPlan {
                 fee_usd,
                 insurance_fee_usd,
                 positions,
-                accounting_updates,
                 accounting_cursor: 0,
                 accounting_applied: false,
                 status: PlanStatus::Planned,
