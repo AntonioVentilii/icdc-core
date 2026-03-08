@@ -28,6 +28,6 @@ pub enum AssetError {
     },
     /// Overflow during internal balance calculations.
     MathOverflow,
-    /// The asset identifier is invalid or correctly formatted.
+    /// The asset identifier is invalid or incorrectly formatted.
     InvalidAssetId(String),
 }
