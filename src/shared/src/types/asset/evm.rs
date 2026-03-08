@@ -3,6 +3,8 @@ use std::fmt;
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
 
+use crate::types::asset::AssetError;
+
 /// Unique identifier for an EVM-compatible chain.
 ///
 /// IDs may be found on: <https://chainlist.org/>
@@ -139,14 +141,14 @@ impl ErcToken {
     }
 
     /// Returns the canonical USDT token for a given chain.
-    pub fn usdt(chain: Chain) -> Result<Self, crate::types::asset::errors::AssetError> {
+    pub fn usdt(chain: Chain) -> Result<Self, AssetError> {
         match chain {
             Chain::Ethereum => Ok(Self {
                 token_address: "0xdAC17F958D2ee523a2206206994597C13D831ec7".to_string(),
                 chain_id: chain.id(),
                 decimals: 6,
             }),
-            _ => Err(crate::types::asset::errors::AssetError::UnsupportedAsset),
+            _ => Err(AssetError::UnsupportedAsset),
         }
     }
 }
