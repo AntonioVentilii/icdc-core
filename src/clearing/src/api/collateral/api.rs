@@ -192,7 +192,6 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
 
         let key = (user, withdrawal_id.clone());
 
-        // ---------- Phase B: Risk Check and Internal Debit ----------
         if plan.reserved_amount.is_none() {
             let amount_u128: u128 = amount
                 .0
@@ -200,23 +199,21 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                 .try_into()
                 .map_err(|_| WithdrawCollateralError::MathOverflow)?;
 
+            let withdrawal_value_usd = (amount_u128 as f64 * config.price_usd.to_f64()) as u128;
+
             let (equity_usd, reserved_margin_usd) = ACCOUNT_STATES.with(|accounts| {
                 let accounts = accounts.borrow();
                 let state = accounts.get(&user).ok_or(
                     WithdrawCollateralError::InsufficientExcessMargin {
                         available: 0,
-                        requested: amount_u128, // This is simplified for the error type
+                        requested: withdrawal_value_usd,
                     },
                 )?;
 
-                // Need to compute equity. Since we need CollateralAssetConfig map, let's get it.
                 let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
                 let equity = state.calculate_equity_usd(&configs);
                 Ok::<(u128, u128), WithdrawCollateralError>((equity, state.reserved_margin_usd))
             })?;
-
-            // Risk check: equity - withdrawal_value_usd must be >= reserved_margin_usd
-            let withdrawal_value_usd = (amount_u128 as f64 * config.price_usd.to_f64()) as u128;
 
             if equity_usd < reserved_margin_usd
                 || equity_usd - reserved_margin_usd < withdrawal_value_usd

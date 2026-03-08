@@ -1,244 +1,124 @@
 #!/bin/bash
 set -euo pipefail
 
-# --- CONFIGURATION (Default Values) ---
-ALLOWANCE=10000000000     # 100 ICP
-DEPOSIT_AMOUNT=1000000000 # 10 ICP
+# Sourcing centralized utilities
+source ./scripts/test.integration.helper.sh
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-log() { echo -e "${BLUE}LOG:${NC} $1"; }
-warn() { echo -e "${YELLOW}WARN:${NC} $1"; }
-error() {
-  echo -e "${RED}ERROR:${NC} $1"
-  exit 1
-}
-success() { echo -e "${GREEN}SUCCESS:${NC} $1"; }
-
-# --- PRE-FLIGHT CHECKS ---
-
-log "Checking environment..."
-
-if ! command -v dfx &>/dev/null; then
-  error "dfx is not installed."
-fi
-
-if ! dfx ping &>/dev/null; then
-  error "dfx replica is not running. Please start it with 'dfx start --background'."
-fi
-
-# Set identities
-dfx identity use default
-PRINCIPAL="$(dfx identity get-principal)"
-log "Default principal: $PRINCIPAL"
-
-dfx identity get-principal --identity secondary &>/dev/null || dfx identity new secondary --storage-mode=plaintext
-SECONDARY="$(dfx identity get-principal --identity secondary)"
-log "Secondary principal: $SECONDARY"
+# --- CONFIGURATION ---
+DEPOSIT_AMOUNT=2000000000 # 20 ICP
+TIMESTAMP=$(date +%s)
 
 # Canister IDs
 CLEARING=$(dfx canister id clearing 2>/dev/null) || error "Clearing canister not found. Did you deploy?"
 REGISTRY=$(dfx canister id registry 2>/dev/null) || error "Registry canister not found. Did you deploy?"
 ICP_LEDGER=$(dfx canister id icp_ledger 2>/dev/null) || error "ICP Ledger canister not found. Did you deploy?"
 
+log "Starting Production-Ready Integration Suite..."
 log "Canisters: Clearing=$CLEARING, Registry=$REGISTRY, Ledger=$ICP_LEDGER"
 
-# --- HELPER FUNCTIONS ---
+# --- 1. INITIALIZATION ---
+log "Initializing clearing config..."
+dfx canister call clearing set_registry_canister "(principal \"$REGISTRY\")" >/dev/null
 
-get_margin_balance() {
-  local identity="$1"
-  local current
-  current=$(dfx identity whoami)
-  dfx identity use "$identity" >/dev/null
-  local res
-  res=$(dfx canister call clearing get_margin_account "(record { refresh = null })")
-  dfx identity use "$current" >/dev/null
-  echo "$res" | grep -oE '[0-9_]+ : nat' | tail -n 1 | awk '{print $1}' | tr -d '_'
-}
-
-# --- INITIALIZATION ---
-
-log "Initializing clearing with registry ID..."
-dfx canister call clearing set_registry_canister "(principal \"$REGISTRY\")"
-
-log "Seeding tokens..."
-./scripts/send.tokens.sh "$PRINCIPAL" 100
-./scripts/send.tokens.sh "$SECONDARY" 100
-
-# --- COLLATERAL SETUP ---
-
-setup_collateral() {
-  local identity="$1"
-  local timestamp
-  timestamp=$(date +%s%N)
-
-  log "Setting up collateral for $identity..."
-  dfx identity use "$identity"
-
-  dfx canister call icp_ledger icrc2_approve "(
-      record {
-        amount = $ALLOWANCE : nat;
-        spender = record { owner = principal \"$CLEARING\" };
-      }
-    )"
-
-  dfx canister call clearing deposit_collateral "(
-      record {
-        deposit_id = \"DEP_${timestamp}\";
-        asset_id = \"ICP\";
-        amount = $DEPOSIT_AMOUNT : nat;
-      }
-    )"
-}
-
-setup_collateral "default"
-setup_collateral "secondary"
+# Get principals for config
 dfx identity use default
+PRINCIPAL="$(dfx identity get-principal)"
+dfx identity get-principal --identity secondary &>/dev/null || dfx identity new secondary --storage-mode=plaintext
+SECONDARY="$(dfx identity get-principal --identity secondary)"
 
-# --- REGISTRY SETUP ---
+# Using explicit Candid syntax for nat16 to avoid subtyping errors
+# Wrap in (val:type) for extra safety with dfx parser
+dfx canister call clearing update_config "(record { 
+    insurance_fund_fee_ratio = (10 : nat16); 
+    protocol_fee_ratio = (5 : nat16);
+    signer_canister = principal \"$PRINCIPAL\"; 
+    evm_rpc = principal \"aaaaa-aa\" 
+})" || error "Failed to update clearing config"
 
-TIMESTAMP=$(date +%s)
-log "Registering Oracle and Series..."
+# --- 2. ASSET SETUP ---
+log "Configuring ICP & vUSD collateral assets..."
+dfx canister call clearing update_collateral_asset "(record { config = record { asset_id = \"ICP\"; asset = variant { Icrc = principal \"$ICP_LEDGER\" }; symbol = \"ICP\"; decimals = 8; price_usd = record { value = 10000000; decimals = 6 }; haircut_bps = 0; is_enabled = true; } })" >/dev/null
+dfx canister call clearing update_collateral_asset "(record { config = record { asset_id = \"vUSD\"; asset = variant { Icrc = principal \"aaaaa-aa\" }; symbol = \"vUSD\"; decimals = 6; price_usd = record { value = 1000000; decimals = 6 }; haircut_bps = 0; is_enabled = true; } })" >/dev/null
 
-dfx canister call registry add_oracle "(
-  record {
-    oracle_id = \"INTEGRATION_ORACLE\";
-    metadata = record { name = \"Integration Oracle\"; description = opt \"Test Oracle\"; website = null; };
-    authorized_principals = vec { principal \"$PRINCIPAL\" };
-  }
-)"
+# --- 3. IDENTITY SEEDING ---
+log "Seeding identities with test tokens..."
+./scripts/send.tokens.sh "$PRINCIPAL" 100 >/dev/null
+./scripts/send.tokens.sh "$SECONDARY" 100 >/dev/null
 
-# Register Series 1: Binary
-RESULT1=$(dfx canister call registry add_series "(
-  record {
-    strike = null; payoff_type = variant { Binary }; payout_unit = variant { Fiat = variant { Usd } };
-    underlying = \"INT_TEST_1_${TIMESTAMP}\"; expiry_ns = 2_000_000_000_000_000_000 : nat64;
-    oracle_source = \"INTEGRATION_ORACLE\"; title = \"Series 1\"; description = record { plain = \"Binary Test\"; markdown = null; html = null };
-  }
-)")
-SERIES_1=$(echo "$RESULT1" | grep -oE '"[a-f0-9]{64}"' | head -n 1 | tr -d '"')
+setup_icp_collateral "default" "$DEPOSIT_AMOUNT"
+setup_icp_collateral "secondary" "$DEPOSIT_AMOUNT"
 
-# Register Series 2: Binary (another one)
-RESULT2=$(dfx canister call registry add_series "(
-  record {
-    strike = null; payoff_type = variant { Binary }; payout_unit = variant { Fiat = variant { Usd } };
-    underlying = \"INT_TEST_2_${TIMESTAMP}\"; expiry_ns = 2_000_000_000_000_000_000 : nat64;
-    oracle_source = \"INTEGRATION_ORACLE\"; title = \"Series 2\"; description = record { plain = \"Binary Test 2\"; markdown = null; html = null };
-  }
-)")
-SERIES_2=$(echo "$RESULT2" | grep -oE '"[a-f0-9]{64}"' | head -n 1 | tr -d '"')
+# --- 4. REGISTRY SETUP (Oracle & Series) ---
+log "Registering Oracle and varied Series types..."
+dfx identity use default
+dfx canister call registry add_authorized_creators "(vec { principal \"$PRINCIPAL\" })" >/dev/null
+# Ignore "OracleAlreadyExists"
+dfx canister call registry add_oracle "(record { oracle_id = \"TRADE_ORACLE\"; metadata = record { name = \"Test Oracle\"; description = opt record { plain = \"Oracle\"; markdown = null; html = null }; website = null }; authorized_principals = vec { principal \"$PRINCIPAL\" } })" 2>/dev/null || true
 
-log "Registered Series: $SERIES_1, $SERIES_2"
+# Register Series: Binary
+BINARY_SERIES=$(register_series_usd "Binary Test" "variant { Binary }" "null" "INT_BIN_${TIMESTAMP}" | grep -oE '"[a-f0-9]{64}"' | head -n 1 | tr -d '"')
 
-# --- TRADING SESSION ---
+# Register Series: Put (Strike $1.00)
+# Price record requires 'decimal' field
+PUT_SERIES=$(register_series_usd "Put Test" "variant { Put }" "opt record { decimal = record { value = 1000000; decimals = 6 } }" "INT_PUT_${TIMESTAMP}" | grep -oE '"[a-f0-9]{64}"' | head -n 1 | tr -d '"')
 
-log "Executing trades..."
+# Register Series: Call (Strike $50,000) - e.g. BTC Call
+CALL_SERIES=$(register_series_usd "BTC Call Test" "variant { Call }" "opt record { decimal = record { value = 50000000000; decimals = 6 } }" "INT_CALL_${TIMESTAMP}" | grep -oE '"[a-f0-9]{64}"' | head -n 1 | tr -d '"')
 
-log "Trade 1: Default (Buyer) vs Secondary (Seller) on Series 1 (Binary)"
-dfx canister call clearing submit_matched_trade "(
-  record {
-    trade_id = \"TR1_${TIMESTAMP}\"; series_id = \"$SERIES_1\";
-    buyer = principal \"$PRINCIPAL\"; seller = principal \"$SECONDARY\";
-    qty = 5 : int; price = 400000 : nat64;
-  }
-)"
-
-log "Trade 2: Default (Seller) vs Secondary (Buyer) on Series 2 (Binary)"
-dfx canister call clearing submit_matched_trade "(
-  record {
-    trade_id = \"TR2_${TIMESTAMP}\"; series_id = \"$SERIES_2\";
-    buyer = principal \"$SECONDARY\"; seller = principal \"$PRINCIPAL\";
-    qty = 2 : int; price = 600000 : nat64;
-  }
-)"
-
-log "Trade 3: Mixed Trade on Series 1 - Default sells 2 units back to Secondary at 0.5 ICP"
-log "Actually, prices are USD (e6) now. 0.5 ICP was 40M. 0.5 USD is 500,000."
-dfx canister call clearing submit_matched_trade "(
-  record {
-    trade_id = \"TR3_${TIMESTAMP}\"; series_id = \"$SERIES_1\";
-    buyer = principal \"$SECONDARY\"; seller = principal \"$PRINCIPAL\";
-    qty = 2 : int; price = 500000 : nat64;
-  }
-)"
-
-# Positions after trades:
-# Series 1: Default Long 3 units (5 - 2), Secondary Short 3 units
-# Series 2: Default Short 2 units, Secondary Long 2 units
-
-# --- SETTLEMENT ---
-
-log "Starting settlement..."
-
-# Adjust balance query - get_margin_account is now get_account_state
-get_usd_balance() {
-  local identity="$1"
-  local current
-  current=$(dfx identity whoami)
-  dfx identity use "$identity" >/dev/null
-  local res
-  res=$(dfx canister call clearing get_account_state "(record { refresh = null })")
-  dfx identity use "$current" >/dev/null
-  # Extract cash_balance_usd
-  echo "$res" | grep -oE 'cash_balance_usd = -?[0-9_]+' | awk '{print $3}' | tr -d '_'
-}
-
-BAL_BEFORE_SETTLE_DEF=$(get_usd_balance "default")
-BAL_BEFORE_SETTLE_SEC=$(get_usd_balance "secondary")
-
-# Settle Series 1: Price 1.0 USD (Full payoff for buyer)
-log "Settling Series 1 at price 1.0 (1,000,000 e6)..."
-dfx canister call clearing settle_series "(
-  record { series_id = \"$SERIES_1\"; settlement_price = record { decimal = record { value = 1000000; decimals = 6 }; timestamp = null; oracle_id = null }; }
-)"
-
-# Settle Series 2: Price 0.0 USD
-log "Settling Series 2 at price 0.0..."
-dfx canister call clearing settle_series "(
-  record { series_id = \"$SERIES_2\"; settlement_price = record { decimal = record { value = 0; decimals = 6 }; timestamp = null; oracle_id = null }; }
-)"
-
-# --- VERIFICATION ---
-
-BAL_AFTER_DEF=$(get_usd_balance "default")
-BAL_AFTER_SEC=$(get_usd_balance "secondary")
-
-log "Verification..."
-echo "------------------------------------------------"
-echo "Identity   | Before (USD) | After (USD) | Delta"
-echo "Default    | $BAL_BEFORE_SETTLE_DEF | $BAL_AFTER_DEF | $((BAL_AFTER_DEF - BAL_BEFORE_SETTLE_DEF))"
-echo "Secondary  | $BAL_BEFORE_SETTLE_SEC | $BAL_AFTER_SEC | $((BAL_AFTER_SEC - BAL_BEFORE_SETTLE_SEC))"
-echo "------------------------------------------------"
-
-# Expected Profit (USD e6):
-# S1: Long 3 units. Payout = 3 * 1.0 = 3,000,000.
-# Cost was 3 * AvgPrice. Wait, internal matching logic handles PnL.
-# If we assume 0 initial cash:
-# T1: Buy 5 @ 0.4 -> Cash = -2.0M
-# T2: Sell 2 @ 0.5 -> Cash = -2.0M + 1.0M = -1.0M
-# Net pos: Long 3.
-# Settle S1 @ 1.0 -> Cash = -1.0M + (3 * 1.0) = +2.0M
-# S2: Sell 2 @ 0.6 -> Cash = +1.2M
-# Net pos: Short 2.
-# Settle S2 @ 0.0 -> Cash = +1.2M + (2 * (1.0 - 0.0)) = 2.0M? No.
-# Binary Payoff for Short = (MAX - P_settle) = (1.0 - 0.0) = 1.0.
-# Short @ 0.6 -> Profit = (0.6 - 0.0) = 0.6. For 2 units = 1.2M.
-# Total Profit Def = 2.0M + 1.2M = 3.2M.
-# Insurance fee (default 0.1%): 0.1% of Payout (3M + 2M) = 5,000?
-# Let's simplify and just check deltas.
-
-EXPECTED_DELTA=3200000
-ACTUAL_DELTA_DEF=$((BAL_AFTER_DEF - BAL_BEFORE_SETTLE_DEF))
-
-if [ "$ACTUAL_DELTA_DEF" -eq "$EXPECTED_DELTA" ]; then
-  success "Integration test passed (USD Accounting)!"
-else
-  warn "Delta mismatch (Expected $EXPECTED_DELTA, Got $ACTUAL_DELTA_DEF). Checking absolute balance..."
-  # Depending on insurance fees, it might be slightly less.
-  success "Integration test verified (Logic confirmed)."
+if [ -z "$BINARY_SERIES" ] || [ -z "$PUT_SERIES" ] || [ -z "$CALL_SERIES" ]; then
+  error "Failed to register series"
 fi
+
+log "Registered Series: BINARY=$BINARY_SERIES, PUT=$PUT_SERIES, CALL=$CALL_SERIES"
+
+# --- 5. EXECUTION: BINARY SCENARIO ---
+log "Scenario 1: Binary Trade Matching..."
+dfx identity use default
+# Buy 10 @ 0.55 USD
+dfx canister call clearing submit_matched_trade "(record { trade_id = \"T1_${TIMESTAMP}\"; series_id = \"$BINARY_SERIES\"; buyer = principal \"$PRINCIPAL\"; seller = principal \"$SECONDARY\"; qty = 10 : int; price = record { decimal = record { value = 550000; decimals = 6 }; timestamp = null; oracle_id = null }; })" >/dev/null
+
+# --- 6. EXECUTION: PUT SCENARIO (Margin Enforcement) ---
+log "Scenario 2: Put Trade (Short side collateralizes strike)..."
+# Seller (Default) sells a Put @ 0.20 USD (Strike $1.0)
+dfx canister call clearing submit_matched_trade "(record { trade_id = \"T2_${TIMESTAMP}\"; series_id = \"$PUT_SERIES\"; buyer = principal \"$SECONDARY\"; seller = principal \"$PRINCIPAL\"; qty = 5 : int; price = record { decimal = record { value = 200000; decimals = 6 }; timestamp = null; oracle_id = null }; })" >/dev/null
+
+# --- 7. SETTLEMENT & VERIFICATION ---
+log "Settling all series..."
+# Settle Binary @ $1.0 (Full Win for Default)
+dfx canister call clearing settle_series "(record { series_id = \"$BINARY_SERIES\"; settlement_price = record { decimal = record { value = 1000000; decimals = 6 }; timestamp = null; oracle_id = null }; })" >/dev/null
+
+# Settle Put @ $0.80 (In-the-money for Secondary)
+# Payoff for Put = max(Strike - Price, 0) = max(1.0 - 0.8, 0) = 0.20 per unit.
+# Secondary (Buyer) gets 5 * 0.20 = 1.00 USD.
+dfx canister call clearing settle_series "(record { series_id = \"$PUT_SERIES\"; settlement_price = record { decimal = record { value = 800000; decimals = 6 }; timestamp = null; oracle_id = null }; })" >/dev/null
+
+# Settle Call @ $60,000 (Very In-the-money) - but we didn't trade it, just verifying registration
+log "Skipping Call settlement as no trades were executed."
+
+# --- FINAL CHECKS ---
+BAL_DEF=$(get_usd_balance "default")
+BAL_SEC=$(get_usd_balance "secondary")
+
+log "------------------------------------------------"
+log "Final USD Balances (Cash):"
+log "Default (Winner BIN, Loser PUT): $BAL_DEF"
+log "Secondary (Loser BIN, Winner PUT): $BAL_SEC"
+log "------------------------------------------------"
+
+# Quick check on core Binary PnL for Default (Winner)
+# T1: Profit (1.0 - 0.55) * 10 = 4.5. Fee (0.15% payout) = 0.015. Net Binary = +4.485
+# T2: Put Short @ 0.20. Settle @ 0.80. Loss in cash is Premium - Payoff.
+# Premium for Put Short = + (5 * 0.20) = +1.0.
+# Payoff for Put Short = - (5 * 0.20) = -1.0.
+# Net PnL = 0.
+# So Default should be +4.485M (assuming 0 starting cash).
+EXPECTED_MIN=4400000
+if [ "$BAL_DEF" -gt "$EXPECTED_MIN" ]; then
+  success "Integration suite completed successfully!"
+else
+  error "Balance verification failed. Default balance: $BAL_DEF (Expected > $EXPECTED_MIN)"
+fi
+
+echo ""
+log "🚀 System Funds State:"
+dfx canister call clearing get_funds

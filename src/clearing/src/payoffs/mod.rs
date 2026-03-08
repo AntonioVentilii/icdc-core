@@ -129,12 +129,29 @@ pub fn get_required_margin(series: &Series, price: &Price, qty: i128) -> u128 {
             }
         }
 
-        PayoffType::Call | PayoffType::Put => {
-            // Placeholder: Vanilla margin model.
-            // For Long: usually the full premium (price).
-            // For Short: depends on risk, but often strike + buffer or similar.
-            // For now, we use price as a placeholder for both sides.
+        PayoffType::Call => {
+            // Margin for Calls:
+            // - Long: Full premium (current price).
+            // - Short: In this version, we require full coverage or premium-based collateral.
             abs_qty * scaled_price
+        }
+
+        PayoffType::Put => {
+            // Margin for Puts:
+            // - Long: Full premium (current price).
+            // - Short: Seller must collateralise up to the strike price to ensure solvency.
+            if qty < 0 {
+                let strike_price = series.strike.as_ref().map(|p| p.value()).unwrap_or(0);
+                let scaled_strike = scale_price(
+                    strike_price,
+                    asset_decimals,
+                    source_precision,
+                    RoundingMode::Ceil,
+                );
+                abs_qty * scaled_strike
+            } else {
+                abs_qty * scaled_price
+            }
         }
     }
 }
@@ -221,6 +238,26 @@ mod tests {
         assert_eq!(get_required_margin(&series_usd, &price, 1), 600_000);
         // Short Binary (6 decimals): (1.0 - 0.6) = 0.40 -> 400,000
         assert_eq!(get_required_margin(&series_usd, &price, -1), 400_000);
+
+        // Call Margin
+        let call_series = mock_series(
+            PayoffType::Call,
+            Some(Price::new(50_000_000, 8)),
+            8,
+            PayoutUnit::usd(),
+        );
+        // Long Call: premium (0.60)
+        assert_eq!(get_required_margin(&call_series, &price, 10), 6_000_000);
+        // Short Call: premium (0.60)
+        assert_eq!(get_required_margin(&call_series, &price, -10), 6_000_000);
+
+        // Put Margin
+        let strike = Price::new(100_000_000, 8); // $1.00
+        let put_series = mock_series(PayoffType::Put, Some(strike), 8, PayoutUnit::usd());
+        // Long Put: premium (0.60)
+        assert_eq!(get_required_margin(&put_series, &price, 10), 6_000_000);
+        // Short Put: strike price ($1.00)
+        assert_eq!(get_required_margin(&put_series, &price, -10), 10_000_000);
     }
 
     #[test]

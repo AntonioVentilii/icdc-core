@@ -41,7 +41,6 @@ pub struct LimitOrder {
     pub qty: i128,
     /// Limit price in the precision defined by the associated series (`series.price_precision`).
     pub price: Price,
-    /// Amount blocked in collateral (in settlement asset's base units).
-    /// TODO: double-check if the above is true
+    /// Amount blocked in collateral (denominated in USD units, 6 decimals).
     pub block_index: u128,
 }

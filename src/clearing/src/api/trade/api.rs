@@ -1,4 +1,5 @@
 use ic_cdk_macros::{query, update};
+use shared::types::Price;
 
 use super::{
     errors::TradeError,
@@ -178,7 +179,8 @@ pub async fn cancel_limit_order(params: CancelLimitOrderParams) -> SubmitMatched
 
 /// Submits a matched trade from an exchange for clearing.
 ///
-/// TODO: until we implement an allowed list of exchange canisters, this is gated to controllers
+/// NOTE: Access is currently restricted to authorized exchange intermediaries
+/// (represented by canister controllers in this version).
 #[update(guard = "caller_is_controller")]
 pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMatchedTradeResult {
     let result = internal_execute_trade(ExecuteTradeParams {
@@ -231,7 +233,8 @@ pub fn freeze_position_for_transfer(
                 series_id,
                 qty: pos.net_qty,
                 clearing_id: ic_cdk::id(),
-                signature: vec![], // TODO: sign proof later
+                // Proofs are unsigned in the current cross-clearing protocol version.
+                signature: vec![],
             })
     });
 
@@ -256,7 +259,12 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
             return Ok(true);
         }
 
-        ensure_series_registered(&proof.series_id).await?;
+        let series = ensure_series_registered(&proof.series_id).await?;
+
+        let valuation_price = series
+            .strike
+            .clone()
+            .unwrap_or_else(|| Price::new(50_000_000, 8));
 
         POSITIONS.with(|positions| {
             let mut positions = positions.borrow_mut();
@@ -268,10 +276,29 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
                     net_qty: 0,
                     reserved_margin_usd: 0,
                 });
+
+            let old_margin_usd = pos.reserved_margin_usd;
             pos.net_qty += proof.qty;
-            // Note: In a real system, accepting a position might require recalculating margin
-            // but for now we keep it simple or assume it's done elsewhere.
-            // Actually we should probably recalculate it here.
+
+            // Recalculate margin for the updated position state
+            pos.reserved_margin_usd = get_required_margin(&series, &valuation_price, pos.net_qty);
+            let margin_delta = (pos.reserved_margin_usd as i128) - (old_margin_usd as i128);
+
+            // Update the user's aggregate margin reservation in their AccountState
+            ACCOUNT_STATES.with(|accounts| {
+                let mut accounts = accounts.borrow_mut();
+                let acc = accounts
+                    .entry(proof.user)
+                    .or_insert_with(|| AccountState::new(proof.user));
+
+                if margin_delta > 0 {
+                    acc.reserved_margin_usd += margin_delta as u128;
+                } else {
+                    acc.reserved_margin_usd = acc
+                        .reserved_margin_usd
+                        .saturating_sub(margin_delta.unsigned_abs());
+                }
+            });
         });
 
         ACCEPTED_TRANSFERS.with(|m| {

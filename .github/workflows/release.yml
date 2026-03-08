@@ -44,6 +44,12 @@ jobs:
           name: registry.wasm.gz
           path: ./target/wasm32-unknown-unknown/release/registry.wasm.gz
 
+      - name: Upload minter.wasm.gz
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: minter.wasm.gz
+          path: ./target/wasm32-unknown-unknown/release/minter.wasm.gz
+
   candid:
     name: Generate Candid
     runs-on: ubuntu-24.04
@@ -59,6 +65,8 @@ jobs:
             target: clearing
           - name: registry.did
             target: registry
+          - name: minter.did
+            target: minter
 
     steps:
       - name: Checkout
@@ -111,6 +119,18 @@ jobs:
           name: registry.did
           path: .
 
+      - name: Download minter.wasm.gz
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: minter.wasm.gz
+          path: .
+
+      - name: Download minter.did
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: minter.did
+          path: .
+
       - name: Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
         if: startsWith(github.ref, 'refs/tags/')
@@ -120,3 +140,5 @@ jobs:
             ./clearing.did
             ./registry.wasm.gz
             ./registry.did
+            ./minter.wasm.gz
+            ./minter.did

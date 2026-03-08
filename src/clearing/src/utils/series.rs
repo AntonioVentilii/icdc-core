@@ -37,7 +37,7 @@ pub async fn ensure_series_registered(series_id: &SeriesId) -> Result<Series, Tr
 
     let series = series_opt.ok_or_else(|| TradeError::SeriesNotFound(series_id.clone()))?;
 
-    // For now, only USD-payout contracts are supported by this clearing canister version.
+    // Only USD-payout contracts are supported by this clearing canister version.
     if series.payout_unit != PayoutUnit::usd() {
         return Err(TradeError::Common(CommonError::Internal(format!(
             "Unsupported payout unit in series: {:?}. Only USD is supported.",
