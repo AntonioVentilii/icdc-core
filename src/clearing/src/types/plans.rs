@@ -151,8 +151,10 @@ pub struct WithdrawalPlan {
     pub idempotency_ns: PaymentIdempotency,
     /// Proof of successful transfer, if completed.
     pub receipt: Option<PaymentReceipt>,
-    /// The amount successfully reserved for withdrawal.
+    /// The amount successfully reserved for withdrawal (token units).
     pub reserved_amount: Option<u128>,
+    /// Sum of internal cash (USD) reserved for withdrawal (internal units).
+    pub reserved_cash_usd: Option<i128>,
 }
 impl WithdrawalPlan {
     /// Retrieves an existing withdrawal plan or creates a new one if it doesn't exist.
@@ -186,6 +188,7 @@ impl WithdrawalPlan {
                 idempotency_ns,
                 receipt: None,
                 reserved_amount: None,
+                reserved_cash_usd: None,
             };
 
             m.insert(key, plan.clone());

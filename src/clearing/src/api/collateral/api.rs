@@ -1,7 +1,7 @@
 use candid::Nat;
 use ic_cdk_macros::update;
 use shared::{
-    constants::{USD_DECIMALS, VUSD_ASSET_ID},
+    constants::{BPS_BASE, USD_DECIMALS, VUSD_ASSET_ID},
     types::asset::errors::AssetError,
 };
 
@@ -208,15 +208,21 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             let target_decimals = USD_DECIMALS as u32;
 
             let withdrawal_value_usd_nat = {
-                let numerator = Nat::from(amount_u128) * Nat::from(price_value);
+                let haircut_multiplier =
+                    (BPS_BASE as u128).saturating_sub(config.haircut_bps as u128);
+
+                let numerator =
+                    Nat::from(amount_u128) * Nat::from(price_value) * Nat::from(haircut_multiplier);
+
                 let total_source_decimals = asset_decimals + price_decimals;
 
                 if total_source_decimals >= target_decimals {
-                    let divisor = Nat::from(10u128.pow(total_source_decimals - target_decimals));
+                    let divisor = Nat::from(BPS_BASE)
+                        * Nat::from(10u128.pow(total_source_decimals - target_decimals));
                     numerator / divisor
                 } else {
                     let multiplier = Nat::from(10u128.pow(target_decimals - total_source_decimals));
-                    numerator * multiplier
+                    (numerator * multiplier) / Nat::from(BPS_BASE)
                 }
             };
 
@@ -246,6 +252,8 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                 });
             }
 
+            let mut reserved_cash_usd: Option<i128> = None;
+
             // Debit internal balance
             ACCOUNT_STATES.with(|accounts| {
                 let mut accounts = accounts.borrow_mut();
@@ -259,6 +267,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                                 as i128
                         };
                         state.cash_balance_usd -= amount_usd;
+                        reserved_cash_usd = Some(amount_usd);
                     } else {
                         let current = state
                             .collateral_balances
@@ -273,6 +282,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             });
 
             plan.reserved_amount = Some(amount_u128);
+            plan.reserved_cash_usd = reserved_cash_usd;
             WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
         }
 
@@ -301,22 +311,16 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                 }
                 Err(e) => {
                     // Compensation: refund internal balance on failure
-                    if let Some(reserved) = plan.reserved_amount.take() {
+                    let reserved_tokens = plan.reserved_amount.take();
+                    let reserved_cash = plan.reserved_cash_usd.take();
+
+                    if reserved_tokens.is_some() || reserved_cash.is_some() {
                         ACCOUNT_STATES.with(|accounts| {
                             let mut accounts = accounts.borrow_mut();
                             if let Some(state) = accounts.get_mut(&user) {
-                                if asset_id == VUSD_ASSET_ID {
-                                    let reserved_usd = if config.decimals > USD_DECIMALS {
-                                        (reserved
-                                            / 10u128.pow((config.decimals - USD_DECIMALS) as u32))
-                                            as i128
-                                    } else {
-                                        (reserved
-                                            * 10u128.pow((USD_DECIMALS - config.decimals) as u32))
-                                            as i128
-                                    };
-                                    state.cash_balance_usd += reserved_usd;
-                                } else {
+                                if let Some(usd) = reserved_cash {
+                                    state.cash_balance_usd += usd;
+                                } else if let Some(tokens) = reserved_tokens {
                                     let current = state
                                         .collateral_balances
                                         .get(&asset_id)
@@ -324,7 +328,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                                         .unwrap_or(0);
                                     state
                                         .collateral_balances
-                                        .insert(asset_id.clone(), current + reserved);
+                                        .insert(asset_id.clone(), current + tokens);
                                 }
                             }
                         });
@@ -347,4 +351,53 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
     .await;
 
     result.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use shared::constants::BPS_BASE;
+
+    use super::*;
+
+    #[test]
+    fn test_withdrawal_value_calculation_with_haircut() {
+        let amount_u128 = 100_000_000u128; // 1 ICP (8 decimals)
+        let price_value = 10_000_000u128; // $10 (6 decimals)
+        let price_decimals = 6u32;
+        let asset_decimals = 8u32;
+        let target_decimals = 6u32;
+        let haircut_bps = 1000u16; // 10% haircut
+
+        // Manual calculation:
+        // Market value = (1e8 * 10e6) / 10^(8+6-6) = 1e14 / 1e8 = 1e6 ($1 USD, wait)
+        // No, 1 ICP * $10 = $10 USD.
+        // numerator = 1e8 * 10e6 = 1e15.
+        // divisor = 10^(8+6-6) = 10^8.
+        // 1e15 / 1e8 = 1e7 = 10 USD (with 6 decimals). Correct.
+
+        // With 10% haircut:
+        // multiplier = 10000 - 1000 = 9000
+        // numerator = 1e8 * 10e6 * 9000 = 9e18
+        // divisor = 10000 * 10^(8+6-6) = 1e4 * 1e8 = 1e12
+        // value = 9e18 / 1e12 = 9e6 = 9 USD. Correct.
+
+        let haircut_multiplier = (BPS_BASE as u128).saturating_sub(haircut_bps as u128);
+
+        let numerator =
+            Nat::from(amount_u128) * Nat::from(price_value) * Nat::from(haircut_multiplier);
+
+        let total_source_decimals = asset_decimals + price_decimals;
+
+        let value_usd_nat = if total_source_decimals >= target_decimals {
+            let divisor = Nat::from(BPS_BASE)
+                * Nat::from(10u128.pow(total_source_decimals - target_decimals));
+            numerator / divisor
+        } else {
+            let multiplier = Nat::from(10u128.pow(target_decimals - total_source_decimals));
+            (numerator * multiplier) / Nat::from(BPS_BASE)
+        };
+
+        let value_usd: u128 = value_usd_nat.0.try_into().unwrap();
+        assert_eq!(value_usd, 9_000_000); // $9 USD
+    }
 }
