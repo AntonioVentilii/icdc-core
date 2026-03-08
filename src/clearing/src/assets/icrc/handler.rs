@@ -7,7 +7,7 @@ use icrc_ledger_types::{
     icrc2::transfer_from::{TransferFromArgs, TransferFromError},
 };
 use num_traits::ToPrimitive;
-use shared::types::Asset;
+use shared::types::{asset::errors::AssetError, Asset};
 
 use crate::{
     assets::{
@@ -15,61 +15,49 @@ use crate::{
         types::AssetAmount,
     },
     traits::ClearingAccountExt,
-    types::{account::LedgerAccount, errors::LedgerError},
+    types::account::LedgerAccount,
 };
 
 /// Implementation of [`AssetHandler`] for ICRC-1 and ICRC-2 compatible ledgers.
 pub struct IcrcHandler;
 
 impl IcrcHandler {
-    /// Resolves a [`LedgerAccount`] into a concrete ICRC [`Account`].
-    fn resolve_account(&self, account: LedgerAccount) -> Account {
-        match account {
-            LedgerAccount::UserClearing(u) => u.clearing_account(),
-            LedgerAccount::CanisterMain => Account {
-                owner: ic_cdk::id(),
-                subaccount: None,
-            },
-            LedgerAccount::External(owner, subaccount) => Account { owner, subaccount },
-        }
-    }
-
     /// Retrieves the balance of an ICRC account.
-    pub async fn balance_of(&self, params: AssetBalanceOfParams<'_>) -> Result<u128, LedgerError> {
-        let Asset::Icrc(ledger_id) = params.asset;
+    pub async fn balance_of(&self, params: AssetBalanceOfParams<'_>) -> Result<u128, AssetError> {
+        let ledger_id = params.asset.as_icrc()?;
 
         let account = self.resolve_account(params.account);
 
         let (ledger_balance,): (Nat,) = ic_cdk::call(*ledger_id, "icrc1_balance_of", (account,))
             .await
-            .map_err(|(code, msg)| LedgerError::CallError {
+            .map_err(|(code, msg)| AssetError::CallError {
                 method: "icrc1_balance_of".to_string(),
                 code: code as i32,
                 message: msg,
             })?;
 
-        ledger_balance.0.to_u128().ok_or(LedgerError::MathOverflow)
+        ledger_balance.0.to_u128().ok_or(AssetError::MathOverflow)
     }
 
     /// Retrieves the transfer fee of an ICRC ledger.
-    pub async fn get_fee(&self, asset: &Asset) -> Result<u128, LedgerError> {
-        let Asset::Icrc(ledger_id) = asset;
+    pub async fn get_fee(&self, asset: &Asset) -> Result<u128, AssetError> {
+        let ledger_id = asset.as_icrc()?;
 
         let (fee_nat,): (Nat,) =
             ic_cdk::call(*ledger_id, "icrc1_fee", ())
                 .await
-                .map_err(|(code, msg)| LedgerError::CallError {
+                .map_err(|(code, msg)| AssetError::CallError {
                     method: "icrc1_fee".to_string(),
                     code: code as i32,
                     message: msg,
                 })?;
 
-        fee_nat.0.to_u128().ok_or(LedgerError::MathOverflow)
+        fee_nat.0.to_u128().ok_or(AssetError::MathOverflow)
     }
 
     /// Executes an ICRC-1 transfer.
-    pub async fn transfer(&self, params: AssetTransferParams<'_>) -> Result<u128, LedgerError> {
-        let Asset::Icrc(ledger_id) = params.asset;
+    pub async fn transfer(&self, params: AssetTransferParams<'_>) -> Result<u128, AssetError> {
+        let ledger_id = params.asset.as_icrc()?;
 
         let from_account = self.resolve_account(params.from);
 
@@ -89,18 +77,18 @@ impl IcrcHandler {
         let (res,): (Result<Nat, TransferError>,) =
             ic_cdk::call(*ledger_id, "icrc1_transfer", (icrc_args,))
                 .await
-                .map_err(|(code, msg)| LedgerError::CallError {
+                .map_err(|(code, msg)| AssetError::CallError {
                     method: "icrc1_transfer".to_string(),
                     code: code as i32,
                     message: msg,
                 })?;
 
         match res {
-            Ok(block) => block.0.to_u128().ok_or(LedgerError::MathOverflow),
+            Ok(block) => block.0.to_u128().ok_or(AssetError::MathOverflow),
             Err(TransferError::Duplicate { duplicate_of }) => {
-                duplicate_of.0.to_u128().ok_or(LedgerError::MathOverflow)
+                duplicate_of.0.to_u128().ok_or(AssetError::MathOverflow)
             }
-            Err(e) => Err(LedgerError::TransferError(format!("{:?}", e))),
+            Err(e) => Err(AssetError::TransferError(format!("{:?}", e))),
         }
     }
 
@@ -108,10 +96,13 @@ impl IcrcHandler {
     pub async fn transfer_from(
         &self,
         params: AssetTransferFromParams<'_>,
-    ) -> Result<u128, LedgerError> {
-        let Asset::Icrc(ledger_id) = params.asset;
+    ) -> Result<u128, AssetError> {
+        let ledger_id = params.asset.as_icrc()?;
+
         let spender_account = self.resolve_account(params.spender);
+
         let from_account = self.resolve_account(params.from);
+
         let to_account = self.resolve_account(params.to);
 
         let AssetAmount::Fixed(amount_u128) = params.amount;
@@ -129,18 +120,30 @@ impl IcrcHandler {
         let (res,): (Result<Nat, TransferFromError>,) =
             ic_cdk::call(*ledger_id, "icrc2_transfer_from", (icrc_args,))
                 .await
-                .map_err(|(code, msg)| LedgerError::CallError {
+                .map_err(|(code, msg)| AssetError::CallError {
                     method: "icrc2_transfer_from".to_string(),
                     code: code as i32,
                     message: msg,
                 })?;
 
         match res {
-            Ok(block) => block.0.to_u128().ok_or(LedgerError::MathOverflow),
+            Ok(block) => block.0.to_u128().ok_or(AssetError::MathOverflow),
             Err(TransferFromError::Duplicate { duplicate_of }) => {
-                duplicate_of.0.to_u128().ok_or(LedgerError::MathOverflow)
+                duplicate_of.0.to_u128().ok_or(AssetError::MathOverflow)
             }
-            Err(e) => Err(LedgerError::TransferError(format!("{:?}", e))),
+            Err(e) => Err(AssetError::TransferError(format!("{:?}", e))),
+        }
+    }
+
+    /// Resolves a [`LedgerAccount`] into a concrete ICRC [`Account`].
+    fn resolve_account(&self, account: LedgerAccount) -> Account {
+        match account {
+            LedgerAccount::UserClearing(u) => u.clearing_account(),
+            LedgerAccount::CanisterMain => Account {
+                owner: ic_cdk::id(),
+                subaccount: None,
+            },
+            LedgerAccount::External(owner, subaccount) => Account { owner, subaccount },
         }
     }
 }

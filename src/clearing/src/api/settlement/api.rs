@@ -1,7 +1,7 @@
 use candid::Principal;
 use ic_cdk::api::is_controller;
 use ic_cdk_macros::update;
-use shared::types::{Asset, Price, Series};
+use shared::types::{errors::AssetError, Asset, Price, Series};
 
 use super::{errors::SettlementError, params::SettleSeriesParams, results::SettleSeriesResult};
 use crate::{
@@ -17,7 +17,7 @@ use crate::{
     payoffs::get_settlement_value,
     types::{
         account::LedgerAccount,
-        errors::{CommonError, LedgerError},
+        errors::CommonError,
         plans::{PlanStatus, SettlementPlan, SettlementPlanParams},
         user::User,
     },
@@ -88,7 +88,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
             if existing.settlement_price != settlement_price {
                 // TODO: specific error variant for this case
-                return Err(SettlementError::Ledger(LedgerError::TransferError(
+                return Err(SettlementError::Asset(AssetError::TransferError(
                     "settlement already in progress with different settlement_price".to_string(),
                 )));
             }
@@ -100,7 +100,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                     .borrow()
                     .get(&series_id)
                     .cloned()
-                    .ok_or(SettlementError::Ledger(LedgerError::UnsupportedLedger))?;
+                    .ok_or(SettlementError::Asset(AssetError::UnsupportedAsset))?;
 
                 POSITIONS.with(|positions| {
                     let mut positions = positions.borrow_mut();
@@ -124,11 +124,11 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 })
             })?;
 
-            let handler = get_handler(&settlement_asset_val).map_err(SettlementError::Ledger)?;
+            let handler = get_handler(&settlement_asset_val).map_err(SettlementError::Asset)?;
             let fee = handler
                 .get_fee(&settlement_asset_val)
                 .await
-                .map_err(SettlementError::Ledger)?;
+                .map_err(SettlementError::Asset)?;
 
             // settlements (bad debt) and guarantees that the canister only executes if
             // all payers are covered.
@@ -204,7 +204,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
             let created_at_time_ns = plan.idempotency_ns.to_created_at_time_ns();
 
-            let handler = get_handler(&plan.settlement_asset).map_err(SettlementError::Ledger)?;
+            let handler = get_handler(&plan.settlement_asset).map_err(SettlementError::Asset)?;
 
             let res = handler
                 .transfer(AssetTransferParams {
@@ -221,7 +221,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 Err(e) => {
                     SETTLEMENT_PLANS
                         .with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
-                    return Err(SettlementError::Ledger(e));
+                    return Err(SettlementError::Asset(e));
                 }
             }
 
@@ -244,11 +244,12 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
             let created_at_time_ns = plan.idempotency_ns.to_created_at_time_ns();
 
-            let handler = get_handler(&plan.settlement_asset).map_err(SettlementError::Ledger)?;
+            let handler = get_handler(&plan.settlement_asset).map_err(SettlementError::Asset)?;
+
             let fee = handler
                 .get_fee(&plan.settlement_asset)
                 .await
-                .map_err(SettlementError::Ledger)?;
+                .map_err(SettlementError::Asset)?;
 
             if amount_u128 <= fee {
                 // Too small to transfer, mark as skipped (0 block index)
@@ -275,7 +276,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                 Err(e) => {
                     SETTLEMENT_PLANS
                         .with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
-                    return Err(SettlementError::Ledger(e));
+                    return Err(SettlementError::Asset(e));
                 }
             }
 

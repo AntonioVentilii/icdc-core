@@ -4,11 +4,13 @@ use serde::{Deserialize, Serialize};
 use crate::{
     constants::{CKUSDC_LEDGER, ICP_LEDGER},
     types::{
+        asset::errors::AssetError,
         evm::{Chain, ErcToken, NativeEvmAsset},
         helpers::{native_evm_asset, usdc_token, usdt_token},
     },
 };
 
+pub mod errors;
 pub mod evm;
 pub mod helpers;
 
@@ -22,7 +24,31 @@ pub enum Asset {
     /// An ERC-20 token on an EVM-compatible chain.
     Erc20(ErcToken),
 }
+impl Asset {
+    /// Returns the ledger canister if this asset is an ICRC token.
+    pub fn as_icrc(&self) -> Result<&Principal, AssetError> {
+        match self {
+            Self::Icrc(ledger_id) => Ok(ledger_id),
+            _ => Err(AssetError::InvalidAssetForHandler),
+        }
+    }
 
+    /// Returns the native EVM asset if this asset represents native gas.
+    pub fn as_native_evm(&self) -> Result<&NativeEvmAsset, AssetError> {
+        match self {
+            Self::NativeEvm(asset) => Ok(asset),
+            _ => Err(AssetError::InvalidAssetForHandler),
+        }
+    }
+
+    /// Returns the ERC-20 token if this asset is an ERC-20 asset.
+    pub fn as_erc20(&self) -> Result<&ErcToken, AssetError> {
+        match self {
+            Self::Erc20(token) => Ok(token),
+            _ => Err(AssetError::InvalidAssetForHandler),
+        }
+    }
+}
 /// Supported assets for settlement of derivative contracts.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SettlementAsset {

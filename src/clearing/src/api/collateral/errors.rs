@@ -1,13 +1,12 @@
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
-
-use crate::types::errors::LedgerError;
+use shared::types::asset::errors::AssetError;
 
 /// Errors occurring during collateral deposit.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum DepositCollateralError {
-    /// An error occurred while interacting with the ledger.
-    Ledger(LedgerError),
+    /// An error occurred while interacting with the asset.
+    Asset(AssetError),
     /// Overflow during collateral calculation.
     MathOverflow,
 }
@@ -15,8 +14,8 @@ pub enum DepositCollateralError {
 /// Errors occurring during collateral withdrawal.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum WithdrawCollateralError {
-    /// An error occurred while interacting with the ledger.
-    Ledger(LedgerError),
+    /// An error occurred while interacting with the asset.
+    Asset(AssetError),
     /// The user does not have enough excess margin to withdraw the requested amount.
     InsufficientExcessMargin {
         /// Current excess margin available for withdrawal.

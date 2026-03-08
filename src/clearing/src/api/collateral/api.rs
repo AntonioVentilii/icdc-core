@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use ic_cdk_macros::update;
+use shared::types::asset::errors::AssetError;
 
 use super::{
     errors::{BlockingError, DepositCollateralError, WithdrawCollateralError},
@@ -25,7 +26,6 @@ use crate::{
     memory::{DEPOSIT_PLANS, MARGIN_ACCOUNTS, WITHDRAWAL_PLANS},
     types::{
         account::LedgerAccount,
-        errors::LedgerError,
         margin::MarginAccount,
         plans::{DepositPlan, DepositPlanParams, PlanStatus, WithdrawalPlan, WithdrawalPlanParams},
         user::User,
@@ -125,9 +125,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
         } = params;
 
         if !is_supported_asset(&asset) {
-            return Err(DepositCollateralError::Ledger(
-                LedgerError::UnsupportedLedger,
-            ));
+            return Err(DepositCollateralError::Asset(AssetError::UnsupportedAsset));
         }
 
         // ---------- Phase A: Build plan (no awaits) ----------
@@ -153,7 +151,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
 
             DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
 
-            let handler = get_handler(&asset).map_err(DepositCollateralError::Ledger)?;
+            let handler = get_handler(&asset).map_err(DepositCollateralError::Asset)?;
 
             let amount_u128: u128 = amount
                 .0
@@ -179,7 +177,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
                 Err(e) => {
                     // Keep plan persisted so retry resumes safely.
                     DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
-                    return Err(DepositCollateralError::Ledger(e));
+                    return Err(DepositCollateralError::Asset(e));
                 }
             }
 
@@ -245,9 +243,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
         } = params;
 
         if !is_supported_asset(&asset) {
-            return Err(WithdrawCollateralError::Ledger(
-                LedgerError::UnsupportedLedger,
-            ));
+            return Err(WithdrawCollateralError::Asset(AssetError::UnsupportedAsset));
         }
 
         // ---------- Phase A: Build plan (durable, no awaits) ----------
@@ -313,7 +309,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
 
             WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
 
-            let handler = get_handler(&asset).map_err(WithdrawCollateralError::Ledger)?;
+            let handler = get_handler(&asset).map_err(WithdrawCollateralError::Asset)?;
 
             let amount_u128: u128 = plan
                 .amount
@@ -355,7 +351,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                     // Persist updated plan (reservation cleared) so retries behave correctly.
                     WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
 
-                    return Err(WithdrawCollateralError::Ledger(e));
+                    return Err(WithdrawCollateralError::Asset(e));
                 }
             }
 

@@ -50,6 +50,19 @@ impl Chain {
         }
     }
 }
+impl TryFrom<ChainId> for Chain {
+    type Error = ();
+
+    fn try_from(id: ChainId) -> Result<Self, Self::Error> {
+        match id {
+            1 => Ok(Self::Ethereum),
+            8453 => Ok(Self::Base),
+            56 => Ok(Self::Bsc),
+            137 => Ok(Self::Polygon),
+            _ => Err(()),
+        }
+    }
+}
 
 /// Represents a native asset on an EVM-compatible chain
 /// (for example ETH on Ethereum/Base, POL on Polygon, or BNB on BSC).

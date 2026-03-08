@@ -1,18 +1,16 @@
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
+use shared::types::asset::errors::AssetError;
 
-use crate::types::{
-    errors::{CommonError, LedgerError},
-    user::User,
-};
+use crate::types::{errors::CommonError, user::User};
 
 /// Errors occurring during derivative series settlement.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum SettlementError {
     /// A common error occurred.
     Common(CommonError),
-    /// An error occurred while interacting with the ledger.
-    Ledger(LedgerError),
+    /// An error occurred while interacting with the asset.
+    Asset(AssetError),
     /// The series uses an unsupported settlement asset.
     UnsupportedSettlementAsset,
     /// Overflow during settlement calculation.

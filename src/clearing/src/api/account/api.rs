@@ -84,7 +84,7 @@ pub async fn get_margin_account(params: GetMarginAccountParams) -> GetMarginAcco
         let mut balances: BTreeMap<Asset, u128> = BTreeMap::new();
 
         for asset in assets_to_refresh.iter().cloned() {
-            let handler = get_handler(&asset).map_err(MarginAccountError::Ledger)?;
+            let handler = get_handler(&asset).map_err(MarginAccountError::Asset)?;
 
             let bal_u128 = handler
                 .balance_of(AssetBalanceOfParams {
@@ -92,7 +92,7 @@ pub async fn get_margin_account(params: GetMarginAccountParams) -> GetMarginAcco
                     account: LedgerAccount::UserClearing(user),
                 })
                 .await
-                .map_err(MarginAccountError::Ledger)?;
+                .map_err(MarginAccountError::Asset)?;
 
             balances.insert(asset, bal_u128);
         }
