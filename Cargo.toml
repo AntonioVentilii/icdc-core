@@ -20,6 +20,7 @@ hex = "0.4"
 ic-cdk = "0.17"
 num-traits = "0.2.19"
 ic-cdk-macros = "0.17"
+ic-cdk-timers = "0.10"
 
 [workspace.lints.rust]
 warnings = "deny"

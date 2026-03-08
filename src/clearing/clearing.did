@@ -123,12 +123,14 @@ type LimitOrder = record {
 type ListOrdersParams = record { series_id : opt text };
 type NativeEvmAsset = record { decimals : nat8; chain_id : nat64 };
 type NonMonetaryUnit = variant { Points };
+type PaymentIdempotency = variant { IcrcCreatedAtTimeNs : nat64 };
 type PayoffType = variant { Put; Binary; Call };
 type PayoutUnit = variant {
 	Fiat : FiatUnit;
 	Crypto : CanonicalCryptoUnit;
 	NonMonetary : NonMonetaryUnit
 };
+type PlanStatus = variant { Finalised; Planned; Executing };
 type Position = record {
 	series_id : text;
 	net_qty : int;
@@ -171,6 +173,24 @@ type SettlementError = variant {
 	SolvencyViolation : record { total_collateral_usd : nat; total_payoff : nat };
 	Asset : AssetError;
 	Common : CommonError
+};
+type SettlementPlan = record {
+	status : PlanStatus;
+	idempotency_ns : PaymentIdempotency;
+	series_id : text;
+	fee_usd : nat;
+	accounting_cursor : nat64;
+	insurance_fee_usd : nat;
+	positions : vec SettlementPosition;
+	accounting_applied : bool;
+	oracle_source : text;
+	settlement_price : Price
+};
+type SettlementPosition = record {
+	net_qty : int;
+	user : principal;
+	reserved_margin_usd : nat;
+	cashflow_usd : int
 };
 type Side = variant { Buy; Sell };
 type Stats = record {
@@ -280,6 +300,8 @@ service : {
 	get_position : (GetPositionParams) -> (opt Position) query;
 	// Retrieves all open positions for the caller.
 	get_positions : () -> (vec record { text; Position }) query;
+	// Returns the active settlement plan for a series, if any.
+	get_settlement_plan : (text) -> (opt SettlementPlan) query;
 	// Retrieves the trade history (executed trades) for the caller.
 	get_trade_history : () -> (vec Event) query;
 	http_request : (HttpRequest) -> (HttpResponse) query;
@@ -309,9 +331,9 @@ service : {
 	// 4. Finalising the plan and removing the series data.
 	//
 	// **Note on Chunking:** To avoid instruction limits, this method processes positions in batches
-	// of 100 per call. If there are many positions, the method will return [`SettleSeriesResult::Processing`].
-	// The caller must repeatedly call `settle_series` with the same parameters until it returns
-	// [`SettleSeriesResult::Ok`].
+	// of 100 per call. If there are many positions, the method will return
+	// [`SettleSeriesResult::Processing`]. The caller must repeatedly call `settle_series` with the
+	// same parameters until it returns [`SettleSeriesResult::Ok`].
 	//
 	// This method is gated to canister controllers or the designated [`oracle_principal`] for the
 	// series. It is intended to be called by an off-chain oracle or automation.

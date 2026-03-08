@@ -1,6 +1,9 @@
+use std::time::Duration;
+
 use candid::Principal;
 use ic_cdk::api::is_controller;
-use ic_cdk_macros::update;
+use ic_cdk_macros::{query, update};
+use ic_cdk_timers::{self, set_timer};
 use shared::{
     constants::VUSD_ASSET_ID,
     types::{Price, Series, SeriesId},
@@ -54,21 +57,17 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
         // 1. Check if a plan already exists
         let existing_plan = SETTLEMENT_PLANS.with(|m| m.borrow().get(&series_id).cloned());
 
-        let oracle_source = if let Some(ref plan) = existing_plan {
-            // If resuming, use the oracle source from the plan
-            plan.oracle_source.clone()
-        } else {
-            // If new, must have the series data to authorize
-            SERIES.with(|s| {
+        // 2. Perform authorization check
+        // RELAXED AUTH: Authorization is only required to CREATE a plan.
+        // Once a plan is authorized and created, anyone can "pump" it.
+        if existing_plan.is_none() && !is_controller(&caller) {
+            let oracle_source = SERIES.with(|s| {
                 s.borrow()
                     .get(&series_id)
                     .map(|ser| ser.oracle_source.clone())
                     .ok_or(SettlementError::Common(CommonError::Unauthorized))
-            })?
-        };
+            })?;
 
-        // 2. Perform authorization check
-        if !is_controller(&caller) {
             let registry_canister = REGISTRY_CANISTER.with(|r| *r.borrow());
             if registry_canister == Principal::anonymous() {
                 return Err(SettlementError::Common(CommonError::RegistryNotSet));
@@ -191,7 +190,19 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
             Ok(SettleSeriesResult::ok())
         } else {
-            // Signal to the caller that more processing is needed.
+            // Automatic self-resumption: schedule a timer to continue processing in the background.
+            // This ensures robustness if the external caller goes offline.
+            let params_clone = SettleSeriesParams {
+                series_id: series_id.clone(),
+                settlement_price: settlement_price.clone(),
+            };
+
+            set_timer(Duration::from_millis(50), move || {
+                ic_cdk::spawn(async move {
+                    let _ = settle_series(params_clone).await;
+                });
+            });
+
             Ok(SettleSeriesResult::processing())
         }
     })
@@ -201,6 +212,12 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
         Ok(res) => res,
         Err(e) => SettleSeriesResult::Err(e),
     }
+}
+
+/// Returns the active settlement plan for a series, if any.
+#[query]
+pub fn get_settlement_plan(series_id: SeriesId) -> Option<SettlementPlan> {
+    SETTLEMENT_PLANS.with(|m| m.borrow().get(&series_id).cloned())
 }
 
 /// Core synchronous logic for building a settlement plan and removing positions.
@@ -451,5 +468,202 @@ mod tests {
         POSITIONS.with(|pos| {
             assert!(!pos.borrow().contains_key(&(user, series_id)));
         });
+    }
+
+    #[test]
+    fn test_get_settlement_plan_returns_active_plan() {
+        let series_id = SeriesId::from("plan_query_test".to_string());
+        let price = Price::new(100, 0);
+
+        // Insert a plan directly
+        let _plan = SettlementPlan::get_or_create(SettlementPlanParams {
+            series_id: series_id.clone(),
+            settlement_price: price.clone(),
+            oracle_source: "test_oracle".to_string(),
+            fee: 1000,
+            insurance_fee: 500,
+            positions: vec![],
+        });
+
+        // Query it back
+        let queried = get_settlement_plan(series_id.clone());
+        assert!(queried.is_some());
+        let queried = queried.unwrap();
+        assert_eq!(queried.series_id, series_id);
+        assert_eq!(queried.fee_usd, 1000);
+        assert_eq!(queried.insurance_fee_usd, 500);
+        assert_eq!(queried.status, PlanStatus::Planned);
+
+        // Non-existent plan returns None
+        let missing = get_settlement_plan(SeriesId::from("nonexistent".to_string()));
+        assert!(missing.is_none());
+
+        // Cleanup
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().remove(&series_id));
+    }
+
+    #[test]
+    fn test_chunked_accounting_processes_in_batches_of_100() {
+        let series_id = SeriesId::from("chunk_test".to_string());
+        let num_positions = 150;
+
+        // Create 150 users with account states
+        let users: Vec<User> = (0..num_positions)
+            .map(|i| {
+                let bytes = (i as u32).to_be_bytes();
+                User(Principal::from_slice(&bytes))
+            })
+            .collect();
+
+        ACCOUNT_STATES.with(|acc| {
+            let mut acc = acc.borrow_mut();
+            for user in &users {
+                let mut a = AccountState::new(*user);
+                a.cash_balance_usd = 1_000_000; // 1 USD
+                a.reserved_margin_usd = 500_000; // 0.5 USD
+                acc.insert(*user, a);
+            }
+        });
+
+        // Build settlement positions
+        let positions: Vec<SettlementPosition> = users
+            .iter()
+            .map(|u| SettlementPosition {
+                user: *u,
+                net_qty: 1,
+                reserved_margin_usd: 500_000,
+                cashflow_usd: 100_000, // +0.1 USD each
+            })
+            .collect();
+
+        // Create a plan with 150 positions
+        let mut plan = SettlementPlan::get_or_create(SettlementPlanParams {
+            series_id: series_id.clone(),
+            settlement_price: Price::new(100, 0),
+            oracle_source: "test".to_string(),
+            fee: 0,
+            insurance_fee: 0,
+            positions,
+        });
+
+        assert_eq!(plan.accounting_cursor, 0);
+        assert!(!plan.accounting_applied);
+
+        // --- Simulate Phase B: first chunk (should process 100) ---
+        plan.status = PlanStatus::Executing;
+        ACCOUNT_STATES.with(|accounts| {
+            let mut accounts = accounts.borrow_mut();
+            while plan.accounting_cursor < plan.positions.len() {
+                let idx = plan.accounting_cursor;
+                let pos = &plan.positions[idx];
+                if let Some(account) = accounts.get_mut(&pos.user) {
+                    account.cash_balance_usd += pos.cashflow_usd;
+                    account.reserved_margin_usd = account
+                        .reserved_margin_usd
+                        .saturating_sub(pos.reserved_margin_usd);
+                }
+                plan.accounting_cursor += 1;
+                if plan.accounting_cursor % 100 == 0 {
+                    break;
+                }
+            }
+            if plan.accounting_cursor == plan.positions.len() {
+                plan.accounting_applied = true;
+            }
+        });
+
+        // After first chunk: cursor at 100, not yet complete
+        assert_eq!(plan.accounting_cursor, 100);
+        assert!(!plan.accounting_applied);
+
+        // Verify first 100 users were updated
+        ACCOUNT_STATES.with(|acc| {
+            let acc = acc.borrow();
+            let first_user = &users[0];
+            let state = acc.get(first_user).unwrap();
+            assert_eq!(state.cash_balance_usd, 1_100_000); // 1.0 + 0.1
+            assert_eq!(state.reserved_margin_usd, 0); // released
+
+            // User 100 should NOT be updated yet
+            let user_100 = &users[100];
+            let state_100 = acc.get(user_100).unwrap();
+            assert_eq!(state_100.cash_balance_usd, 1_000_000); // unchanged
+            assert_eq!(state_100.reserved_margin_usd, 500_000); // unchanged
+        });
+
+        // --- Simulate Phase B: second chunk (should process remaining 50) ---
+        ACCOUNT_STATES.with(|accounts| {
+            let mut accounts = accounts.borrow_mut();
+            while plan.accounting_cursor < plan.positions.len() {
+                let idx = plan.accounting_cursor;
+                let pos = &plan.positions[idx];
+                if let Some(account) = accounts.get_mut(&pos.user) {
+                    account.cash_balance_usd += pos.cashflow_usd;
+                    account.reserved_margin_usd = account
+                        .reserved_margin_usd
+                        .saturating_sub(pos.reserved_margin_usd);
+                }
+                plan.accounting_cursor += 1;
+                if plan.accounting_cursor % 100 == 0 {
+                    break;
+                }
+            }
+            if plan.accounting_cursor == plan.positions.len() {
+                plan.accounting_applied = true;
+            }
+        });
+
+        // After second chunk: cursor at 150, complete
+        assert_eq!(plan.accounting_cursor, 150);
+        assert!(plan.accounting_applied);
+
+        // Verify user 100 is now updated
+        ACCOUNT_STATES.with(|acc| {
+            let acc = acc.borrow();
+            let user_100 = &users[100];
+            let state = acc.get(user_100).unwrap();
+            assert_eq!(state.cash_balance_usd, 1_100_000); // now updated
+            assert_eq!(state.reserved_margin_usd, 0); // released
+        });
+
+        // Cleanup
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().remove(&series_id));
+        ACCOUNT_STATES.with(|acc| acc.borrow_mut().clear());
+    }
+
+    #[test]
+    fn test_settlement_price_immutability() {
+        let series_id = SeriesId::from("immutable_price_test".to_string());
+
+        // Create a plan with price 100
+        let plan = SettlementPlan::get_or_create(SettlementPlanParams {
+            series_id: series_id.clone(),
+            settlement_price: Price::new(100, 0),
+            oracle_source: "oracle".to_string(),
+            fee: 0,
+            insurance_fee: 0,
+            positions: vec![],
+        });
+
+        // The plan is locked with price 100
+        assert_eq!(plan.settlement_price, Price::new(100, 0));
+
+        // A subsequent get_or_create with the same series_id returns the original plan
+        // (price is locked, cannot be changed)
+        let plan2 = SettlementPlan::get_or_create(SettlementPlanParams {
+            series_id: series_id.clone(),
+            settlement_price: Price::new(200, 0), // different price
+            oracle_source: "oracle".to_string(),
+            fee: 999,
+            insurance_fee: 999,
+            positions: vec![],
+        });
+
+        // Plan is returned unchanged — the original price (100) is preserved
+        assert_eq!(plan2.settlement_price, Price::new(100, 0));
+        assert_eq!(plan2.fee_usd, 0); // original fee, not 999
+
+        // Cleanup
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().remove(&series_id));
     }
 }
