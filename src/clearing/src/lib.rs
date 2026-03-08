@@ -35,7 +35,7 @@ use crate::{
         event::Event,
         http::{HttpRequest, HttpResponse},
         margin::Position,
-        state::{ClearingConfig, PositionProof},
+        state::{Config, PositionProof},
         stats::Stats,
         trade::LimitOrder,
     },

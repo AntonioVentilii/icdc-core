@@ -12,7 +12,7 @@ use crate::{
         event::Event,
         margin::{MarginAccount, Position},
         plans::{DepositPlan, SettlementPlan, WithdrawalPlan},
-        state::{ClearingConfig, StableState},
+        state::{Config, StableState},
         trade::{LimitOrder, OrderId, TradeId, TransferId},
         user::{DepositKey, User, WithdrawalKey},
     },
@@ -20,7 +20,7 @@ use crate::{
 };
 
 thread_local! {
-    pub static CONFIG: RefCell<ClearingConfig> = const { RefCell::new(ClearingConfig { insurance_fund_fee_ratio: 10, evm_rpc: Principal::anonymous(), signer_canister: Principal::anonymous() }) };
+    pub static CONFIG: RefCell<Config> = const { RefCell::new(Config { insurance_fund_fee_ratio: 10, evm_rpc: Principal::anonymous(), signer_canister: Principal::anonymous() }) };
     pub static POSITIONS: RefCell<BTreeMap<(User, SeriesId), Position>> = const { RefCell::new(BTreeMap::new()) };
     pub static MARGIN_ACCOUNTS: RefCell<BTreeMap<User, MarginAccount>> = const { RefCell::new(BTreeMap::new()) };
     pub static SERIES: RefCell<BTreeMap<SeriesId, Series>> = const { RefCell::new(BTreeMap::new()) };
@@ -40,7 +40,7 @@ thread_local! {
 }
 
 pub fn save_state() {
-    let config: ClearingConfig = CONFIG.with(|c: &RefCell<ClearingConfig>| c.borrow().clone());
+    let config: Config = CONFIG.with(|c: &RefCell<Config>| c.borrow().clone());
     let positions: Vec<Position> = POSITIONS.with(|p| p.borrow().values().cloned().collect());
     let accounts: BTreeMap<User, MarginAccount> = MARGIN_ACCOUNTS.with(|a| a.borrow().clone());
     let series: BTreeMap<SeriesId, Series> = SERIES.with(|s| s.borrow().clone());
