@@ -96,28 +96,62 @@ dfx canister call clearing settle_series "(record { series_id = \"$PUT_SERIES\";
 log "Skipping Call settlement as no trades were executed."
 
 # --- FINAL CHECKS ---
+# Under the upfront collateral model, margin cost is deducted from cash_balance_usd
+# at trade time. Cash can be negative — users are backed by ICP collateral.
+#
+# PnL Breakdown (all values in 6-decimal USD units):
+#
+# T1 Binary (Default=Buyer 10@0.55):
+#   Default cost:    -5,500,000  (buyer_margin = 10 * 550,000)
+#   Secondary cost:  -4,500,000  (seller_margin = 10 * (1,000,000 - 550,000))
+#
+# T2 Put (Secondary=Buyer 5@0.20, Strike=$1.0):
+#   Secondary cost:  -1,000,000  (buyer_margin = 5 * 200,000)
+#   Default cost:    -5,000,000  (seller_margin = 5 * 1,000,000 strike)
+#
+# Settlement Binary @$1.0 (fees: 10bps insurance + 5bps protocol = 15bps):
+#   Default  (Long,  qty=10): gross=10,000,000 i_fee=10,000 p_fee=5,000 net=+9,985,000
+#   Secondary(Short, qty=-10): gross=0 fees=0 net=0
+#
+# Settlement Put @$0.80 (payoff=max(1.0-0.8,0)=0.2):
+#   Secondary(Long,  qty=5):  gross=1,000,000 i_fee=1,000 p_fee=500 net=+998,500
+#   Default  (Short, qty=-5): gross=0 fees=0 net=0
+#
+# Expected cash_balance_usd:
+#   Default:   0 - 5,500,000 - 5,000,000 + 9,985,000 + 0 = -515,000
+#   Secondary: 0 - 4,500,000 - 1,000,000 + 0 + 998,500   = -4,501,500
+
+log "================================================"
+log "Final Verification"
+log "================================================"
+
 BAL_DEF=$(get_usd_balance "default")
 BAL_SEC=$(get_usd_balance "secondary")
 
-log "------------------------------------------------"
-log "Final USD Balances (Cash):"
-log "Default (Winner BIN, Loser PUT): $BAL_DEF"
-log "Secondary (Loser BIN, Winner PUT): $BAL_SEC"
-log "------------------------------------------------"
+log "Cash Balances:"
+assert_eq "$BAL_DEF" "-515000" "Default cash_balance_usd"
+assert_eq "$BAL_SEC" "-4501500" "Secondary cash_balance_usd"
 
-# Quick check on core Binary PnL for Default (Winner)
-# T1: Profit (1.0 - 0.55) * 10 = 4.5. Fee (0.15% payout) = 0.015. Net Binary = +4.485
-# T2: Put Short @ 0.20. Settle @ 0.80. Loss in cash is Premium - Payoff.
-# Premium for Put Short = + (5 * 0.20) = +1.0.
-# Payoff for Put Short = - (5 * 0.20) = -1.0.
-# Net PnL = 0.
-# So Default should be +4.485M (assuming 0 starting cash).
-EXPECTED_MIN=4400000
-if [ "$BAL_DEF" -gt "$EXPECTED_MIN" ]; then
-  success "Integration suite completed successfully!"
-else
-  error "Balance verification failed. Default balance: $BAL_DEF (Expected > $EXPECTED_MIN)"
-fi
+# Verify all margin is released after settlement
+MARGIN_DEF=$(get_equity "default")
+MARGIN_SEC=$(get_equity "secondary")
+
+log "Post-Settlement Margin:"
+assert_eq "$MARGIN_DEF" "0" "Default reserved_margin_usd (released)"
+assert_eq "$MARGIN_SEC" "0" "Secondary reserved_margin_usd (released)"
+
+# Verify fee collection in system funds
+# Treasury (protocol fees):  5,000 (Binary) + 500 (Put) = 5,500
+# Insurance Fund:           10,000 (Binary) + 1,000 (Put) = 11,000
+TREASURY_BAL=$(get_fund_balance "treasury")
+INSURANCE_BAL=$(get_fund_balance "insurance_fund")
+
+log "System Funds:"
+assert_eq "$TREASURY_BAL" "5500" "Treasury vUSD balance"
+assert_eq "$INSURANCE_BAL" "11000" "Insurance Fund vUSD balance"
+
+echo ""
+success "Integration suite completed successfully!"
 
 echo ""
 log "🚀 System Funds State:"
