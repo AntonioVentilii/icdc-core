@@ -1,5 +1,23 @@
 type AcceptPositionTransferResult = variant { Ok : bool; Err : TradeError };
-type Asset = variant { Icrc : principal };
+type AdminError = variant {
+	TransferFailed : text;
+	InsufficientFunds;
+	Common : CommonError
+};
+type AdminResult = variant { Ok : nat; Err : AdminError };
+type Asset = variant {
+	Erc20 : ErcToken;
+	Icrc : principal;
+	NativeEvm : NativeEvmAsset
+};
+type AssetError = variant {
+	TransferError : text;
+	InsufficientBalance : record { balance : nat; required : nat };
+	MathOverflow;
+	CallError : record { method : text; code : int32; message : text };
+	InvalidAssetForHandler;
+	UnsupportedAsset
+};
 type BlockCollateralParams = record { asset : Asset; amount : nat };
 type BlockCollateralResult = variant { Ok; Err : BlockingError };
 type BlockingError = variant {
@@ -8,6 +26,12 @@ type BlockingError = variant {
 	InsufficientReservedBalance : record { requested : nat; "reserved" : nat }
 };
 type CancelLimitOrderParams = record { order_id : text };
+type Chain = variant { Bsc; Base; Ethereum; Polygon };
+type ClearingConfig = record {
+	insurance_fund_fee_ratio : nat16;
+	signer_canister : principal;
+	evm_rpc : principal
+};
 type CommonError = variant {
 	Internal : text;
 	MathOverflow;
@@ -15,7 +39,7 @@ type CommonError = variant {
 	RegistryNotSet
 };
 type DecimalValue = record { decimals : nat8; value : nat };
-type DepositCollateralError = variant { MathOverflow; Ledger : LedgerError };
+type DepositCollateralError = variant { MathOverflow; Asset : AssetError };
 type DepositCollateralParams = record {
 	deposit_id : text;
 	asset : Asset;
@@ -26,6 +50,11 @@ type Description = record {
 	html : opt text;
 	markdown : opt text;
 	plain : text
+};
+type ErcToken = record {
+	decimals : nat8;
+	token_address : text;
+	chain_id : nat64
 };
 type Event = record {
 	qty : int;
@@ -43,6 +72,11 @@ type FreezePositionForTransferParams = record {
 	user : principal;
 	transfer_id : text
 };
+type FundType = variant { Insurance; Treasury };
+type GetFundsResult = record {
+	insurance_fund : vec record { Asset; nat };
+	treasury : vec record { Asset; nat }
+};
 type GetMarginAccountParams = record { refresh : opt bool };
 type GetMarginAccountResult = variant {
 	Ok : MarginAccount;
@@ -59,13 +93,6 @@ type HttpResponse = record {
 	body : blob;
 	headers : vec record { text; text };
 	status_code : nat16
-};
-type LedgerError = variant {
-	TransferError : text;
-	InsufficientBalance : record { balance : nat; required : nat };
-	MathOverflow;
-	CallError : record { method : text; code : int32; message : text };
-	UnsupportedLedger
 };
 type LimitOrder = record {
 	qty : int;
@@ -86,8 +113,9 @@ type MarginAccount = record {
 type MarginAccountError = variant {
 	NoMarginAccountFound;
 	MathOverflow;
-	Ledger : LedgerError
+	Asset : AssetError
 };
+type NativeEvmAsset = record { decimals : nat8; chain_id : nat64 };
 type PayoffType = variant { Put; Binary; Call };
 type Position = record {
 	series_id : text;
@@ -124,7 +152,13 @@ type Series = record {
 };
 type SettleSeriesParams = record { series_id : text; settlement_price : Price };
 type SettleSeriesResult = variant { Ok; Err : SettlementError };
-type SettlementAsset = variant { Icp; CkUsdc };
+type SettlementAsset = variant {
+	Icp;
+	Usdc : Chain;
+	Usdt : Chain;
+	Native : Chain;
+	CkUsdc
+};
 type SettlementError = variant {
 	InsufficientInternalBalance : record {
 		balance : nat;
@@ -134,7 +168,7 @@ type SettlementError = variant {
 	UnsupportedSettlementAsset;
 	MathOverflow;
 	SolvencyViolation : record { total_payoff : nat; total_collateral : nat };
-	Ledger : LedgerError;
+	Asset : AssetError;
 	Common : CommonError
 };
 type Side = variant { Buy; Sell };
@@ -184,7 +218,7 @@ type TradeError = variant {
 type WithdrawCollateralError = variant {
 	InsufficientExcessMargin : record { requested : nat; available : nat };
 	MathOverflow;
-	Ledger : LedgerError
+	Asset : AssetError
 };
 type WithdrawCollateralParams = record {
 	asset : Asset;
@@ -192,6 +226,12 @@ type WithdrawCollateralParams = record {
 	amount : nat
 };
 type WithdrawCollateralResult = variant { Ok; Err : WithdrawCollateralError };
+type WithdrawFundParams = record {
+	to : principal;
+	fund_type : FundType;
+	asset : Asset;
+	amount : nat
+};
 service : {
 	// Accepts a position transfer from another clearing canister.
 	//
@@ -225,6 +265,10 @@ service : {
 	freeze_position_for_transfer : (FreezePositionForTransferParams) -> (
 		opt PositionProof
 	);
+	// Returns the current balances of the Insurance Fund and Treasury.
+	//
+	// This method is gated to canister controllers.
+	get_funds : () -> (GetFundsResult) query;
 	// Retrieves the current user's margin account details, optionally refreshing balances.
 	//
 	// # Arguments
@@ -287,6 +331,10 @@ service : {
 	);
 	// Unblocks (releases) collateral in the user's margin account.
 	unblock_collateral : (BlockCollateralParams) -> (BlockCollateralResult);
+	// Updates the global configuration for the Clearing canister.
+	//
+	// This method is gated to canister controllers.
+	update_config : (ClearingConfig) -> ();
 	// Withdraws collateral from the user's margin account to an external address.
 	//
 	// This is a multi-phase operation:
@@ -303,5 +351,9 @@ service : {
 	// * [`WithdrawalCollateralResult::Err`] if margin is insufficient or a transfer error occurs.
 	withdraw_collateral : (WithdrawCollateralParams) -> (
 		WithdrawCollateralResult
-	)
+	);
+	// Withdraws assets from the Insurance Fund or Treasury to an external wallet.
+	//
+	// This method is gated to canister controllers.
+	withdraw_fund : (WithdrawFundParams) -> (AdminResult)
 }
