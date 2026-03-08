@@ -164,7 +164,7 @@ type Series = record {
 	oracle_source : text
 };
 type SettleSeriesParams = record { series_id : text; settlement_price : Price };
-type SettleSeriesResult = variant { Ok; Err : SettlementError };
+type SettleSeriesResult = variant { Ok; Err : SettlementError; Processing };
 type SettlementError = variant {
 	InconsistentSettlementPrice : record { requested : Price; existing : Price };
 	MathOverflow;
@@ -307,6 +307,11 @@ service : {
 	// 2. Updating internal USD cash balances for all participants based on payoffs.
 	// 3. Releasing margin requirements for the settled positions.
 	// 4. Finalising the plan and removing the series data.
+	//
+	// **Note on Chunking:** To avoid instruction limits, this method processes positions in batches
+	// of 100 per call. If there are many positions, the method will return [`SettleSeriesResult::Processing`].
+	// The caller must repeatedly call `settle_series` with the same parameters until it returns
+	// [`SettleSeriesResult::Ok`].
 	//
 	// This method is gated to canister controllers or the designated [`oracle_principal`] for the
 	// series. It is intended to be called by an off-chain oracle or automation.

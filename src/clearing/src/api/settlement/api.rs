@@ -28,6 +28,11 @@ use crate::{
 /// 3. Releasing margin requirements for the settled positions.
 /// 4. Finalising the plan and removing the series data.
 ///
+/// **Note on Chunking:** To avoid instruction limits, this method processes positions in batches
+/// of 100 per call. If there are many positions, the method will return
+/// [`SettleSeriesResult::Processing`]. The caller must repeatedly call `settle_series` with the
+/// same parameters until it returns [`SettleSeriesResult::Ok`].
+///
 /// This method is gated to canister controllers or the designated [`oracle_principal`] for the
 /// series. It is intended to be called by an off-chain oracle or automation.
 #[update(guard = "caller_is_not_anonymous")]
@@ -37,7 +42,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
         (c.insurance_fund_fee_ratio, c.protocol_fee_ratio)
     });
 
-    let result: Result<(), SettlementError> = (async {
+    let result: Result<SettleSeriesResult, SettlementError> = (async {
         let SettleSeriesParams {
             series_id,
             settlement_price,
@@ -90,7 +95,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
         // ---------- Phase A: build or resume plan ----------
         let mut plan = if let Some(existing) = existing_plan {
             if existing.status == PlanStatus::Finalised {
-                return Ok(());
+                return Ok(SettleSeriesResult::ok());
             }
 
             if existing.settlement_price != settlement_price {
@@ -119,7 +124,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
         };
 
         if plan.status == PlanStatus::Finalised {
-            return Ok(());
+            return Ok(SettleSeriesResult::ok());
         }
 
         // ---------- Phase B: apply internal accounting updates ----------
@@ -147,7 +152,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
                     plan.accounting_cursor += 1;
 
-                    // Idiomatic chunking: we process in slices to avoid instruction limits.
+                    // Batched execution: yield to avoid instruction limits.
                     if plan.accounting_cursor % 100 == 0 {
                         break;
                     }
@@ -183,13 +188,19 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
             // Clean up: remove the series from active series list
             SERIES.with(|s| s.borrow_mut().remove(&series_id));
-        }
 
-        Ok(())
+            Ok(SettleSeriesResult::ok())
+        } else {
+            // Signal to the caller that more processing is needed.
+            Ok(SettleSeriesResult::processing())
+        }
     })
     .await;
 
-    result.into()
+    match result {
+        Ok(res) => res,
+        Err(e) => SettleSeriesResult::Err(e),
+    }
 }
 
 /// Core synchronous logic for building a settlement plan and removing positions.
