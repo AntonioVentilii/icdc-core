@@ -166,6 +166,10 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
         // ---------- Phase B: apply internal accounting updates ----------
         if !plan.accounting_applied {
+            if plan.status == PlanStatus::Planned {
+                plan.status = PlanStatus::Executing;
+            }
+
             ACCOUNT_STATES.with(|accounts| {
                 let mut accounts = accounts.borrow_mut();
 
@@ -177,13 +181,11 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                         // 1. Update cash balance (PnL)
                         account.cash_balance_usd += cashflow;
 
-                        // 2. Release margin
-                        if let Some((_, _, old_margin)) =
-                            plan.positions.iter().find(|(u, _, _)| u == &user)
-                        {
-                            account.reserved_margin_usd =
-                                account.reserved_margin_usd.saturating_sub(*old_margin);
-                        }
+                        // 2. Release margin (Index matches accounting_updates as both are built
+                        //    from SAME users list in Phase A)
+                        let old_margin = plan.positions[idx].2;
+                        account.reserved_margin_usd =
+                            account.reserved_margin_usd.saturating_sub(old_margin);
                     }
 
                     plan.accounting_cursor += 1;
@@ -197,33 +199,33 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
                 if plan.accounting_cursor == plan.accounting_updates.len() {
                     plan.accounting_applied = true;
+
+                    // Distribute collected fees (internal USD accounting)
+                    let insurance_fee_total = plan.insurance_fee_usd;
+                    let protocol_fee_total = plan.fee_usd;
+
+                    TREASURY.with(|t| {
+                        let mut t = t.borrow_mut();
+                        let current = t.get("vUSD").copied().unwrap_or(0);
+                        t.insert("vUSD".to_string(), current + protocol_fee_total);
+                    });
+
+                    INSURANCE_FUND.with(|i| {
+                        let mut i = i.borrow_mut();
+                        let current = i.get("vUSD").copied().unwrap_or(0);
+                        i.insert("vUSD".to_string(), current + insurance_fee_total);
+                    });
                 }
-            });
-
-            SETTLEMENT_PLANS.with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
-
-            // Distribute collected fees (internal USD accounting)
-            let insurance_fee_total = plan.insurance_fee_usd;
-            let protocol_fee_total = plan.fee_usd;
-
-            TREASURY.with(|t| {
-                let mut t = t.borrow_mut();
-                let current = t.get("vUSD").copied().unwrap_or(0);
-                t.insert("vUSD".to_string(), current + protocol_fee_total);
-            });
-
-            INSURANCE_FUND.with(|i| {
-                let mut i = i.borrow_mut();
-                let current = i.get("vUSD").copied().unwrap_or(0);
-                i.insert("vUSD".to_string(), current + insurance_fee_total);
             });
 
             SETTLEMENT_PLANS.with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
         }
 
         // ---------- Phase C: finalise ----------
-        plan.status = PlanStatus::Finalised;
-        SETTLEMENT_PLANS.with(|m| m.borrow_mut().insert(series_id, plan));
+        if plan.accounting_applied {
+            plan.status = PlanStatus::Finalised;
+            SETTLEMENT_PLANS.with(|m| m.borrow_mut().insert(series_id, plan));
+        }
 
         Ok(())
     })

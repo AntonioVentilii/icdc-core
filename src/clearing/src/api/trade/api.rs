@@ -1,5 +1,4 @@
 use ic_cdk_macros::{query, update};
-use shared::types::Price;
 
 use super::{
     errors::TradeError,
@@ -18,6 +17,7 @@ use crate::{
     payoffs::get_required_margin,
     trade::{service::internal_execute_trade, types::ExecuteTradeParams},
     types::{
+        errors::CommonError,
         event::{Event, EventType},
         margin::{AccountState, Position},
         state::PositionProof,
@@ -214,6 +214,7 @@ pub fn freeze_position_for_transfer(
         transfer_id,
         user,
         series_id,
+        valuation_price,
     } = params;
 
     // If already frozen, return the same proof.
@@ -235,6 +236,7 @@ pub fn freeze_position_for_transfer(
                 clearing_id: ic_cdk::id(),
                 // Proofs are unsigned in the current cross-clearing protocol version.
                 signature: vec![],
+                valuation_price,
             })
     });
 
@@ -261,10 +263,14 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
 
         let series = ensure_series_registered(&proof.series_id).await?;
 
-        let valuation_price = series
-            .strike
-            .clone()
-            .unwrap_or_else(|| Price::new(50_000_000, 8));
+        let valuation_price = proof
+            .valuation_price
+            .or_else(|| series.strike.clone())
+            .ok_or_else(|| {
+                TradeError::Common(CommonError::Internal(
+                    "No valuation price available for transfer".to_string(),
+                ))
+            })?;
 
         POSITIONS.with(|positions| {
             let mut positions = positions.borrow_mut();

@@ -86,7 +86,8 @@ type FiatUnit = variant { Chf; Eur; Gbp; Usd };
 type FreezePositionForTransferParams = record {
 	series_id : text;
 	user : principal;
-	transfer_id : text
+	transfer_id : text;
+	valuation_price : opt Price
 };
 type FundType = variant { Insurance; Treasury };
 type GetAccountStateParams = record { refresh : opt bool };
@@ -140,6 +141,7 @@ type PositionProof = record {
 	series_id : text;
 	user : principal;
 	transfer_id : text;
+	valuation_price : opt Price;
 	clearing_id : principal
 };
 type Price = record {

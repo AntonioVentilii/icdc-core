@@ -199,7 +199,26 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                 .try_into()
                 .map_err(|_| WithdrawCollateralError::MathOverflow)?;
 
-            let withdrawal_value_usd = (amount_u128 as f64 * config.price_usd.to_f64()) as u128;
+            let price_value = config.price_usd.value;
+            let price_decimals = config.price_usd.decimals as u32;
+            let asset_decimals = config.decimals as u32;
+            let target_decimals = USD_DECIMALS as u32;
+
+            let withdrawal_value_usd_nat = {
+                let numerator = Nat::from(amount_u128) * Nat::from(price_value);
+                let total_source_decimals = asset_decimals + price_decimals;
+
+                if total_source_decimals >= target_decimals {
+                    let divisor = Nat::from(10u128.pow(total_source_decimals - target_decimals));
+                    numerator / divisor
+                } else {
+                    let multiplier = Nat::from(10u128.pow(target_decimals - total_source_decimals));
+                    numerator * multiplier
+                }
+            };
+
+            let withdrawal_value_usd: u128 =
+                withdrawal_value_usd_nat.0.try_into().unwrap_or(u128::MAX);
 
             let (equity_usd, reserved_margin_usd) = ACCOUNT_STATES.with(|accounts| {
                 let accounts = accounts.borrow();

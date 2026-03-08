@@ -1,8 +1,11 @@
 use std::collections::BTreeMap;
 
-use candid::CandidType;
+use candid::{CandidType, Nat};
 use serde::{Deserialize, Serialize};
-use shared::types::{AssetId, CollateralAssetConfig, SeriesId};
+use shared::{
+    constants::{BPS_BASE, USD_DECIMALS},
+    types::{AssetId, CollateralAssetConfig, SeriesId},
+};
 
 use crate::types::user::User;
 
@@ -57,16 +60,52 @@ impl AccountState {
     }
 
     /// Calculates the total account equity in USD using provided asset valuations.
+    ///
+    /// Formula (all integer):
+    /// value_usd = (balance * price_value * (10000 - haircut_bps)) / (10000 * 10^(decimals +
+    /// price_decimals - 6))
     pub fn calculate_equity_usd(&self, configs: &BTreeMap<AssetId, CollateralAssetConfig>) -> u128 {
         let mut total_equity_usd: i128 = self.cash_balance_usd;
+
+        let target_decimals = USD_DECIMALS as u32;
 
         for (asset_id, balance) in &self.collateral_balances {
             if let Some(config) = configs.get(asset_id) {
                 if config.is_enabled {
-                    let value = (*balance as f64
-                        * config.price_usd.to_f64()
-                        * config.valuation_factor()) as i128;
-                    total_equity_usd += value;
+                    let price_value = config.price_usd.value;
+                    let price_decimals = config.price_usd.decimals as u32;
+                    let asset_decimals = config.decimals as u32;
+
+                    let haircut_multiplier =
+                        (BPS_BASE as u128).saturating_sub(config.haircut_bps as u128);
+
+                    // Intermediate numerator: balance * price * multiplier
+                    // Max potential: 10^38 * 10^18 * 10^4 = 10^60 (Fits comfortably in u128 which
+                    // is ~3.4 * 10^38... wait) Actually, u128 max is 3.4e38.
+                    // balance (u128 tokens) * price (u128) * 10000 can easily overflow u128.
+                    // We must use BigUint (candid::Nat) for the intermediate calculation to be
+                    // safe.
+
+                    let numerator = Nat::from(*balance)
+                        * Nat::from(price_value)
+                        * Nat::from(haircut_multiplier);
+
+                    let total_source_decimals = asset_decimals + price_decimals;
+
+                    let value_usd_nat = if total_source_decimals >= target_decimals {
+                        let divisor = Nat::from(BPS_BASE)
+                            * Nat::from(10u128.pow(total_source_decimals - target_decimals));
+                        numerator / divisor
+                    } else {
+                        // This case is unlikely (decimals + price_decimals < 6), but for
+                        // completeness:
+                        let multiplier =
+                            Nat::from(10u128.pow(target_decimals - total_source_decimals));
+                        (numerator * multiplier) / Nat::from(BPS_BASE)
+                    };
+
+                    let value_usd: u128 = value_usd_nat.0.try_into().unwrap_or(u128::MAX);
+                    total_equity_usd += value_usd as i128;
                 }
             }
         }

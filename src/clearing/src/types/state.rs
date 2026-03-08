@@ -4,7 +4,7 @@ use candid::{CandidType, Principal};
 use serde::Deserialize;
 use shared::{
     constants::{DEFAULT_INSURANCE_FEE_RATIO, DEFAULT_PROTOCOL_FEE_RATIO},
-    types::{Series, SeriesId},
+    types::{Price, Series, SeriesId},
 };
 
 use crate::types::{
@@ -30,6 +30,8 @@ pub struct PositionProof {
     pub clearing_id: Principal,
     /// The cryptographic signature of the proof data.
     pub signature: Vec<u8>,
+    /// Optional valuation price for the position.
+    pub valuation_price: Option<Price>,
 }
 
 /// Global configuration for the Clearing canister.

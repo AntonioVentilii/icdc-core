@@ -19,14 +19,3 @@ pub struct CollateralAssetConfig {
     pub haircut_bps: u16,
     pub is_enabled: bool,
 }
-
-impl CollateralAssetConfig {
-    /// Returns the effective value multiplier (1.0 - haircut).
-    pub fn valuation_factor(&self) -> f64 {
-        if self.haircut_bps >= 10000 {
-            0.0
-        } else {
-            (10000 - self.haircut_bps) as f64 / 10000.0
-        }
-    }
-}

@@ -39,3 +39,6 @@ pub const MAX_SERIES_DESCRIPTION_LEN: usize = 1024;
 pub const DEFAULT_INSURANCE_FEE_RATIO: u16 = 10;
 /// Default protocol fee ratio in basis points (5 bps = 0.05%).
 pub const DEFAULT_PROTOCOL_FEE_RATIO: u16 = 5;
+
+/// The base for basis points (100% = 10,000 bps).
+pub const BPS_BASE: u16 = 10_000;
