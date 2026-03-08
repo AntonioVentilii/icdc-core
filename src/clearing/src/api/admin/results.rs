@@ -2,14 +2,14 @@ use std::collections::BTreeMap;
 
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
-use shared::types::Asset;
+use shared::types::AssetId;
 
 use crate::types::errors::CommonError;
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct GetFundsResult {
-    pub insurance_fund: BTreeMap<Asset, u128>,
-    pub treasury: BTreeMap<Asset, u128>,
+    pub insurance_fund: BTreeMap<AssetId, u128>,
+    pub treasury: BTreeMap<AssetId, u128>,
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]

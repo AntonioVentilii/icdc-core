@@ -1,8 +1,6 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
-use shared::types::{
-    Description, OracleMetadata, PayoffType, Price, Series, SeriesId, SettlementAsset,
-};
+use shared::types::{Description, OracleMetadata, PayoffType, PayoutUnit, Price, Series, SeriesId};
 
 /// Input parameters for registering a new derivative series.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -17,8 +15,8 @@ pub struct AddSeriesParams {
     pub strike: Option<Price>,
     /// The number of decimals used for prices and strikes in this series.
     pub price_precision: u8,
-    /// The asset in which the contract is settled.
-    pub settlement_asset: SettlementAsset,
+    /// The unit in which the contract payoff is expressed.
+    pub payout_unit: PayoutUnit,
     /// The price oracle identifier (case-insensitive, e.g., "Coingecko").
     pub oracle_source: String,
     /// A short, descriptive title for the series.
@@ -86,8 +84,8 @@ pub struct ListSeriesParams {
     pub payoff_type: Option<PayoffType>,
     /// Filter by the strike price.
     pub strike: Option<Price>,
-    /// Filter by the settlement asset.
-    pub settlement_asset: Option<SettlementAsset>,
+    /// Filter by the payout unit.
+    pub payout_unit: Option<PayoutUnit>,
     /// Filter by the price oracle identifier (case-insensitive, partial match).
     pub oracle_source: Option<String>,
     /// Filter by the principal identifier of the creator.
@@ -118,8 +116,8 @@ impl ListSeriesParams {
             }
         }
 
-        if let Some(settlement_asset) = &self.settlement_asset {
-            if &series.settlement_asset != settlement_asset {
+        if let Some(payout_unit) = &self.payout_unit {
+            if &series.payout_unit != payout_unit {
                 return false;
             }
         }
@@ -197,7 +195,7 @@ pub struct ManageOraclePrincipalsParams {
 #[cfg(test)]
 mod tests {
     use candid::Principal;
-    use shared::types::{Description, PayoffType, SeriesId, SettlementAsset};
+    use shared::types::{Description, PayoffType, PayoutUnit, SeriesId};
 
     use super::*;
 
@@ -209,7 +207,7 @@ mod tests {
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(100, 8)),
             price_precision: 8,
-            settlement_asset: SettlementAsset::Icp,
+            payout_unit: PayoutUnit::usd(),
             oracle_source: "Coingecko".to_string(),
             creator: Principal::anonymous(),
             created_at_ns: 0,

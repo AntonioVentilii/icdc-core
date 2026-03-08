@@ -1,22 +1,22 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
 
-use super::errors::MarginAccountError;
-use crate::types::margin::MarginAccount;
+use super::errors::AccountStateError;
+use crate::types::margin::AccountState;
 
-/// Result of a margin account retrieval request.
+/// Result of an account state retrieval request.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
-pub enum GetMarginAccountResult {
-    /// Successfully retrieved the margin account details.
-    Ok(MarginAccount),
-    /// Failed to retrieve the margin account.
-    Err(MarginAccountError),
+pub enum GetAccountStateResult {
+    /// Successfully retrieved the account state details.
+    Ok(AccountState),
+    /// Failed to retrieve the account state.
+    Err(AccountStateError),
 }
-impl From<Result<MarginAccount, MarginAccountError>> for GetMarginAccountResult {
-    fn from(value: Result<MarginAccount, MarginAccountError>) -> Self {
+impl From<Result<AccountState, AccountStateError>> for GetAccountStateResult {
+    fn from(value: Result<AccountState, AccountStateError>) -> Self {
         match value {
-            Ok(v) => GetMarginAccountResult::Ok(v),
-            Err(e) => GetMarginAccountResult::Err(e),
+            Ok(v) => GetAccountStateResult::Ok(v),
+            Err(e) => GetAccountStateResult::Err(e),
         }
     }
 }

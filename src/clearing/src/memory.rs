@@ -4,13 +4,13 @@ use candid::Principal;
 use ic_cdk::storage;
 use shared::{
     constants::{CKUSDC_LEDGER, ICP_LEDGER},
-    types::{Asset, Series, SeriesId},
+    types::{Asset, AssetId, CollateralAssetConfig, Series, SeriesId},
 };
 
 use crate::{
     types::{
         event::Event,
-        margin::{MarginAccount, Position},
+        margin::{AccountState, Position},
         plans::{DepositPlan, SettlementPlan, WithdrawalPlan},
         state::{ClearingConfig, StableState},
         trade::{LimitOrder, OrderId, TradeId, TransferId},
@@ -22,7 +22,7 @@ use crate::{
 thread_local! {
     pub static CONFIG: RefCell<ClearingConfig> = const { RefCell::new(ClearingConfig { insurance_fund_fee_ratio: 10, evm_rpc: Principal::anonymous(), signer_canister: Principal::anonymous() }) };
     pub static POSITIONS: RefCell<BTreeMap<(User, SeriesId), Position>> = const { RefCell::new(BTreeMap::new()) };
-    pub static MARGIN_ACCOUNTS: RefCell<BTreeMap<User, MarginAccount>> = const { RefCell::new(BTreeMap::new()) };
+    pub static ACCOUNT_STATES: RefCell<BTreeMap<User, AccountState>> = const { RefCell::new(BTreeMap::new()) };
     pub static SERIES: RefCell<BTreeMap<SeriesId, Series>> = const { RefCell::new(BTreeMap::new()) };
     pub static EVENTS: RefCell<Vec<Event>> = const { RefCell::new(Vec::new()) };
     pub static NEXT_EVENT_ID: RefCell<u64> = const { RefCell::new(0) };
@@ -34,15 +34,16 @@ thread_local! {
     pub static FROZEN_TRANSFERS: RefCell<BTreeMap<TransferId, PositionProof>> = const { RefCell::new(BTreeMap::new()) };
     pub static ACCEPTED_TRANSFERS: RefCell<BTreeMap<TransferId, bool>> = const { RefCell::new(BTreeMap::new()) };
     pub static SETTLEMENT_PLANS: RefCell<BTreeMap<SeriesId, SettlementPlan>> = const { RefCell::new(BTreeMap::new()) };
-    pub static INSURANCE_FUND: RefCell<BTreeMap<Asset, u128>> = const { RefCell::new(BTreeMap::new()) };
-    pub static TREASURY: RefCell<BTreeMap<Asset, u128>> = const { RefCell::new(BTreeMap::new()) };
+    pub static INSURANCE_FUND: RefCell<BTreeMap<AssetId, u128>> = const { RefCell::new(BTreeMap::new()) };
+    pub static TREASURY: RefCell<BTreeMap<AssetId, u128>> = const { RefCell::new(BTreeMap::new()) };
+    pub static COLLATERAL_ASSETS: RefCell<BTreeMap<AssetId, CollateralAssetConfig>> = const { RefCell::new(BTreeMap::new()) };
     pub static EVM_ADDRESSES: RefCell<BTreeMap<Principal, String>> = const { RefCell::new(BTreeMap::new()) };
 }
 
 pub fn save_state() {
     let config: ClearingConfig = CONFIG.with(|c: &RefCell<ClearingConfig>| c.borrow().clone());
     let positions: Vec<Position> = POSITIONS.with(|p| p.borrow().values().cloned().collect());
-    let accounts: BTreeMap<User, MarginAccount> = MARGIN_ACCOUNTS.with(|a| a.borrow().clone());
+    let accounts: BTreeMap<User, AccountState> = ACCOUNT_STATES.with(|a| a.borrow().clone());
     let series: BTreeMap<SeriesId, Series> = SERIES.with(|s| s.borrow().clone());
     let events: Vec<Event> = EVENTS.with(|e| e.borrow().clone());
     let next_id: u64 = NEXT_EVENT_ID.with(|id| *id.borrow());
@@ -59,8 +60,10 @@ pub fn save_state() {
     let settlement_plans: BTreeMap<SeriesId, SettlementPlan> =
         SETTLEMENT_PLANS.with(|s| s.borrow().clone());
     let limit_orders: BTreeMap<OrderId, LimitOrder> = LIMIT_ORDERS.with(|l| l.borrow().clone());
-    let insurance_fund: BTreeMap<Asset, u128> = INSURANCE_FUND.with(|f| f.borrow().clone());
-    let treasury: BTreeMap<Asset, u128> = TREASURY.with(|f| f.borrow().clone());
+    let insurance_fund: BTreeMap<AssetId, u128> = INSURANCE_FUND.with(|f| f.borrow().clone());
+    let treasury: BTreeMap<AssetId, u128> = TREASURY.with(|f| f.borrow().clone());
+    let collateral_assets: BTreeMap<AssetId, CollateralAssetConfig> =
+        COLLATERAL_ASSETS.with(|f| f.borrow().clone());
     let evm_addresses: BTreeMap<Principal, String> = EVM_ADDRESSES.with(|f| f.borrow().clone());
 
     let state = StableState {
@@ -80,6 +83,7 @@ pub fn save_state() {
         limit_orders,
         insurance_fund,
         treasury,
+        collateral_assets,
         evm_addresses,
     };
 
@@ -106,6 +110,7 @@ pub fn restore_state() {
         limit_orders,
         insurance_fund,
         treasury,
+        collateral_assets,
         evm_addresses,
     } = state;
 
@@ -117,7 +122,7 @@ pub fn restore_state() {
     });
 
     CONFIG.with(|c| *c.borrow_mut() = config);
-    MARGIN_ACCOUNTS.with(|w| *w.borrow_mut() = accounts);
+    ACCOUNT_STATES.with(|a| *a.borrow_mut() = accounts);
     SERIES.with(|s| *s.borrow_mut() = series);
     EVENTS.with(|e| *e.borrow_mut() = events);
     NEXT_EVENT_ID.with(|id| *id.borrow_mut() = next_id);
@@ -131,6 +136,7 @@ pub fn restore_state() {
     LIMIT_ORDERS.with(|l| *l.borrow_mut() = limit_orders);
     INSURANCE_FUND.with(|f| *f.borrow_mut() = insurance_fund);
     TREASURY.with(|f| *f.borrow_mut() = treasury);
+    COLLATERAL_ASSETS.with(|f| *f.borrow_mut() = collateral_assets);
     EVM_ADDRESSES.with(|f| *f.borrow_mut() = evm_addresses);
 }
 

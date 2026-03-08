@@ -10,6 +10,7 @@ type Asset = variant {
 	Icrc : principal;
 	NativeEvm : NativeEvmAsset
 };
+type AssetId = text;
 type AssetError = variant {
 	TransferError : text;
 	InsufficientBalance : record { balance : nat; required : nat };
@@ -17,13 +18,6 @@ type AssetError = variant {
 	CallError : record { method : text; code : int32; message : text };
 	InvalidAssetForHandler;
 	UnsupportedAsset
-};
-type BlockCollateralParams = record { asset : Asset; amount : nat };
-type BlockCollateralResult = variant { Ok; Err : BlockingError };
-type BlockingError = variant {
-	InsufficientAvailableBalance : record { requested : nat; available : nat };
-	MathOverflow;
-	InsufficientReservedBalance : record { requested : nat; "reserved" : nat }
 };
 type CancelLimitOrderParams = record { order_id : text };
 type Chain = variant { Bsc; Base; Ethereum; Polygon };
@@ -42,7 +36,7 @@ type DecimalValue = record { decimals : nat8; value : nat };
 type DepositCollateralError = variant { MathOverflow; Asset : AssetError };
 type DepositCollateralParams = record {
 	deposit_id : text;
-	asset : Asset;
+	asset_id : AssetId;
 	amount : nat
 };
 type DepositCollateralResult = variant { Ok; Err : DepositCollateralError };
@@ -67,20 +61,23 @@ type Event = record {
 	clearing_id : principal
 };
 type EventType = variant { OrderPlaced; Executed; Liquidated; Settled };
-type FreezePositionForTransferParams = record {
-	series_id : text;
-	user : principal;
-	transfer_id : text
+type FiatUnit = variant { Usd; Eur; Gbp; Chf };
+type CanonicalCryptoUnit = variant { Btc; Eth; Icp };
+type NonMonetaryUnit = variant { Points };
+type PayoutUnit = variant {
+	Fiat : FiatUnit;
+	Crypto : CanonicalCryptoUnit;
+	NonMonetary : NonMonetaryUnit
 };
 type FundType = variant { Insurance; Treasury };
 type GetFundsResult = record {
-	insurance_fund : vec record { Asset; nat };
-	treasury : vec record { Asset; nat }
+	insurance_fund : vec record { AssetId; nat };
+	treasury : vec record { AssetId; nat }
 };
-type GetMarginAccountParams = record { refresh : opt bool };
-type GetMarginAccountResult = variant {
-	Ok : MarginAccount;
-	Err : MarginAccountError
+type GetAccountStateParams = record { refresh : opt bool };
+type GetAccountStateResult = variant {
+	Ok : AccountState;
+	Err : AccountStateError
 };
 type GetPositionParams = record { series_id : text };
 type HttpRequest = record {
@@ -104,14 +101,14 @@ type LimitOrder = record {
 	price : Price
 };
 type ListOrdersParams = record { series_id : opt text };
-type MarginAccount = record {
-	required_margin : nat;
-	reserved_balances : vec record { Asset; nat };
+type AccountState = record {
+	reserved_margin_usd : nat;
+	collateral_balances : vec record { AssetId; nat };
 	user : principal;
-	balances : vec record { Asset; nat }
+	cash_balance_usd : int
 };
-type MarginAccountError = variant {
-	NoMarginAccountFound;
+type AccountStateError = variant {
+	NoAccountStateFound;
 	MathOverflow;
 	Asset : AssetError
 };
@@ -121,15 +118,7 @@ type Position = record {
 	series_id : text;
 	net_qty : int;
 	user : principal;
-	locked_collateral : nat
-};
-type PositionProof = record {
-	qty : int;
-	signature : blob;
-	series_id : text;
-	user : principal;
-	transfer_id : text;
-	clearing_id : principal
+	reserved_margin_usd : nat
 };
 type Price = record {
 	timestamp : opt nat64;
@@ -143,7 +132,7 @@ type Series = record {
 	payoff_type : PayoffType;
 	expiry_ns : nat64;
 	series_id : text;
-	settlement_asset : SettlementAsset;
+	payout_unit : PayoutUnit;
 	underlying : text;
 	description : Description;
 	created_at_ns : nat64;
@@ -152,30 +141,17 @@ type Series = record {
 };
 type SettleSeriesParams = record { series_id : text; settlement_price : Price };
 type SettleSeriesResult = variant { Ok; Err : SettlementError };
-type SettlementAsset = variant {
-	Icp;
-	Usdc : Chain;
-	Usdt : Chain;
-	Native : Chain;
-	CkUsdc
-};
 type SettlementError = variant {
-	InsufficientInternalBalance : record {
-		balance : nat;
-		user : principal;
-		required : nat
-	};
-	UnsupportedSettlementAsset;
 	MathOverflow;
-	SolvencyViolation : record { total_payoff : nat; total_collateral : nat };
+	InconsistentSettlementPrice : record { Price; Price };
 	Asset : AssetError;
 	Common : CommonError
 };
 type Side = variant { Buy; Sell };
 type Stats = record {
 	total_users : nat64;
-	margin_balances : vec record { Asset; nat };
-	total_collateral_locked : nat;
+	asset_balances : vec record { AssetId; nat };
+	total_collateral_locked_usd : nat;
 	total_trades : nat64;
 	total_series : nat64;
 	open_interest : nat;
@@ -197,10 +173,8 @@ type SubmitMatchedTradeParams = record {
 	trade_id : text;
 	series_id : text;
 	seller : principal;
-	buyer_unblock_amount : opt nat;
 	buyer : principal;
-	price : Price;
-	seller_unblock_amount : opt nat
+	price : Price
 };
 type SubmitMatchedTradeResult = variant { Ok : bool; Err : TradeError };
 type TradeError = variant {
@@ -221,7 +195,7 @@ type WithdrawCollateralError = variant {
 	Asset : AssetError
 };
 type WithdrawCollateralParams = record {
-	asset : Asset;
+	asset_id : AssetId;
 	withdrawal_id : text;
 	amount : nat
 };
@@ -229,131 +203,53 @@ type WithdrawCollateralResult = variant { Ok; Err : WithdrawCollateralError };
 type WithdrawFundParams = record {
 	to : principal;
 	fund_type : FundType;
-	asset : Asset;
+	asset_id : AssetId;
 	amount : nat
 };
+type UpdateCollateralAssetParams = record { config : CollateralAssetConfig };
+type CollateralAssetConfig = record {
+	asset_id : AssetId;
+	asset : Asset;
+	symbol : text;
+	decimals : nat8;
+	price_usd : DecimalValue;
+	haircut_bps : nat16;
+	is_enabled : bool
+};
 service : {
-	// Accepts a position transfer from another clearing canister.
-	//
-	// This method validates the series and increases the target user's position based on the provided
-	// proof. This method is gated to canister controllers.
-	accept_position_transfer : (PositionProof) -> (AcceptPositionTransferResult);
-	// Blocks (reserves) collateral in the user's margin account.
-	block_collateral : (BlockCollateralParams) -> (BlockCollateralResult);
-	// Cancels an existing limit order and releases the reserved collateral.
-	//
-	// Only the creator of the order can cancel it.
+	accept_position_transfer : (
+		record {
+			user : principal;
+			qty : int;
+			series_id : text;
+			transfer_id : text
+		}
+	) -> (AcceptPositionTransferResult);
 	cancel_limit_order : (CancelLimitOrderParams) -> (SubmitMatchedTradeResult);
-	// Deposits collateral into the user's margin account.
-	//
-	// This is a multi-phase operation:
-	// 1. Building a [`DepositPlan`] for idempotency.
-	// 2. Executing the asynchronous ledger transfer (`transfer_from`).
-	// 3. Finalising the internal margin account balances.
-	//
-	// # Arguments
-	// * `params` - The deposit details including amount, asset, and a unique deposit ID.
-	//
-	// # Returns
-	// * [`DepositCollateralResult::Ok`] if the deposit was successfully planned or executed.
-	// * [`DepositCollateralResult::Err`] if the asset is unsupported or a transfer error occurs.
 	deposit_collateral : (DepositCollateralParams) -> (DepositCollateralResult);
-	// Freezes a user's position to prepare it for transfer to another clearing canister.
-	//
-	// Once frozen, the position is removed from active state and a [`PositionProof`] is issued.
-	// This method is gated to canister controllers.
-	freeze_position_for_transfer : (FreezePositionForTransferParams) -> (
-		opt PositionProof
-	);
-	// Returns the current balances of the Insurance Fund and Treasury.
-	//
-	// This method is gated to canister controllers.
+	update_collateral_asset : (UpdateCollateralAssetParams) -> ();
 	get_funds : () -> (GetFundsResult) query;
-	// Retrieves the current user's margin account details, optionally refreshing balances.
-	//
-	// # Arguments
-	// * `params` - Includes an optional `refresh` flag to trigger external ledger checks.
-	get_margin_account : (GetMarginAccountParams) -> (GetMarginAccountResult);
-	// Retrieves the current user's margin account details (query only).
-	//
-	// This does not refresh balances from external ledgers.
-	get_margin_account_query : () -> (GetMarginAccountResult) query;
-	// Retrieves all active limit orders for the caller.
+	get_account_state : (GetAccountStateParams) -> (GetAccountStateResult);
+	get_account_state_query : () -> (GetAccountStateResult) query;
 	get_orders : () -> (vec LimitOrder) query;
-	// Retrieves a specific position for the caller.
 	get_position : (GetPositionParams) -> (opt Position) query;
-	// Retrieves all open positions for the caller.
 	get_positions : () -> (vec record { text; Position }) query;
-	// Retrieves the trade history (executed trades) for the caller.
 	get_trade_history : () -> (vec Event) query;
 	http_request : (HttpRequest) -> (HttpResponse) query;
-	// Returns a list of all active limit orders, potentially filtered by series.
 	list_orders : (ListOrdersParams) -> (vec LimitOrder) query;
-	// Returns a list of all derivative series currently cached in the clearing canister.
 	list_series : () -> (vec Series) query;
-	// Exports internal state as Prometheus metrics.
-	//
-	// This method is gated to canister controllers.
 	metrics : () -> (text) query;
-	// Sets the principal of the Series Registry canister.
-	//
-	// This principal is used to discover and validate derivative series.
-	// This method is gated to canister controllers.
 	set_registry_canister : (principal) -> ();
-	// Settles a derivative series at a specific price.
-	//
-	// This is a complex background operation consisting of:
-	// 1. Creating or resuming a [`SettlementPlan`].
-	// 2. Collecting collateral from users with net losses.
-	// 3. Paying out collateral to users with net profits.
-	// 4. Finalising internal margin account balances and releasing locked collateral.
-	//
-	// This method is gated to canister controllers or the designated [`oracle_principal`] for the
-	// series. It is intended to be called by an off-chain oracle or automation.
 	settle_series : (SettleSeriesParams) -> (SettleSeriesResult);
-	// Exports internal state as a structured `Stats` object.
-	//
-	// This method is gated to canister controllers.
 	stats : () -> (Stats) query;
-	// Submits a limit order for the caller.
-	//
-	// This atomically blocks the required collateral for the order.
 	submit_limit_order : (SubmitLimitOrderParams) -> (SubmitMatchedTradeResult);
-	// Submits a market order to match an existing limit order.
-	//
-	// The caller is the taker.
 	submit_market_order : (SubmitMarketOrderParams) -> (SubmitMatchedTradeResult);
-	// Submits a matched trade from an exchange for clearing.
-	//
-	// TODO: until we implement an allowed list of exchange canisters, this is gated to controllers
 	submit_matched_trade : (SubmitMatchedTradeParams) -> (
 		SubmitMatchedTradeResult
 	);
-	// Unblocks (releases) collateral in the user's margin account.
-	unblock_collateral : (BlockCollateralParams) -> (BlockCollateralResult);
-	// Updates the global configuration for the Clearing canister.
-	//
-	// This method is gated to canister controllers.
 	update_config : (ClearingConfig) -> ();
-	// Withdraws collateral from the user's margin account to an external address.
-	//
-	// This is a multi-phase operation:
-	// 1. Building a [`WithdrawalPlan`] for idempotency.
-	// 2. Reserving the internal balance to prevent double-spending or risk violations.
-	// 3. Executing the asynchronous ledger transfer (`transfer`).
-	// 4. Finalising the plan status.
-	//
-	// # Arguments
-	// * `params` - The withdrawal details including amount, asset, and a unique withdrawal ID.
-	//
-	// # Returns
-	// * [`WithdrawalCollateralResult::Ok`] if the withdrawal was successfully planned or executed.
-	// * [`WithdrawalCollateralResult::Err`] if margin is insufficient or a transfer error occurs.
 	withdraw_collateral : (WithdrawCollateralParams) -> (
 		WithdrawCollateralResult
 	);
-	// Withdraws assets from the Insurance Fund or Treasury to an external wallet.
-	//
-	// This method is gated to canister controllers.
 	withdraw_fund : (WithdrawFundParams) -> (AdminResult)
 }

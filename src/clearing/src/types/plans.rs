@@ -1,6 +1,6 @@
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
-use shared::types::{Asset, Price, SeriesId};
+use shared::types::{Asset, AssetId, Price, SeriesId};
 
 use crate::{
     memory::{DEPOSIT_PLANS, SETTLEMENT_PLANS, WITHDRAWAL_PLANS},
@@ -28,8 +28,8 @@ pub struct DepositPlanParams {
     pub deposit_id: DepositId,
     /// The user making the deposit.
     pub user: User,
-    /// The asset being deposited.
-    pub asset: Asset,
+    /// The collateral asset being deposited.
+    pub asset_id: AssetId,
     /// The amount being deposited.
     pub amount: candid::Nat,
 }
@@ -41,8 +41,8 @@ pub struct WithdrawalPlanParams {
     pub withdrawal_id: WithdrawalId,
     /// The user making the withdrawal.
     pub user: User,
-    /// The asset being withdrawn.
-    pub asset: Asset,
+    /// The collateral asset being withdrawn.
+    pub asset_id: AssetId,
     /// The amount being withdrawn.
     pub amount: candid::Nat,
     /// The destination principal and optional subaccount.
@@ -56,20 +56,15 @@ pub struct SettlementPlanParams {
     pub series_id: SeriesId,
     /// The final settlement price from the oracle.
     pub settlement_price: Price,
-    /// The asset in which the settlement occurs.
-    pub settlement_asset: Asset,
-    /// The protocol fee applied to the settlement.
+    /// Users who had positions in this series.
+    /// The protocol fee applied to the settlement (in USD units).
     pub fee: u128,
-    /// The insurance fee collected for this settlement session.
+    /// The insurance fee collected for this settlement session (in USD units).
     pub insurance_fee: u128,
     /// A list of positions involved in the settlement.
     pub positions: Vec<(User, i128)>,
-    /// Users who owe collateral for the settlement.
-    pub payers: Vec<(User, u128)>,
-    /// Users who are owed collateral for the settlement.
-    pub receivers: Vec<(User, u128)>,
-    /// List of accounting updates: (user, net_qty, sign, profit_loss, margin_to_release).
-    pub accounting_updates: Vec<(User, i128, i8, u128, u128)>,
+    /// List of accounting updates: (user, cashflow_usd).
+    pub accounting_updates: Vec<(User, i128)>,
 }
 
 /// A plan for processing a collateral deposit in the background.
@@ -79,8 +74,8 @@ pub struct DepositPlan {
     pub deposit_id: DepositId,
     /// The user making the deposit.
     pub user: User,
-    /// The asset being deposited.
-    pub asset: Asset,
+    /// The collateral asset being deposited.
+    pub asset_id: AssetId,
     /// The amount being deposited.
     pub amount: candid::Nat,
     /// Current execution status of the plan.
@@ -99,7 +94,7 @@ impl DepositPlan {
             let DepositPlanParams {
                 deposit_id,
                 user,
-                asset,
+                asset_id,
                 amount,
             } = params;
 
@@ -114,7 +109,7 @@ impl DepositPlan {
             let plan = DepositPlan {
                 deposit_id,
                 user,
-                asset,
+                asset_id,
                 amount,
                 status: PlanStatus::Planned,
                 idempotency_ns,
@@ -134,8 +129,8 @@ pub struct WithdrawalPlan {
     pub withdrawal_id: WithdrawalId,
     /// The user making the withdrawal.
     pub user: User,
-    /// The asset being withdrawn.
-    pub asset: Asset,
+    /// The collateral asset being withdrawn.
+    pub asset_id: AssetId,
     /// The amount being withdrawn.
     pub amount: candid::Nat,
     /// The destination principal and optional subaccount.
@@ -158,7 +153,7 @@ impl WithdrawalPlan {
             let WithdrawalPlanParams {
                 withdrawal_id,
                 user,
-                asset,
+                asset_id,
                 amount,
                 to_account,
             } = params;
@@ -174,7 +169,7 @@ impl WithdrawalPlan {
             let plan = WithdrawalPlan {
                 withdrawal_id,
                 user,
-                asset,
+                asset_id,
                 amount,
                 to_account,
                 status: PlanStatus::Planned,
@@ -196,48 +191,25 @@ pub struct SettlementPlan {
     pub series_id: SeriesId,
     /// The final settlement price.
     pub settlement_price: Price,
-    /// The asset used for settlement.
-    pub settlement_asset: Asset,
-    /// The protocol fee.
-    pub fee: u128,
-    /// The insurance fee.
-    pub insurance_fee: u128,
+    /// The protocol fee (in USD units).
+    pub fee_usd: u128,
+    /// The insurance fee (in USD units).
+    pub insurance_fee_usd: u128,
     /// Detailed position snapshots at the time of settlement.
     pub positions: Vec<(User, i128)>,
-    /// List of payers and their respective owed amounts.
-    pub payers: Vec<(User, u128)>,
-    /// List of receivers and their respective owed amounts.
-    pub receivers: Vec<(User, u128)>,
-    /// List of accounting updates: (user, net_qty, sign, profit_loss, margin_to_release).
-    pub accounting_updates: Vec<(User, i128, i8, u128, u128)>,
-    /// Tracks progress through the payers list.
-    pub payer_cursor: usize,
-    /// Tracks progress through the receivers list.
-    pub receiver_cursor: usize,
+    /// List of accounting updates: (user, cashflow_usd).
+    pub accounting_updates: Vec<(User, i128)>,
     /// Tracks progress through accounting updates.
     pub accounting_cursor: usize,
-    /// Whether all accounting updates have been applied to margin accounts.
+    /// Whether all accounting updates have been applied to account states.
     pub accounting_applied: bool,
     /// Current execution status of the plan.
     pub status: PlanStatus,
-    /// Base idempotency key in nanoseconds for transfers.
+    /// Base idempotency key in nanoseconds.
     pub idempotency_ns: PaymentIdempotency,
-    /// Receipts for successful payer transfers.
-    pub payer_receipts: Vec<Option<PaymentReceipt>>,
-    /// Receipts for successful receiver transfers.
-    pub receiver_receipts: Vec<Option<PaymentReceipt>>,
 }
+
 impl SettlementPlan {
-    /// Returns a unique idempotency step identifier for a payer transfer.
-    pub fn payer_step(&self, idx: u32) -> u64 {
-        idx as u64
-    }
-
-    /// Returns a unique idempotency step identifier for a receiver transfer.
-    pub fn receiver_step(&self, idx: u32) -> u64 {
-        10_000u64 + (idx as u64)
-    }
-
     /// Retrieves an existing settlement plan or creates a new one if it doesn't exist.
     pub fn get_or_create(params: SettlementPlanParams) -> Self {
         SETTLEMENT_PLANS.with(|m| {
@@ -246,13 +218,11 @@ impl SettlementPlan {
             let SettlementPlanParams {
                 series_id,
                 settlement_price,
-                settlement_asset,
-                fee,
-                insurance_fee,
+                fee: fee_usd,
+                insurance_fee: insurance_fee_usd,
                 positions,
-                payers,
-                receivers,
                 accounting_updates,
+                ..
             } = params;
 
             let key = series_id.clone();
@@ -263,27 +233,17 @@ impl SettlementPlan {
 
             let idempotency_ns = ic_cdk::api::time().into();
 
-            let payers_len = payers.len();
-            let receivers_len = receivers.len();
-
             let plan = SettlementPlan {
                 series_id,
                 settlement_price,
-                settlement_asset,
-                fee,
-                insurance_fee,
+                fee_usd,
+                insurance_fee_usd,
                 positions,
-                payers: payers.clone(),
-                receivers: receivers.clone(),
                 accounting_updates,
-                payer_cursor: 0,
-                receiver_cursor: 0,
                 accounting_cursor: 0,
                 accounting_applied: false,
                 status: PlanStatus::Planned,
                 idempotency_ns,
-                payer_receipts: vec![None; payers_len],
-                receiver_receipts: vec![None; receivers_len],
             };
 
             m.insert(key, plan.clone());

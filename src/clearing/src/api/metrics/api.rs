@@ -1,17 +1,21 @@
-use std::collections::BTreeMap;
+use std::{cell::RefCell, collections::BTreeMap};
 
 use candid::Nat;
 use ic_cdk::api::is_controller;
 use ic_cdk_macros::query;
-use shared::types::Asset;
+use shared::types::{Asset, AssetId, CollateralAssetConfig};
 
 use crate::{
     guards::caller_is_controller,
-    memory::{ckusdc_ledger, icp_ledger, EVENTS, MARGIN_ACCOUNTS, POSITIONS, SERIES},
+    memory::{
+        ckusdc_ledger, icp_ledger, ACCOUNT_STATES, COLLATERAL_ASSETS, EVENTS, POSITIONS, SERIES,
+    },
     types::{
         event::EventType,
         http::{HeaderField, HttpRequest, HttpResponse},
+        margin::AccountState,
         stats::Stats,
+        user::User,
     },
 };
 
@@ -21,24 +25,39 @@ use crate::{
 #[query(guard = "caller_is_controller")]
 pub fn stats() -> Stats {
     // --- POSITIONS & OPEN INTEREST ---
-    let (total_open_interest, total_locked_collateral) = POSITIONS.with(|p| {
+    let (total_open_interest, total_reserved_margin) = POSITIONS.with(|p| {
         let p = p.borrow();
         let oi: u128 = p.values().map(|v| v.net_qty.unsigned_abs()).sum();
-        let locked: u128 = p.values().map(|v| v.locked_collateral).sum();
-        (oi, locked)
+        let reserved: u128 = p.values().map(|v| v.reserved_margin_usd).sum();
+        (oi, reserved)
     });
 
-    // --- MARGIN ACCOUNTS & BALANCES ---
-    let (total_users, asset_balances) = MARGIN_ACCOUNTS.with(|m| {
-        let m = m.borrow();
-        let mut balances = BTreeMap::new();
-        for account in m.values() {
-            for (asset, amount) in &account.balances {
-                *balances.entry(asset.clone()).or_insert(0u128) += amount;
+    // --- ACCOUNT STATES & BALANCES ---
+    let (total_users, asset_balances_id) =
+        ACCOUNT_STATES.with(|m: &RefCell<BTreeMap<User, AccountState>>| {
+            let m = m.borrow();
+            let mut balances: BTreeMap<AssetId, u128> = BTreeMap::new();
+            for account in m.values() {
+                for (asset_id, amount) in &account.collateral_balances {
+                    *balances.entry(asset_id.clone()).or_insert(0u128) += amount;
+                }
             }
-        }
-        (m.len() as u64, balances)
-    });
+            (m.len() as u64, balances)
+        });
+
+    // --- Map AssetId back to Asset for Stats reporting ---
+    let asset_balances = COLLATERAL_ASSETS.with(
+        |configs: &RefCell<BTreeMap<AssetId, CollateralAssetConfig>>| {
+            let configs = configs.borrow();
+            let mut mapped = BTreeMap::new();
+            for (id, amount) in asset_balances_id {
+                if let Some(config) = configs.get(&id) {
+                    mapped.insert(config.asset.clone(), amount);
+                }
+            }
+            mapped
+        },
+    );
 
     // --- SERIES ---
     let total_series = SERIES.with(|s| s.borrow().len() as u64);
@@ -70,7 +89,7 @@ pub fn stats() -> Stats {
 
     Stats {
         open_interest: Nat::from(total_open_interest),
-        total_collateral_locked: Nat::from(total_locked_collateral),
+        total_collateral_locked: Nat::from(total_reserved_margin),
         total_users,
         total_series,
         total_trades: trade_count,

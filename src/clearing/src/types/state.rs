@@ -9,7 +9,7 @@ use shared::{
 
 use crate::types::{
     event::Event,
-    margin::{MarginAccount, Position},
+    margin::{AccountState, Position},
     plans::{DepositPlan, SettlementPlan, WithdrawalPlan},
     trade::{LimitOrder, OrderId, TradeId, TransferId},
     user::{DepositKey, User, WithdrawalKey},
@@ -59,8 +59,8 @@ pub struct StableState {
     pub config: ClearingConfig,
     /// All active positions in the system.
     pub positions: Vec<Position>,
-    /// Mapping of users to their margin accounts.
-    pub accounts: BTreeMap<User, MarginAccount>,
+    /// Mapping of users to their account states.
+    pub accounts: BTreeMap<User, AccountState>,
     /// Cached information about registered series.
     pub series: BTreeMap<SeriesId, Series>,
     /// A log of significant system events.
@@ -84,9 +84,11 @@ pub struct StableState {
     /// Active limit orders.
     pub limit_orders: BTreeMap<OrderId, LimitOrder>,
     /// Accumulated fees in the insurance fund, per asset.
-    pub insurance_fund: BTreeMap<shared::types::Asset, u128>,
+    pub insurance_fund: BTreeMap<shared::types::AssetId, u128>,
     /// Accumulated fees in the treasury (main fund), per asset.
-    pub treasury: BTreeMap<shared::types::Asset, u128>,
+    pub treasury: BTreeMap<shared::types::AssetId, u128>,
+    /// Configuration for supported collateral assets.
+    pub collateral_assets: BTreeMap<shared::types::AssetId, shared::types::CollateralAssetConfig>,
     /// Cached EVM addresses derived for principals.
     pub evm_addresses: BTreeMap<Principal, String>,
 }

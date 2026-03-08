@@ -1,8 +1,8 @@
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
-use shared::types::asset::errors::AssetError;
+use shared::types::{asset::errors::AssetError, Price};
 
-use crate::types::{errors::CommonError, user::User};
+use crate::types::errors::CommonError;
 
 /// Errors occurring during derivative series settlement.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -11,19 +11,13 @@ pub enum SettlementError {
     Common(CommonError),
     /// An error occurred while interacting with the asset.
     Asset(AssetError),
-    /// The series uses an unsupported settlement asset.
-    UnsupportedSettlementAsset,
     /// Overflow during settlement calculation.
     MathOverflow,
-    /// Total payoffs exceed locked collateral (system insolvency).
+    /// Total payoffs exceed global system collateral value (system insolvency).
     SolvencyViolation {
         total_payoff: u128,
-        total_collateral: u128,
+        total_collateral_usd: u128,
     },
-    /// A payer has insufficient internal balance to cover their loss.
-    InsufficientInternalBalance {
-        user: User,
-        balance: u128,
-        required: u128,
-    },
+    /// Settlement price inconsistent with already executing plan.
+    InconsistentSettlementPrice { existing: Price, requested: Price },
 }

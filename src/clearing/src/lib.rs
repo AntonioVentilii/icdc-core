@@ -1,29 +1,26 @@
 use candid::{Nat, Principal};
 use ic_cdk_macros::{post_upgrade, pre_upgrade};
-use shared::types::{Series, SeriesId};
+use shared::types::{Asset, AssetId, CollateralAssetConfig, PayoutUnit, Price, Series, SeriesId};
 
 use crate::{
     api::{
         account::{
-            params::{GetMarginAccountParams, GetPositionParams},
-            results::GetMarginAccountResult,
+            params::{GetAccountStateParams, GetPositionParams},
+            results::GetAccountStateResult,
         },
         admin::{
-            params::WithdrawFundParams,
-            results::{AdminResult, GetFundsResult},
+            params::{FundType, UpdateCollateralAssetParams, WithdrawFundParams},
+            results::{AdminError, AdminResult, GetFundsResult},
         },
         collateral::{
-            params::{
-                BlockCollateralParams, DepositCollateralParams, UnblockCollateralParams,
-                WithdrawCollateralParams,
-            },
-            results::{
-                BlockCollateralResult, DepositCollateralResult, UnblockCollateralResult,
-                WithdrawCollateralResult,
-            },
+            params::{DepositCollateralParams, WithdrawCollateralParams},
+            results::{DepositCollateralResult, WithdrawCollateralResult},
         },
-        settlement::{params::SettleSeriesParams, results::SettleSeriesResult},
+        settlement::{
+            errors::SettlementError, params::SettleSeriesParams, results::SettleSeriesResult,
+        },
         trade::{
+            errors::TradeError,
             params::{
                 CancelLimitOrderParams, FreezePositionForTransferParams, ListOrdersParams,
                 SubmitLimitOrderParams, SubmitMarketOrderParams, SubmitMatchedTradeParams,

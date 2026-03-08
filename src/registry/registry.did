@@ -3,19 +3,26 @@ type AddOracleParams = record {
 	authorized_principals : vec principal;
 	oracle_id : text
 };
+type FiatUnit = variant { Usd; Eur; Gbp; Chf };
+type CanonicalCryptoUnit = variant { Btc; Eth; Icp };
+type NonMonetaryUnit = variant { Points };
+type PayoutUnit = variant {
+	Fiat : FiatUnit;
+	Crypto : CanonicalCryptoUnit;
+	NonMonetary : NonMonetaryUnit
+};
 type AddSeriesParams = record {
 	title : text;
 	strike : opt Price;
 	payoff_type : PayoffType;
 	expiry_ns : nat64;
-	settlement_asset : SettlementAsset;
+	payout_unit : PayoutUnit;
 	underlying : text;
 	description : Description;
 	price_precision : nat8;
 	oracle_source : text
 };
 type AddSeriesResult = variant { Ok : text; Err : SeriesError };
-type Chain = variant { Bsc; Base; Ethereum; Polygon };
 type DecimalValue = record { decimals : nat8; value : nat };
 type Description = record {
 	html : opt text;
@@ -27,7 +34,7 @@ type ListSeriesParams = record {
 	creator : opt principal;
 	payoff_type : opt PayoffType;
 	pagination : opt PaginationParams;
-	settlement_asset : opt SettlementAsset;
+	payout_unit : opt PayoutUnit;
 	underlying : opt text;
 	search_term : opt text;
 	oracle_source : opt text
@@ -69,7 +76,7 @@ type Series = record {
 	payoff_type : PayoffType;
 	expiry_ns : nat64;
 	series_id : text;
-	settlement_asset : SettlementAsset;
+	payout_unit : PayoutUnit;
 	underlying : text;
 	description : Description;
 	created_at_ns : nat64;
@@ -83,66 +90,22 @@ type SeriesError = variant {
 	SeriesAlreadyExists
 };
 type SeriesPage = record { next_cursor : opt text; items : vec Series };
-type SettlementAsset = variant {
-	Icp;
-	Usdc : Chain;
-	Usdt : Chain;
-	Native : Chain;
-	CkUsdc
-};
 type UpdateOracleMetadataParams = record {
 	metadata : OracleMetadata;
 	oracle_id : text
 };
 service : {
-	// Authorizes a list of principals to create new derivative series.
-	//
-	// This method is gated to canister controllers.
 	add_authorized_creators : (vec principal) -> ();
-	// Registers a new price oracle in the registry.
 	add_oracle : (AddOracleParams) -> (OracleResult);
-	// Adds a new derivative series to the registry.
-	//
-	// This method generates a canonical [`SeriesId`] for the provided parameters.
-	// If the series already exists, it returns an error.
-	//
-	// # Arguments
-	// * `params` - The defining parameters for the new series.
-	//
-	// # Returns
-	// * [`AddSeriesResult::Ok`] containing the new [`SeriesId`] on success.
-	// * [`AddSeriesResult::Err`] with [`SeriesError::SeriesAlreadyExists`] if the series is already
-	// registered.
 	add_series : (AddSeriesParams) -> (AddSeriesResult);
-	// Retrieves the details of a specific oracle by its ID.
 	get_oracle : (text) -> (opt Oracle) query;
-	// Retrieves a specific [`Series`] by its [`SeriesId`].
-	//
-	// # Arguments
-	// * `series_id` - The unique identifier of the series to retrieve.
-	//
-	// # Returns
-	// * `Some(Series)` if the series exists in the registry.
-	// * `None` otherwise.
 	get_series : (text) -> (opt Series) query;
-	// Checks if a principal is authorized to create derivative series.
 	is_authorized_creator : (principal) -> (bool) query;
-	// Checks if a principal is authorized to push settlement data for a given oracle.
 	is_oracle_authorized : (text, principal) -> (bool) query;
-	// Returns a list of all principals currently authorized to create series.
-	//
-	// This method is gated to canister controllers.
 	list_authorized_creators : () -> (vec principal) query;
-	// Returns a paginated page of all registered derivative series.
 	list_series : (PaginationParams) -> (SeriesPage) query;
-	// Returns a paginated page of registered derivative series, optionally filtered.
 	list_series_with : (ListSeriesParams) -> (SeriesPage) query;
-	// Adds or removes authorised principals for an oracle.
 	manage_oracle_principals : (ManageOraclePrincipalsParams) -> (OracleResult);
-	// Removes authorization from a list of principals, preventing them from creating new series.
-	//
-	// This method is gated to canister controllers.
 	remove_authorized_creators : (vec principal) -> ();
-	// Updates the metadata of an existing oracle.
 	update_oracle_metadata : (UpdateOracleMetadataParams) -> (OracleResult)
 }

@@ -20,6 +20,11 @@ pub const MONTH_NS: u64 = 30 * DAY_NS;
 pub const ICP_LEDGER: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
 /// Principal ID of the ckUSDC Ledger canister
 pub const CKUSDC_LEDGER: &str = "yfumr-cyaaa-aaaar-qaela-cai";
+/// Principal ID of the virtual USD (vUSD) Ledger canister (Internal ghost token)
+pub const VUSD_LEDGER: &str = "vust-aaaaa-aaaag-qacka-cai";
+
+/// The canonical number of decimals for internal USD accounting.
+pub const USD_DECIMALS: u8 = 6;
 
 /// Maximum length of a series title in characters.
 pub const MAX_SERIES_TITLE_LEN: usize = 128;

@@ -1,6 +1,6 @@
 use candid::{CandidType, Deserialize, Nat};
 use serde::Serialize;
-use shared::types::Asset;
+use shared::types::AssetId;
 
 use crate::types::user::{DepositId, WithdrawalId};
 
@@ -9,8 +9,8 @@ use crate::types::user::{DepositId, WithdrawalId};
 pub struct DepositCollateralParams {
     /// The amount of the asset to deposit.
     pub amount: Nat,
-    /// The asset to be deposited.
-    pub asset: Asset,
+    /// The unique identifier of the asset to deposit.
+    pub asset_id: AssetId,
     /// Unique identifier for the deposit operation.
     pub deposit_id: DepositId,
 }
@@ -20,8 +20,8 @@ pub struct DepositCollateralParams {
 pub struct WithdrawCollateralParams {
     /// The amount of the asset to withdraw.
     pub amount: Nat,
-    /// The asset to be withdrawn.
-    pub asset: Asset,
+    /// The unique identifier of the asset to withdraw.
+    pub asset_id: AssetId,
     /// Unique identifier for the withdrawal operation.
     pub withdrawal_id: WithdrawalId,
 }
@@ -31,8 +31,8 @@ pub struct WithdrawCollateralParams {
 pub struct BlockCollateralParams {
     /// The amount of the asset to block.
     pub amount: Nat,
-    /// The asset to be blocked.
-    pub asset: Asset,
+    /// The unique identifier of the asset to block.
+    pub asset_id: AssetId,
 }
 
 /// Input parameters for unblocking (releasing) collateral.
@@ -40,6 +40,6 @@ pub struct BlockCollateralParams {
 pub struct UnblockCollateralParams {
     /// The amount of the asset to unblock.
     pub amount: Nat,
-    /// The asset to be unblocked.
-    pub asset: Asset,
+    /// The unique identifier of the asset to unblock.
+    pub asset_id: AssetId,
 }

@@ -1,122 +1,105 @@
 use std::collections::BTreeMap;
 
 use ic_cdk_macros::{query, update};
-use shared::types::{Asset, SeriesId};
+use shared::types::{AssetId, SeriesId};
 
 use super::{
-    errors::MarginAccountError,
-    params::{GetMarginAccountParams, GetPositionParams},
+    errors::AccountStateError,
+    params::{GetAccountStateParams, GetPositionParams},
 };
 use crate::{
     assets::asset::{handler::get_handler, params::AssetBalanceOfParams},
     guards::caller_is_not_anonymous,
-    memory::{MARGIN_ACCOUNTS, POSITIONS},
+    memory::{ACCOUNT_STATES, COLLATERAL_ASSETS, POSITIONS},
     types::{
         account::AssetAccount,
-        margin::{MarginAccount, Position},
+        margin::{AccountState, Position},
         user::User,
     },
-    GetMarginAccountResult,
+    GetAccountStateResult,
 };
 
-/// Retrieves the current user's margin account details (query only).
+/// Retrieves the current user's account state (query only).
 ///
 /// This does not refresh balances from external ledgers.
 #[query(guard = "caller_is_not_anonymous")]
-pub fn get_margin_account_query() -> GetMarginAccountResult {
-    let result: Result<MarginAccount, MarginAccountError> = {
+pub fn get_account_state_query() -> GetAccountStateResult {
+    let result: Result<AccountState, AccountStateError> = {
         let user: User = ic_cdk::caller().into();
 
-        MARGIN_ACCOUNTS.with(|accounts| {
+        ACCOUNT_STATES.with(|accounts| {
             accounts
                 .borrow()
                 .get(&user)
                 .cloned()
-                .ok_or(MarginAccountError::NoMarginAccountFound)
+                .ok_or(AccountStateError::NoAccountStateFound)
         })
     };
 
     result.into()
 }
 
-/// Retrieves the current user's margin account details, optionally refreshing balances.
+/// Retrieves the current user's account state, optionally refreshing balances.
 ///
 /// # Arguments
 /// * `params` - Includes an optional `refresh` flag to trigger external ledger checks.
 #[update(guard = "caller_is_not_anonymous")]
-pub async fn get_margin_account(params: GetMarginAccountParams) -> GetMarginAccountResult {
-    let result: Result<MarginAccount, MarginAccountError> = (async {
+pub async fn get_account_state(params: GetAccountStateParams) -> GetAccountStateResult {
+    let result: Result<AccountState, AccountStateError> = (async {
         let user: User = ic_cdk::caller().into();
 
-        let GetMarginAccountParams { refresh } = params;
+        let GetAccountStateParams { refresh } = params;
 
         let refresh = refresh.unwrap_or(false);
 
-        // Always read required_margin from internal state (risk state)
-        let (required_margin_u128, reserved_balances) = MARGIN_ACCOUNTS.with(|accounts| {
-            accounts
-                .borrow()
-                .get(&user)
-                .map(|m| (m.required_margin, m.reserved_balances.clone()))
-                .unwrap_or((0, BTreeMap::new()))
-        });
-
-        // If not refreshing, just return cached state (no await)
+        // If not refreshing, just return cached state
         if !refresh {
-            return MARGIN_ACCOUNTS.with(|accounts| {
+            return ACCOUNT_STATES.with(|accounts| {
                 accounts
                     .borrow()
                     .get(&user)
                     .cloned()
-                    .ok_or(MarginAccountError::NoMarginAccountFound)
+                    .ok_or(AccountStateError::NoAccountStateFound)
             });
         }
 
-        // Refresh balances from ledgers (await)
-        let assets_to_refresh = MARGIN_ACCOUNTS.with(|accounts| {
-            accounts
-                .borrow()
-                .get(&user)
-                .map(|m| m.tracked_assets())
-                .unwrap_or_default()
-        });
+        // Refresh balances from ledgers
+        let collateral_configs = COLLATERAL_ASSETS.with(|assets| assets.borrow().clone());
 
-        let mut balances: BTreeMap<Asset, u128> = BTreeMap::new();
+        let mut fresh_collateral_balances: BTreeMap<AssetId, u128> = BTreeMap::new();
 
-        for asset in assets_to_refresh.iter().cloned() {
-            let handler = get_handler(&asset).map_err(MarginAccountError::Asset)?;
+        for (asset_id, config) in collateral_configs {
+            if !config.is_enabled {
+                continue;
+            }
 
-            let bal_u128 = handler
+            let handler = get_handler(&config.asset).map_err(AccountStateError::Asset)?;
+
+            let balance = handler
                 .balance_of(AssetBalanceOfParams {
-                    asset: &asset,
+                    asset: &config.asset,
                     account: AssetAccount::UserClearing(user),
                 })
                 .await
-                .map_err(MarginAccountError::Asset)?;
+                .map_err(AccountStateError::Asset)?;
 
-            balances.insert(asset, bal_u128);
+            fresh_collateral_balances.insert(asset_id, balance);
         }
 
-        // Persist refreshed balances, but do NOT overwrite required_margin
-        MARGIN_ACCOUNTS.with(|accounts| {
+        // Update the account state in memory
+        let final_state = ACCOUNT_STATES.with(|accounts| {
             let mut accounts = accounts.borrow_mut();
-            let acct = accounts.entry(user).or_insert(MarginAccount {
-                user,
-                balances: BTreeMap::new(),
-                reserved_balances: BTreeMap::new(),
-                required_margin: 0,
-            });
+            let state = accounts
+                .entry(user)
+                .or_insert_with(|| AccountState::new(user));
 
-            acct.balances = balances.clone();
-            acct.required_margin = required_margin_u128;
+            state.collateral_balances = fresh_collateral_balances;
+            // Note: cash_balance_usd and reserved_margin_usd are updated by other processes
+            // (trades, settlement)
+            state.clone()
         });
 
-        Ok(MarginAccount {
-            user,
-            balances,
-            reserved_balances,
-            required_margin: required_margin_u128,
-        })
+        Ok(final_state)
     })
     .await;
 
