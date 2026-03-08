@@ -168,9 +168,6 @@ pub(crate) fn execute_trade_impl(
             .entry(buyer)
             .or_insert_with(|| AccountState::new(buyer));
         buyer_acc.cash_balance_usd -= buyer_cost;
-        if let Some(amt) = buyer_unblock_amount {
-            buyer_acc.reserved_margin_usd = buyer_acc.reserved_margin_usd.saturating_sub(amt);
-        }
         buyer_acc.reserved_margin_usd = target_buyer_reserved;
 
         // Update Seller
@@ -178,9 +175,6 @@ pub(crate) fn execute_trade_impl(
             .entry(seller)
             .or_insert_with(|| AccountState::new(seller));
         seller_acc.cash_balance_usd -= seller_cost;
-        if let Some(amt) = seller_unblock_amount {
-            seller_acc.reserved_margin_usd = seller_acc.reserved_margin_usd.saturating_sub(amt);
-        }
         seller_acc.reserved_margin_usd = target_seller_reserved;
     });
 
