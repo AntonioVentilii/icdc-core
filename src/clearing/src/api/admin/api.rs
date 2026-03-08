@@ -128,15 +128,11 @@ pub async fn withdraw_fund(params: WithdrawFundParams) -> AdminResult<Nat> {
                     plan.status = PlanStatus::Finalised;
                 }
                 Err(e) => {
-                    // Revert deduction (Atomic Rollback)
-                    rollback_fund_deduction_impl(&asset_id, amount, fund_type);
-
-                    // Marks as planned so it can be retried (or kept as executing if we want to be
-                    // stricter) For fund withdrawals, we can allow retries if
-                    // the transfer failed to even start.
-                    plan.status = PlanStatus::Planned;
-                    FUND_WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(request_id, plan));
-
+                    // For fund withdrawals, keep state as Executing since deducting from the
+                    // internal fund (Phase B) already succeeded. This prevents a retry from
+                    // duplicating Phase B. Because the exact identical `idempotency_ns` will be
+                    // provided on retry, the ICRC ledger handler duplicate check makes retrying
+                    // entirely safe.
                     return Err(AdminError::TransferFailed(format!("{:?}", e)));
                 }
             }
@@ -196,18 +192,6 @@ pub(crate) fn deduct_fund_balance_impl(
     })
 }
 
-pub(crate) fn rollback_fund_deduction_impl(asset_id: &AssetId, amount: u128, fund_type: FundType) {
-    let store = match fund_type {
-        FundType::Insurance => &INSURANCE_FUND,
-        FundType::Treasury => &TREASURY,
-    };
-    store.with(|f| {
-        let mut f = f.borrow_mut();
-        let current = f.get(asset_id).cloned().unwrap_or(0);
-        f.insert(asset_id.clone(), current + amount);
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use shared::types::AssetId;
@@ -234,12 +218,11 @@ mod tests {
             assert_eq!(f.borrow().get(&asset_id).cloned().unwrap(), 9_000_000);
         });
 
-        // Step 2: Rollback (simulating transfer failure)
-        rollback_fund_deduction_impl(&asset_id, amount, FundType::Insurance);
-
-        // Internal balance should be restored
+        // Step 2: In the new implementation we deliberately DO NOT rollback
+        // upon transfer error. The internal fund deduction stands and Phase B
+        // is not retried.
         INSURANCE_FUND.with(|f| {
-            assert_eq!(f.borrow().get(&asset_id).cloned().unwrap(), 10_000_000);
+            assert_eq!(f.borrow().get(&asset_id).cloned().unwrap(), 9_000_000);
         });
     }
 
