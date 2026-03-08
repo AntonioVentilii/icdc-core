@@ -37,11 +37,6 @@ use crate::{
 };
 
 pub mod api;
-pub use api::{
-    account::api::*, admin::api::*, collateral::api::*, general::api::*, metrics::api::*,
-    settlement::api::*, trade::api::*,
-};
-
 pub mod assets;
 pub mod guards;
 pub mod memory;
