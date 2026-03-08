@@ -1,6 +1,9 @@
 use candid::Nat;
 use ic_cdk_macros::update;
-use shared::types::{asset::errors::AssetError, AssetId};
+use shared::{
+    constants::USD_DECIMALS,
+    types::{asset::errors::AssetError, AssetId},
+};
 
 use super::{
     errors::{DepositCollateralError, WithdrawCollateralError},
@@ -119,14 +122,24 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
                 let state = accounts
                     .entry(user)
                     .or_insert_with(|| AccountState::new(user));
-                let current = state
-                    .collateral_balances
-                    .get(&asset_id)
-                    .copied()
-                    .unwrap_or(0);
-                state
-                    .collateral_balances
-                    .insert(asset_id.clone(), current + amount_u128);
+
+                if asset_id == "vUSD" {
+                    let amount_usd = if config.decimals > USD_DECIMALS {
+                        (amount_u128 / 10u128.pow((config.decimals - USD_DECIMALS) as u32)) as i128
+                    } else {
+                        (amount_u128 * 10u128.pow((USD_DECIMALS - config.decimals) as u32)) as i128
+                    };
+                    state.cash_balance_usd += amount_usd;
+                } else {
+                    let current = state
+                        .collateral_balances
+                        .get(&asset_id)
+                        .copied()
+                        .unwrap_or(0);
+                    state
+                        .collateral_balances
+                        .insert(asset_id.clone(), current + amount_u128);
+                }
             });
 
             plan.status = PlanStatus::Finalised;
@@ -219,14 +232,25 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             ACCOUNT_STATES.with(|accounts| {
                 let mut accounts = accounts.borrow_mut();
                 if let Some(state) = accounts.get_mut(&user) {
-                    let current = state
-                        .collateral_balances
-                        .get(&asset_id)
-                        .copied()
-                        .unwrap_or(0);
-                    state
-                        .collateral_balances
-                        .insert(asset_id.clone(), current.saturating_sub(amount_u128));
+                    if asset_id == "vUSD" {
+                        let amount_usd = if config.decimals > USD_DECIMALS {
+                            (amount_u128 / 10u128.pow((config.decimals - USD_DECIMALS) as u32))
+                                as i128
+                        } else {
+                            (amount_u128 * 10u128.pow((USD_DECIMALS - config.decimals) as u32))
+                                as i128
+                        };
+                        state.cash_balance_usd -= amount_usd;
+                    } else {
+                        let current = state
+                            .collateral_balances
+                            .get(&asset_id)
+                            .copied()
+                            .unwrap_or(0);
+                        state
+                            .collateral_balances
+                            .insert(asset_id.clone(), current.saturating_sub(amount_u128));
+                    }
                 }
             });
 
@@ -263,14 +287,27 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                         ACCOUNT_STATES.with(|accounts| {
                             let mut accounts = accounts.borrow_mut();
                             if let Some(state) = accounts.get_mut(&user) {
-                                let current = state
-                                    .collateral_balances
-                                    .get(&asset_id)
-                                    .copied()
-                                    .unwrap_or(0);
-                                state
-                                    .collateral_balances
-                                    .insert(asset_id.clone(), current + reserved);
+                                if asset_id == "vUSD" {
+                                    let reserved_usd = if config.decimals > USD_DECIMALS {
+                                        (reserved
+                                            / 10u128.pow((config.decimals - USD_DECIMALS) as u32))
+                                            as i128
+                                    } else {
+                                        (reserved
+                                            * 10u128.pow((USD_DECIMALS - config.decimals) as u32))
+                                            as i128
+                                    };
+                                    state.cash_balance_usd += reserved_usd;
+                                } else {
+                                    let current = state
+                                        .collateral_balances
+                                        .get(&asset_id)
+                                        .copied()
+                                        .unwrap_or(0);
+                                    state
+                                        .collateral_balances
+                                        .insert(asset_id.clone(), current + reserved);
+                                }
                             }
                         });
                     }

@@ -150,3 +150,9 @@ pub fn update_collateral_asset(params: UpdateCollateralAssetParams) {
 pub fn list_collateral_assets() -> Vec<CollateralAssetConfig> {
     COLLATERAL_ASSETS.with(|assets| assets.borrow().values().cloned().collect())
 }
+
+/// Debug: returns the principal of the registry canister.
+#[query(guard = "caller_is_controller")]
+pub fn debug_get_registry_canister() -> Principal {
+    REGISTRY_CANISTER.with(|r| *r.borrow())
+}

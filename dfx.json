@@ -10,6 +10,11 @@
 			"package": "registry",
 			"candid": "src/registry/registry.did"
 		},
+		"minter": {
+			"type": "rust",
+			"package": "minter",
+			"candid": "src/minter/minter.did"
+		},
 		"ledger": {
 			"type": "custom",
 			"candid": "https://github.com/dfinity/ic/releases/download/ledger-suite-icrc-2025-06-19/ledger.did",

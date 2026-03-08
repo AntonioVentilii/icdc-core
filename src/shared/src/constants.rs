@@ -21,7 +21,9 @@ pub const ICP_LEDGER: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
 /// Principal ID of the ckUSDC Ledger canister
 pub const CKUSDC_LEDGER: &str = "yfumr-cyaaa-aaaar-qaela-cai";
 /// Principal ID of the virtual USD (vUSD) Ledger canister (Internal ghost token)
-pub const VUSD_LEDGER: &str = "vust-aaaaa-aaaag-qacka-cai";
+pub const VUSD_LEDGER: &str = "ap6gq-taaaa-aaaae-acsaq-cai";
+/// Principal ID of the virtual USD (vUSD) Index canister
+pub const VUSD_INDEX: &str = "x3qir-tyaaa-aaaae-acr6a-cai";
 
 /// The canonical number of decimals for internal USD accounting.
 pub const USD_DECIMALS: u8 = 6;
