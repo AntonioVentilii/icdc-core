@@ -25,12 +25,13 @@ type AssetError = variant {
 	TransferError : text;
 	InsufficientBalance : record { balance : nat; required : nat };
 	MathOverflow;
+	InvalidAssetId : text;
 	CallError : record { method : text; code : int32; message : text };
 	InvalidAssetForHandler;
 	UnsupportedAsset
 };
 type CancelLimitOrderParams = record { order_id : text };
-type CanonicalCryptoUnit = variant { Btc; Eth; Icp };
+type CanonicalCryptoUnit = variant { Btc; Eth; Icp; Usdc; Usdt };
 type CollateralAssetConfig = record {
 	decimals : nat8;
 	haircut_bps : nat16;
@@ -321,7 +322,8 @@ service : {
 	submit_market_order : (SubmitMarketOrderParams) -> (SubmitMatchedTradeResult);
 	// Submits a matched trade from an exchange for clearing.
 	//
-	// TODO: until we implement an allowed list of exchange canisters, this is gated to controllers
+	// NOTE: Access is currently restricted to authorized exchange intermediaries
+	// (represented by canister controllers in this version).
 	submit_matched_trade : (SubmitMatchedTradeParams) -> (
 		SubmitMatchedTradeResult
 	);

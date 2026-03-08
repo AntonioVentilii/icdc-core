@@ -15,7 +15,7 @@ type AddSeriesParams = record {
 	oracle_source : text
 };
 type AddSeriesResult = variant { Ok : text; Err : SeriesError };
-type CanonicalCryptoUnit = variant { Btc; Eth; Icp };
+type CanonicalCryptoUnit = variant { Btc; Eth; Icp; Usdc; Usdt };
 type DecimalValue = record { decimals : nat8; value : nat };
 type Description = record {
 	html : opt text;
