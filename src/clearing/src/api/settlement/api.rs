@@ -11,7 +11,7 @@ use shared::{
 
 use super::{errors::SettlementError, params::SettleSeriesParams, results::SettleSeriesResult};
 use crate::{
-    guards::caller_is_not_anonymous,
+    guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
         ACCOUNT_STATES, COLLATERAL_ASSETS, CONFIG, INSURANCE_FUND, POSITIONS, REGISTRY_CANISTER,
         SERIES, SETTLEMENT_PLANS, TREASURY,
@@ -19,7 +19,10 @@ use crate::{
     payoffs::{fees::calculate_settlement_fee, get_settlement_value},
     types::{
         errors::CommonError,
-        plans::{PlanStatus, SettlementPlan, SettlementPlanParams, SettlementPosition},
+        plans::{
+            PlanStatus, SettlementPlan, SettlementPlanParams, SettlementPosition,
+            SettlementStatusView,
+        },
     },
 };
 
@@ -36,10 +39,88 @@ use crate::{
 /// [`SettleSeriesResult::Processing`]. The caller must repeatedly call `settle_series` with the
 /// same parameters until it returns [`SettleSeriesResult::Ok`].
 ///
-/// This method is gated to canister controllers or the designated [`oracle_principal`] for the
-/// series. It is intended to be called by an off-chain oracle or automation.
+/// **Authorization:** Every call is gated to canister controllers or the designated oracle for
+/// the series. Unauthorized callers are rejected even if a plan already exists.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
+    let caller = ic_cdk::caller();
+
+    // ---------- Full authorization on EVERY call ----------
+    // Controllers are always authorized.
+    if !is_controller(&caller) {
+        let oracle_source = SERIES.with(|s| {
+            s.borrow()
+                .get(&params.series_id)
+                .map(|ser| ser.oracle_source.clone())
+        });
+
+        // If the series no longer exists, check if there is an active plan
+        // (the series is removed on finalization but the plan may still be
+        // in-flight).  Fall back to the plan's oracle_source.
+        let oracle_source = match oracle_source {
+            Some(src) => src,
+            None => {
+                let plan_oracle = SETTLEMENT_PLANS.with(|m| {
+                    m.borrow()
+                        .get(&params.series_id)
+                        .map(|p| p.oracle_source.clone())
+                });
+                match plan_oracle {
+                    Some(src) => src,
+                    None => {
+                        return SettleSeriesResult::Err(SettlementError::Common(
+                            CommonError::Unauthorized,
+                        ));
+                    }
+                }
+            }
+        };
+
+        let registry_canister = REGISTRY_CANISTER.with(|r| *r.borrow());
+        if registry_canister == Principal::anonymous() {
+            return SettleSeriesResult::Err(SettlementError::Common(CommonError::RegistryNotSet));
+        }
+
+        let is_authorized: Result<(bool,), _> = ic_cdk::call(
+            registry_canister,
+            "is_oracle_authorized",
+            (oracle_source, caller),
+        )
+        .await;
+
+        match is_authorized {
+            Ok((true,)) => {} // authorized
+            Ok((false,)) => {
+                return SettleSeriesResult::Err(SettlementError::Common(CommonError::Unauthorized));
+            }
+            Err((code, msg)) => {
+                return SettleSeriesResult::Err(SettlementError::Common(CommonError::Internal(
+                    format!("Registry call failed: {:?} - {}", code, msg),
+                )));
+            }
+        }
+    }
+
+    settle_series_inner(params).await
+}
+
+/// Returns the full settlement plan including per-position accounting details (admin only).
+#[query(guard = "caller_is_controller")]
+pub fn get_settlement_plan(series_id: SeriesId) -> Option<SettlementPlan> {
+    SETTLEMENT_PLANS.with(|m| m.borrow().get(&series_id).cloned())
+}
+
+/// Returns the public settlement progress for a derivative series without exposing user positions.
+#[query(guard = "caller_is_not_anonymous")]
+pub fn get_settlement_status(series_id: SeriesId) -> Option<SettlementStatusView> {
+    SETTLEMENT_PLANS.with(|m| m.borrow().get(&series_id).map(SettlementStatusView::from))
+}
+
+/// Internal settlement logic — caller has already been authorized.
+///
+/// This function is also used by the timer-based self-resumption so that
+/// background processing does not re-enter the IC update guard.
+pub(crate) async fn settle_series_inner(params: SettleSeriesParams) -> SettleSeriesResult {
     let (insurance_fund_fee_ratio, protocol_fee_ratio) = CONFIG.with(|c| {
         let c = c.borrow();
         (c.insurance_fund_fee_ratio, c.protocol_fee_ratio)
@@ -51,47 +132,9 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             settlement_price,
         } = params;
 
-        let caller = ic_cdk::caller();
-
-        // ---------- Authorization & Plan Retrieval ----------
-        // 1. Check if a plan already exists
+        // ---------- Phase A: build or resume plan ----------
         let existing_plan = SETTLEMENT_PLANS.with(|m| m.borrow().get(&series_id).cloned());
 
-        // 2. Perform authorization check
-        // RELAXED AUTH: Authorization is only required to CREATE a plan.
-        // Once a plan is authorized and created, anyone can "pump" it.
-        if existing_plan.is_none() && !is_controller(&caller) {
-            let oracle_source = SERIES.with(|s| {
-                s.borrow()
-                    .get(&series_id)
-                    .map(|ser| ser.oracle_source.clone())
-                    .ok_or(SettlementError::Common(CommonError::Unauthorized))
-            })?;
-
-            let registry_canister = REGISTRY_CANISTER.with(|r| *r.borrow());
-            if registry_canister == Principal::anonymous() {
-                return Err(SettlementError::Common(CommonError::RegistryNotSet));
-            }
-
-            let (is_authorized,): (bool,) = ic_cdk::call(
-                registry_canister,
-                "is_oracle_authorized",
-                (oracle_source, caller),
-            )
-            .await
-            .map_err(|(code, msg)| {
-                SettlementError::Common(CommonError::Internal(format!(
-                    "Registry call failed: {:?} - {}",
-                    code, msg
-                )))
-            })?;
-
-            if !is_authorized {
-                return Err(SettlementError::Common(CommonError::Unauthorized));
-            }
-        }
-
-        // ---------- Phase A: build or resume plan ----------
         let mut plan = if let Some(existing) = existing_plan {
             if existing.status == PlanStatus::Finalised {
                 return Ok(SettleSeriesResult::ok());
@@ -190,8 +233,9 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
             Ok(SettleSeriesResult::ok())
         } else {
-            // Automatic self-resumption: schedule a timer to continue processing in the background.
-            // This ensures robustness if the external caller goes offline.
+            // Automatic self-resumption: schedule a timer to continue processing
+            // in the background. Calls settle_series_inner directly to bypass the
+            // IC update guard (the original caller was already authorized).
             let params_clone = SettleSeriesParams {
                 series_id: series_id.clone(),
                 settlement_price: settlement_price.clone(),
@@ -199,7 +243,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
             set_timer(Duration::from_millis(50), move || {
                 ic_cdk::spawn(async move {
-                    let _ = settle_series(params_clone).await;
+                    let _ = settle_series_inner(params_clone).await;
                 });
             });
 
@@ -212,12 +256,6 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
         Ok(res) => res,
         Err(e) => SettleSeriesResult::Err(e),
     }
-}
-
-/// Returns the active settlement plan for a series, if any.
-#[query]
-pub fn get_settlement_plan(series_id: SeriesId) -> Option<SettlementPlan> {
-    SETTLEMENT_PLANS.with(|m| m.borrow().get(&series_id).cloned())
 }
 
 /// Core synchronous logic for building a settlement plan and removing positions.

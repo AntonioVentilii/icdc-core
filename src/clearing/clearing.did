@@ -195,6 +195,17 @@ type SettlementPosition = record {
 	reserved_margin_usd : nat;
 	cashflow_usd : int
 };
+type SettlementStatusView = record {
+	status : PlanStatus;
+	series_id : text;
+	fee_usd : nat;
+	accounting_cursor : nat64;
+	insurance_fee_usd : nat;
+	accounting_applied : bool;
+	oracle_source : text;
+	settlement_price : Price;
+	total_positions : nat64
+};
 type Side = variant { Buy; Sell };
 type Stats = record {
 	total_users : nat64;
@@ -303,8 +314,10 @@ service : {
 	get_position : (GetPositionParams) -> (opt Position) query;
 	// Retrieves all open positions for the caller.
 	get_positions : () -> (vec record { text; Position }) query;
-	// Returns the active settlement plan for a series, if any.
+	// Returns the full settlement plan including per-position accounting details (admin only).
 	get_settlement_plan : (text) -> (opt SettlementPlan) query;
+	// Returns the public settlement progress for a derivative series without exposing user positions.
+	get_settlement_status : (text) -> (opt SettlementStatusView) query;
 	// Retrieves the trade history (executed trades) for the caller.
 	get_trade_history : () -> (vec Event) query;
 	http_request : (HttpRequest) -> (HttpResponse) query;
@@ -338,8 +351,8 @@ service : {
 	// [`SettleSeriesResult::Processing`]. The caller must repeatedly call `settle_series` with the
 	// same parameters until it returns [`SettleSeriesResult::Ok`].
 	//
-	// This method is gated to canister controllers or the designated [`oracle_principal`] for the
-	// series. It is intended to be called by an off-chain oracle or automation.
+	// **Authorization:** Every call is gated to canister controllers or the designated oracle for
+	// the series. Unauthorized callers are rejected even if a plan already exists.
 	settle_series : (SettleSeriesParams) -> (SettleSeriesResult);
 	// Exports internal state as a structured `Stats` object.
 	//

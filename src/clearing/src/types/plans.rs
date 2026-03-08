@@ -320,3 +320,33 @@ impl FundWithdrawalPlan {
         })
     }
 }
+
+/// Public settlement progress for a derivative series.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct SettlementStatusView {
+    pub series_id: SeriesId,
+    pub settlement_price: Price,
+    pub oracle_source: String,
+    pub fee_usd: u128,
+    pub insurance_fee_usd: u128,
+    pub accounting_cursor: usize,
+    pub accounting_applied: bool,
+    pub status: PlanStatus,
+    pub total_positions: usize,
+}
+
+impl From<&SettlementPlan> for SettlementStatusView {
+    fn from(plan: &SettlementPlan) -> Self {
+        Self {
+            series_id: plan.series_id.clone(),
+            settlement_price: plan.settlement_price.clone(),
+            oracle_source: plan.oracle_source.clone(),
+            fee_usd: plan.fee_usd,
+            insurance_fee_usd: plan.insurance_fee_usd,
+            accounting_cursor: plan.accounting_cursor,
+            accounting_applied: plan.accounting_applied,
+            status: plan.status.clone(),
+            total_positions: plan.positions.len(),
+        }
+    }
+}
