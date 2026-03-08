@@ -40,7 +40,6 @@ impl IcrcHandler {
     }
 
     /// Retrieves the transfer fee of an ICRC ledger.
-    #[allow(dead_code)]
     pub async fn get_fee(&self, asset: &Asset) -> Result<u128, AssetError> {
         let ledger_id = asset.as_icrc()?;
 

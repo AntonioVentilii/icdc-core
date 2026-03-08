@@ -12,7 +12,6 @@ pub enum ExternalAssetAccount {
         subaccount: Option<[u8; 32]>,
     },
     /// An EVM address.
-    #[allow(dead_code)]
     Evm(String),
 }
 
