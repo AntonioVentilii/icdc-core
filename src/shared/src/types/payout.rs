@@ -28,7 +28,7 @@ impl PayoutUnit {
         PayoutUnit::Fiat(FiatUnit::Usd)
     }
 
-    /// Converts the economic unit to its canonical ICDP token rail.
+    /// Converts the economic unit to its canonical token rail.
     pub fn to_asset(&self) -> Result<Asset, AssetError> {
         match self {
             PayoutUnit::Fiat(FiatUnit::Usd) => Principal::from_text(VUSD_LEDGER)
