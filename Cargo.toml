@@ -1,5 +1,6 @@
 [workspace]
 members = ["src/clearing", "src/minter", "src/registry", "src/shared"]
+version = "0.0.2"
 resolver = "2"
 
 [workspace.dependencies]
