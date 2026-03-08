@@ -16,7 +16,7 @@ use crate::{
     },
     payoffs::get_settlement_value,
     types::{
-        account::LedgerAccount,
+        account::AssetAccount,
         errors::CommonError,
         plans::{PlanStatus, SettlementPlan, SettlementPlanParams},
         user::User,
@@ -209,8 +209,8 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             let res = handler
                 .transfer(AssetTransferParams {
                     asset: &plan.settlement_asset,
-                    from: LedgerAccount::UserClearing(user),
-                    to: LedgerAccount::CanisterMain,
+                    from: AssetAccount::UserClearing(user),
+                    to: AssetAccount::CanisterMain,
                     amount: AssetAmount::Fixed(amount_u128),
                     created_at_time_ns,
                 })
@@ -264,8 +264,8 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             let res = handler
                 .transfer(AssetTransferParams {
                     asset: &plan.settlement_asset,
-                    from: LedgerAccount::CanisterMain,
-                    to: LedgerAccount::UserClearing(user),
+                    from: AssetAccount::CanisterMain,
+                    to: AssetAccount::UserClearing(user),
                     amount: AssetAmount::Fixed(amount_u128),
                     created_at_time_ns,
                 })

@@ -26,6 +26,17 @@
 
 ---
 
+### Multi-Chain Integration (EVM)
+
+- [x] **Chain Fusion Integration**: Support for `ChainFusionSigner` to derive and sign on sovereign EVM chains.
+- [x] **EVM RPC Bridge**: Integration with `evm-rpc-canister` for multi-chain state reads and transaction relay.
+- [x] **Cached Address Derivation**: Persistent caching of principal-to-EVM addresses to minimize cross-canister overhead.
+- [x] **EVM Asset Types**: Support for ETH, USDC, and USDT across Ethereum, Base, and Polygon.
+- [ ] **Unified API**: `get_evm_address` endpoint for users to discover their canister-controlled deposit addresses.
+- [ ] **EVM Settlement Execution**: Finalise raw transaction building and signing for automated payouts to EVM addresses.
+
+---
+
 ## 🚧 In Progress / Missing (High Priority)
 
 ### Access Control & Security

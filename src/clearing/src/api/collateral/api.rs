@@ -25,7 +25,7 @@ use crate::{
     guards::caller_is_not_anonymous,
     memory::{DEPOSIT_PLANS, MARGIN_ACCOUNTS, WITHDRAWAL_PLANS},
     types::{
-        account::LedgerAccount,
+        account::AssetAccount,
         margin::MarginAccount,
         plans::{DepositPlan, DepositPlanParams, PlanStatus, WithdrawalPlan, WithdrawalPlanParams},
         user::User,
@@ -162,9 +162,9 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
             let res = handler
                 .transfer_from(AssetTransferFromParams {
                     asset: &asset,
-                    spender: LedgerAccount::CanisterMain,
-                    from: LedgerAccount::External(user.principal(), None),
-                    to: LedgerAccount::UserClearing(user),
+                    spender: AssetAccount::CanisterMain,
+                    from: AssetAccount::external_principal(user.principal()),
+                    to: AssetAccount::UserClearing(user),
                     amount: AssetAmount::Fixed(amount_u128),
                     created_at_time_ns: plan.idempotency_ns.to_created_at_time_ns(),
                 })
@@ -321,8 +321,8 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             let res = handler
                 .transfer(AssetTransferParams {
                     asset: &asset,
-                    from: LedgerAccount::UserClearing(user),
-                    to: LedgerAccount::External(plan.to_account.0, plan.to_account.1),
+                    from: AssetAccount::UserClearing(user),
+                    to: AssetAccount::external_icrc(plan.to_account.0, plan.to_account.1),
                     amount: AssetAmount::Fixed(amount_u128),
                     created_at_time_ns: plan.idempotency_ns.to_created_at_time_ns(),
                 })

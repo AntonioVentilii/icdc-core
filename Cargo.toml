@@ -15,3 +15,11 @@ hex = "0.4"
 ic-cdk = "0.17"
 num-traits = "0.2.19"
 ic-cdk-macros = "0.17"
+
+[workspace.lints.rust]
+warnings = "deny"
+unused_attributes = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+allow_attributes = "warn"

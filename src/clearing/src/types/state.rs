@@ -37,11 +37,17 @@ pub struct PositionProof {
 pub struct ClearingConfig {
     /// The global insurance fund fee ratio in basis points (1 bp = 0.01%).
     pub insurance_fund_fee_ratio: u16,
+    /// The principal of the EVM RPC canister.
+    pub evm_rpc: Principal,
+    /// The principal of the Chain Fusion Signer canister.
+    pub signer_canister: Principal,
 }
 impl Default for ClearingConfig {
     fn default() -> Self {
         Self {
             insurance_fund_fee_ratio: DEFAULT_INSURANCE_FEE_RATIO,
+            evm_rpc: Principal::anonymous(),
+            signer_canister: Principal::anonymous(),
         }
     }
 }
@@ -81,4 +87,6 @@ pub struct StableState {
     pub insurance_fund: BTreeMap<shared::types::Asset, u128>,
     /// Accumulated fees in the treasury (main fund), per asset.
     pub treasury: BTreeMap<shared::types::Asset, u128>,
+    /// Cached EVM addresses derived for principals.
+    pub evm_addresses: BTreeMap<Principal, String>,
 }

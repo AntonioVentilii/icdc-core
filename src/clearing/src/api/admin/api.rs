@@ -12,7 +12,7 @@ use crate::{
     },
     guards::caller_is_controller,
     memory::{CONFIG, INSURANCE_FUND, REGISTRY_CANISTER, TREASURY},
-    types::{account::LedgerAccount, state::ClearingConfig},
+    types::{account::AssetAccount, state::ClearingConfig},
 };
 
 /// Sets the principal of the Series Registry canister.
@@ -99,8 +99,8 @@ pub async fn withdraw_fund(params: WithdrawFundParams) -> AdminResult<Nat> {
     let res = handler
         .transfer(AssetTransferParams {
             asset: &asset,
-            from: LedgerAccount::CanisterMain,
-            to: LedgerAccount::External(to, None),
+            from: AssetAccount::CanisterMain,
+            to: AssetAccount::external_principal(to),
             amount: AssetAmount::Fixed(amount),
             created_at_time_ns: Some(ic_cdk::api::time()),
         })

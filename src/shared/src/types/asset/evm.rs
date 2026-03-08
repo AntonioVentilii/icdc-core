@@ -107,3 +107,8 @@ impl fmt::Display for ErcToken {
         write!(f, "{}-{}", self.token_address, self.chain_id)
     }
 }
+
+pub enum EvmAssetRef<'a> {
+    Native(&'a NativeEvmAsset),
+    Erc20(&'a ErcToken),
+}

@@ -5,7 +5,7 @@ use crate::{
     constants::{CKUSDC_LEDGER, ICP_LEDGER},
     types::{
         asset::errors::AssetError,
-        evm::{Chain, ErcToken, NativeEvmAsset},
+        evm::{Chain, ErcToken, EvmAssetRef, NativeEvmAsset},
         helpers::{native_evm_asset, usdc_token, usdt_token},
     },
 };
@@ -33,22 +33,17 @@ impl Asset {
         }
     }
 
-    /// Returns the native EVM asset if this asset represents native gas.
-    pub fn as_native_evm(&self) -> Result<&NativeEvmAsset, AssetError> {
+    /// Returns a reference to the underlying EVM asset, whether it's a native asset or an ERC
+    /// token.
+    pub fn as_evm(&self) -> Result<EvmAssetRef<'_>, AssetError> {
         match self {
-            Self::NativeEvm(asset) => Ok(asset),
-            _ => Err(AssetError::InvalidAssetForHandler),
-        }
-    }
-
-    /// Returns the ERC-20 token if this asset is an ERC-20 asset.
-    pub fn as_erc20(&self) -> Result<&ErcToken, AssetError> {
-        match self {
-            Self::Erc20(token) => Ok(token),
+            Self::NativeEvm(a) => Ok(EvmAssetRef::Native(a)),
+            Self::Erc20(t) => Ok(EvmAssetRef::Erc20(t)),
             _ => Err(AssetError::InvalidAssetForHandler),
         }
     }
 }
+
 /// Supported assets for settlement of derivative contracts.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SettlementAsset {

@@ -12,7 +12,7 @@ use crate::{
     guards::caller_is_not_anonymous,
     memory::{MARGIN_ACCOUNTS, POSITIONS},
     types::{
-        account::LedgerAccount,
+        account::AssetAccount,
         margin::{MarginAccount, Position},
         user::User,
     },
@@ -89,7 +89,7 @@ pub async fn get_margin_account(params: GetMarginAccountParams) -> GetMarginAcco
             let bal_u128 = handler
                 .balance_of(AssetBalanceOfParams {
                     asset: &asset,
-                    account: LedgerAccount::UserClearing(user),
+                    account: AssetAccount::UserClearing(user),
                 })
                 .await
                 .map_err(MarginAccountError::Asset)?;

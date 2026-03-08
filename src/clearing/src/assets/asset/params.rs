@@ -1,13 +1,13 @@
 use shared::types::Asset;
 
-use crate::{assets::types::AssetAmount, types::account::LedgerAccount};
+use crate::{assets::types::AssetAmount, types::account::AssetAccount};
 
 /// Parameters for retrieving an asset balance.
 pub struct AssetBalanceOfParams<'a> {
     /// The asset to check the balance for.
     pub asset: &'a Asset,
     /// The account to check the balance of.
-    pub account: LedgerAccount,
+    pub account: AssetAccount,
 }
 
 /// Parameters for a standard asset transfer.
@@ -15,9 +15,9 @@ pub struct AssetTransferParams<'a> {
     /// The asset to transfer.
     pub asset: &'a Asset,
     /// The source account.
-    pub from: LedgerAccount,
+    pub from: AssetAccount,
     /// The destination account.
-    pub to: LedgerAccount,
+    pub to: AssetAccount,
     /// The amount to transfer.
     pub amount: AssetAmount,
     /// Optional timestamp in nanoseconds for ledger idempotency.
@@ -29,11 +29,11 @@ pub struct AssetTransferFromParams<'a> {
     /// The asset to transfer.
     pub asset: &'a Asset,
     /// The account with the allowance (typically the canister).
-    pub spender: LedgerAccount,
+    pub spender: AssetAccount,
     /// The source account (owner of the funds).
-    pub from: LedgerAccount,
+    pub from: AssetAccount,
     /// The destination account.
-    pub to: LedgerAccount,
+    pub to: AssetAccount,
     /// The amount to transfer.
     pub amount: AssetAmount,
     /// Optional timestamp in nanoseconds for ledger idempotency.

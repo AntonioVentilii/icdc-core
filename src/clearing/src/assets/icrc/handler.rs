@@ -15,7 +15,7 @@ use crate::{
         types::AssetAmount,
     },
     traits::ClearingAccountExt,
-    types::account::LedgerAccount,
+    types::account::{AssetAccount, ExternalAssetAccount},
 };
 
 /// Implementation of [`AssetHandler`] for ICRC-1 and ICRC-2 compatible ledgers.
@@ -59,9 +59,9 @@ impl IcrcHandler {
     pub async fn transfer(&self, params: AssetTransferParams<'_>) -> Result<u128, AssetError> {
         let ledger_id = params.asset.as_icrc()?;
 
-        let from_account = self.resolve_account(params.from);
+        let from_account = self.resolve_account(params.from)?;
 
-        let to_account = self.resolve_account(params.to);
+        let to_account = self.resolve_account(params.to)?;
 
         let AssetAmount::Fixed(amount_u128) = params.amount;
 
@@ -99,11 +99,11 @@ impl IcrcHandler {
     ) -> Result<u128, AssetError> {
         let ledger_id = params.asset.as_icrc()?;
 
-        let spender_account = self.resolve_account(params.spender);
+        let spender_account = self.resolve_account(params.spender)?;
 
-        let from_account = self.resolve_account(params.from);
+        let from_account = self.resolve_account(params.from)?;
 
-        let to_account = self.resolve_account(params.to);
+        let to_account = self.resolve_account(params.to)?;
 
         let AssetAmount::Fixed(amount_u128) = params.amount;
 
@@ -135,15 +135,24 @@ impl IcrcHandler {
         }
     }
 
-    /// Resolves a [`LedgerAccount`] into a concrete ICRC [`Account`].
-    fn resolve_account(&self, account: LedgerAccount) -> Account {
+    /// Resolves a [`AssetAccount`] into a concrete [`Account`].
+    fn resolve_account(&self, account: AssetAccount) -> Result<Account, AssetError> {
         match account {
-            LedgerAccount::UserClearing(u) => u.clearing_account(),
-            LedgerAccount::CanisterMain => Account {
+            AssetAccount::UserClearing(u) => Ok(u.clearing_account()),
+            AssetAccount::CanisterMain => Ok(Account {
                 owner: ic_cdk::id(),
                 subaccount: None,
-            },
-            LedgerAccount::External(owner, subaccount) => Account { owner, subaccount },
+            }),
+            AssetAccount::External(ExternalAssetAccount::Principal(principal)) => Ok(Account {
+                owner: principal,
+                subaccount: None,
+            }),
+            AssetAccount::External(ExternalAssetAccount::Icrc { owner, subaccount }) => {
+                Ok(Account { owner, subaccount })
+            }
+            AssetAccount::External(ExternalAssetAccount::Evm(_)) => {
+                Err(AssetError::InvalidAssetForHandler)
+            }
         }
     }
 }
