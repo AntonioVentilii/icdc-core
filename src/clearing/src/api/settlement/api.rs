@@ -138,12 +138,13 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             for (user, net_qty, _) in positions_to_settle.iter().copied() {
                 let payoff_u128 = get_settlement_value(&ser, &settlement_price, net_qty);
 
-                let i_fee = crate::payoffs::fees::calculate_insurance_fee(
+                let i_fee = crate::payoffs::fees::calculate_settlement_fee(
                     payoff_u128,
                     insurance_fund_fee_ratio,
                 );
+
                 let p_fee =
-                    crate::payoffs::fees::calculate_insurance_fee(payoff_u128, protocol_fee_ratio);
+                    crate::payoffs::fees::calculate_settlement_fee(payoff_u128, protocol_fee_ratio);
 
                 total_insurance_fee += i_fee;
                 total_protocol_fee += p_fee;
