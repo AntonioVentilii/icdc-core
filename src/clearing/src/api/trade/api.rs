@@ -113,8 +113,9 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
         }
 
         let order = LIMIT_ORDERS.with(|m| {
-            m.borrow_mut()
-                .remove(&matching_order_id)
+            m.borrow()
+                .get(&matching_order_id)
+                .cloned()
                 .ok_or(TradeError::OrderNotFound(matching_order_id.clone()))
         })?;
 
@@ -124,7 +125,7 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
         };
 
         internal_execute_trade(ExecuteTradeParams {
-            trade_id,
+            trade_id: trade_id.clone(),
             series_id: order.series_id,
             buyer,
             seller,
@@ -133,7 +134,14 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
             buyer_unblock_amount: b_unblock,
             seller_unblock_amount: s_unblock,
         })
-        .await
+        .await?;
+
+        // Only remove the order after successful execution
+        LIMIT_ORDERS.with(|m| {
+            m.borrow_mut().remove(&matching_order_id);
+        });
+
+        Ok(true)
     })
     .await;
 

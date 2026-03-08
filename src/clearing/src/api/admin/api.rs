@@ -58,6 +58,7 @@ pub fn get_funds() -> GetFundsResult {
 pub async fn withdraw_fund(params: WithdrawFundParams) -> AdminResult<Nat> {
     let res: Result<Nat, AdminError> = (async {
         let WithdrawFundParams {
+            request_id,
             fund_type,
             asset_id,
             amount,
@@ -73,59 +74,92 @@ pub async fn withdraw_fund(params: WithdrawFundParams) -> AdminResult<Nat> {
         })?;
 
         let asset = config.asset;
-
         let store = match fund_type {
             FundType::Insurance => &INSURANCE_FUND,
             FundType::Treasury => &TREASURY,
         };
 
-        // 1. Check and deduct balance
-        store.with(|f| {
-            let mut f = f.borrow_mut();
-            let current = f.get(&asset_id).cloned().unwrap_or(0);
-            if current < amount {
-                return Err(AdminError::InsufficientFunds);
-            }
-            f.insert(asset_id.clone(), current - amount);
-            Ok(())
-        })?;
+        // ---------- Phase A: Build or resume plan ----------
+        let mut plan = crate::types::plans::FundWithdrawalPlan::get_or_create(
+            crate::types::plans::FundWithdrawalPlanParams {
+                request_id: request_id.clone(),
+                fund_type,
+                asset_id: asset_id.clone(),
+                amount,
+                to,
+            },
+        );
 
-        // 2. Perform ledger transfer
-        let handler = match get_handler(&asset) {
-            Ok(h) => h,
-            Err(e) => {
-                // Revert deduction
-                store.with(|f| {
-                    let mut f = f.borrow_mut();
-                    let current = f.get(&asset_id).cloned().unwrap_or(0);
-                    f.insert(asset_id.clone(), current + amount);
-                });
-                return Err(AdminError::TransferFailed(format!("{:?}", e)));
-            }
-        };
-
-        let transfer_res = handler
-            .transfer(AssetTransferParams {
-                asset: &asset,
-                from: AssetAccount::CanisterMain,
-                to: AssetAccount::external_principal(to),
-                amount: AssetAmount::Fixed(amount),
-                created_at_time_ns: Some(ic_cdk::api::time()),
-            })
-            .await;
-
-        match transfer_res {
-            Ok(block) => Ok(Nat::from(block)),
-            Err(e) => {
-                // Revert deduction
-                store.with(|f| {
-                    let mut f = f.borrow_mut();
-                    let current = f.get(&asset_id).cloned().unwrap_or(0);
-                    f.insert(asset_id, current + amount);
-                });
-                Err(AdminError::TransferFailed(format!("{:?}", e)))
-            }
+        if plan.status == crate::types::plans::PlanStatus::Finalised {
+            return plan
+                .receipt
+                .map(|r| r.block_index())
+                .ok_or(AdminError::TransferFailed("No receipt found".to_string()));
         }
+
+        // ---------- Phase B: Deduct fund balance (internal) ----------
+        if plan.status == crate::types::plans::PlanStatus::Planned {
+            store.with(|f| {
+                let mut f = f.borrow_mut();
+                let current = f.get(&asset_id).cloned().unwrap_or(0);
+                if current < amount {
+                    return Err(AdminError::InsufficientFunds);
+                }
+                f.insert(asset_id.clone(), current - amount);
+                Ok(())
+            })?;
+
+            plan.status = crate::types::plans::PlanStatus::Executing;
+            crate::memory::FUND_WITHDRAWAL_PLANS
+                .with(|m| m.borrow_mut().insert(request_id.clone(), plan.clone()));
+        }
+
+        // ---------- Phase C: Execute ledger transfer ----------
+        if plan.receipt.is_none() {
+            let handler =
+                get_handler(&asset).map_err(|e| AdminError::TransferFailed(format!("{:?}", e)))?;
+
+            let transfer_res = handler
+                .transfer(AssetTransferParams {
+                    asset: &asset,
+                    from: AssetAccount::CanisterMain,
+                    to: AssetAccount::external_principal(to),
+                    amount: AssetAmount::Fixed(amount),
+                    created_at_time_ns: plan.idempotency_ns.to_created_at_time_ns(),
+                })
+                .await;
+
+            match transfer_res {
+                Ok(block) => {
+                    plan.receipt = Some(crate::types::payment::PaymentReceipt::IcrcBlockIndex(
+                        Nat::from(block),
+                    ));
+                    plan.status = crate::types::plans::PlanStatus::Finalised;
+                }
+                Err(e) => {
+                    // Revert deduction
+                    store.with(|f| {
+                        let mut f = f.borrow_mut();
+                        let current = f.get(&asset_id).cloned().unwrap_or(0);
+                        f.insert(asset_id, current + amount);
+                    });
+
+                    // Marks as planned so it can be retried (or kept as executing if we want to be
+                    // stricter) For fund withdrawals, we can allow retries if
+                    // the transfer failed to even start.
+                    plan.status = crate::types::plans::PlanStatus::Planned;
+                    crate::memory::FUND_WITHDRAWAL_PLANS
+                        .with(|m| m.borrow_mut().insert(request_id, plan));
+
+                    return Err(AdminError::TransferFailed(format!("{:?}", e)));
+                }
+            }
+
+            crate::memory::FUND_WITHDRAWAL_PLANS
+                .with(|m| m.borrow_mut().insert(request_id, plan.clone()));
+        }
+
+        Ok(plan.receipt.unwrap().block_index())
     })
     .await;
 

@@ -10,7 +10,7 @@ use shared::{
 use crate::types::{
     event::Event,
     margin::{AccountState, Position},
-    plans::{DepositPlan, SettlementPlan, WithdrawalPlan},
+    plans::{DepositPlan, FundWithdrawalPlan, SettlementPlan, WithdrawalPlan},
     trade::{LimitOrder, OrderId, TradeId, TransferId},
     user::{DepositKey, User, WithdrawalKey},
 };
@@ -78,6 +78,8 @@ pub struct StableState {
     pub deposit_plans: BTreeMap<DepositKey, DepositPlan>,
     /// Active plans for collateral withdrawals.
     pub withdrawal_plans: BTreeMap<WithdrawalKey, WithdrawalPlan>,
+    /// Active plans for admin fund withdrawals.
+    pub fund_withdrawal_plans: BTreeMap<String, FundWithdrawalPlan>,
     /// Tracked execution IDs to prevent double-processing of trades.
     pub executed_trades: BTreeMap<TradeId, u64>,
     /// Positions currently frozen for transfer.

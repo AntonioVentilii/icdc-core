@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use shared::types::{AssetId, Price, SeriesId};
 
 use crate::{
+    api::admin::params::FundType,
     memory::{DEPOSIT_PLANS, SETTLEMENT_PLANS, WITHDRAWAL_PLANS},
     types::{
         payment::{PaymentIdempotency, PaymentReceipt},
@@ -247,6 +248,63 @@ impl SettlementPlan {
             };
 
             m.insert(key, plan.clone());
+            plan
+        })
+    }
+}
+
+/// Input parameters for creating a [`FundWithdrawalPlan`].
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct FundWithdrawalPlanParams {
+    /// Controller-provided unique identifier for this withdrawal request.
+    pub request_id: String,
+    /// Whether to withdraw from Insurance or Treasury.
+    pub fund_type: FundType,
+    /// The specific asset to withdraw.
+    pub asset_id: AssetId,
+    /// The amount to withdraw.
+    pub amount: u128,
+    /// The destination principal.
+    pub to: candid::Principal,
+}
+
+/// A plan for processing an admin fund withdrawal in the background.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct FundWithdrawalPlan {
+    pub request_id: String,
+    pub fund_type: FundType,
+    pub asset_id: AssetId,
+    pub amount: u128,
+    pub to: candid::Principal,
+    pub status: PlanStatus,
+    pub idempotency_ns: PaymentIdempotency,
+    pub receipt: Option<PaymentReceipt>,
+}
+
+impl FundWithdrawalPlan {
+    /// Retrieves an existing fund withdrawal plan or creates a new one.
+    pub fn get_or_create(params: FundWithdrawalPlanParams) -> Self {
+        crate::memory::FUND_WITHDRAWAL_PLANS.with(|m| {
+            let mut m = m.borrow_mut();
+
+            if let Some(existing) = m.get(&params.request_id) {
+                return existing.clone();
+            }
+
+            let idempotency_ns = ic_cdk::api::time().into();
+
+            let plan = FundWithdrawalPlan {
+                request_id: params.request_id.clone(),
+                fund_type: params.fund_type,
+                asset_id: params.asset_id,
+                amount: params.amount,
+                to: params.to,
+                status: PlanStatus::Planned,
+                idempotency_ns,
+                receipt: None,
+            };
+
+            m.insert(params.request_id, plan.clone());
             plan
         })
     }

@@ -10,6 +10,7 @@ pub enum FundType {
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct WithdrawFundParams {
+    pub request_id: String,
     pub fund_type: FundType,
     pub asset_id: AssetId,
     pub amount: u128,

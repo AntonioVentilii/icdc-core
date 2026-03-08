@@ -11,7 +11,7 @@ use crate::{
     types::{
         event::Event,
         margin::{AccountState, Position},
-        plans::{DepositPlan, SettlementPlan, WithdrawalPlan},
+        plans::{DepositPlan, FundWithdrawalPlan, SettlementPlan, WithdrawalPlan},
         state::{Config, StableState},
         trade::{LimitOrder, OrderId, TradeId, TransferId},
         user::{DepositKey, User, WithdrawalKey},
@@ -29,6 +29,7 @@ thread_local! {
     pub static REGISTRY_CANISTER: RefCell<Principal> = const { RefCell::new(Principal::anonymous()) };
     pub static DEPOSIT_PLANS: RefCell<BTreeMap<DepositKey, DepositPlan>> = const { RefCell::new(BTreeMap::new()) };
     pub static WITHDRAWAL_PLANS: RefCell<BTreeMap<WithdrawalKey, WithdrawalPlan>> = const { RefCell::new(BTreeMap::new()) };
+    pub static FUND_WITHDRAWAL_PLANS: RefCell<BTreeMap<String, FundWithdrawalPlan>> = const { RefCell::new(BTreeMap::new()) };
     pub static EXECUTED_TRADES: RefCell<BTreeMap<TradeId, u64>> = const { RefCell::new(BTreeMap::new()) };
     pub static LIMIT_ORDERS: RefCell<BTreeMap<OrderId, LimitOrder>> = const { RefCell::new(BTreeMap::new()) };
     pub static FROZEN_TRANSFERS: RefCell<BTreeMap<TransferId, PositionProof>> = const { RefCell::new(BTreeMap::new()) };
@@ -52,6 +53,8 @@ pub fn save_state() {
         DEPOSIT_PLANS.with(|d| d.borrow().clone());
     let withdrawal_plans: BTreeMap<WithdrawalKey, WithdrawalPlan> =
         WITHDRAWAL_PLANS.with(|w| w.borrow().clone());
+    let fund_withdrawal_plans: BTreeMap<String, FundWithdrawalPlan> =
+        FUND_WITHDRAWAL_PLANS.with(|f| f.borrow().clone());
     let executed_trades: BTreeMap<TradeId, u64> = EXECUTED_TRADES.with(|t| t.borrow().clone());
     let frozen_transfers: BTreeMap<TransferId, PositionProof> =
         FROZEN_TRANSFERS.with(|t| t.borrow().clone());
@@ -76,6 +79,7 @@ pub fn save_state() {
         registry,
         deposit_plans,
         withdrawal_plans,
+        fund_withdrawal_plans,
         executed_trades,
         frozen_transfers,
         accepted_transfers,
@@ -103,6 +107,7 @@ pub fn restore_state() {
         registry,
         deposit_plans,
         withdrawal_plans,
+        fund_withdrawal_plans,
         executed_trades,
         frozen_transfers,
         accepted_transfers,
@@ -129,6 +134,7 @@ pub fn restore_state() {
     REGISTRY_CANISTER.with(|r| *r.borrow_mut() = registry);
     DEPOSIT_PLANS.with(|d| *d.borrow_mut() = deposit_plans);
     WITHDRAWAL_PLANS.with(|w| *w.borrow_mut() = withdrawal_plans);
+    FUND_WITHDRAWAL_PLANS.with(|f| *f.borrow_mut() = fund_withdrawal_plans);
     EXECUTED_TRADES.with(|t| *t.borrow_mut() = executed_trades);
     FROZEN_TRANSFERS.with(|t| *t.borrow_mut() = frozen_transfers);
     ACCEPTED_TRANSFERS.with(|t| *t.borrow_mut() = accepted_transfers);
