@@ -25,7 +25,7 @@ use crate::{
         event::{Event, EventType},
         margin::{AccountState, Position},
         state::PositionProof,
-        trade::{LimitOrder, OrderId, Side, TradeId},
+        trade::{LimitOrder, Side, TradeId},
         user::User,
     },
     utils::series::ensure_series_registered,
@@ -112,16 +112,16 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
             matching_order_id,
         } = params;
 
-        let series_id = LIMIT_ORDERS.with(|m| {
+        let order = LIMIT_ORDERS.with(|m| {
             m.borrow()
                 .get(&matching_order_id)
-                .map(|o| o.series_id.clone())
+                .cloned()
                 .ok_or(TradeError::OrderNotFound(matching_order_id.clone()))
         })?;
 
-        let series = ensure_series_registered(&series_id).await?;
+        let series = ensure_series_registered(&order.series_id).await?;
 
-        submit_market_order_impl(taker, matching_order_id, trade_id, series)
+        submit_market_order_impl(taker, order, trade_id, series)
     })
     .await;
 
@@ -130,15 +130,16 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
 
 pub(crate) fn submit_market_order_impl(
     taker: User,
-    matching_order_id: OrderId,
+    order: LimitOrder,
     trade_id: TradeId,
     series: Series,
 ) -> Result<bool, TradeError> {
-    let order = LIMIT_ORDERS.with(|m| {
+    // Verify the order still exists — it may have been cancelled during the await.
+    LIMIT_ORDERS.with(|m| {
         m.borrow()
-            .get(&matching_order_id)
-            .cloned()
-            .ok_or(TradeError::OrderNotFound(matching_order_id.clone()))
+            .contains_key(&order.order_id)
+            .then_some(())
+            .ok_or_else(|| TradeError::OrderNotFound(order.order_id.clone()))
     })?;
 
     let (buyer, seller, b_unblock, s_unblock) = match order.side {
@@ -162,7 +163,7 @@ pub(crate) fn submit_market_order_impl(
 
     // Only remove the order after successful execution
     LIMIT_ORDERS.with(|m| {
-        m.borrow_mut().remove(&matching_order_id);
+        m.borrow_mut().remove(&order.order_id);
     });
 
     Ok(true)
@@ -401,24 +402,18 @@ mod tests {
     use shared::types::{Description, PayoffType, PayoutUnit, Price, Series, SeriesId};
 
     use super::*;
-    use crate::memory::{ACCOUNT_STATES, LIMIT_ORDERS};
+    use crate::{
+        memory::{ACCOUNT_STATES, LIMIT_ORDERS},
+        types::trade::OrderId,
+    };
 
-    #[test]
-    fn test_market_order_atomicity_on_execution_failure() {
-        let maker_p = Principal::from_slice(&[1]);
-        let taker_p = Principal::from_slice(&[2]);
-        let maker = User(maker_p);
-        let taker = User(taker_p);
-        let series_id = SeriesId::from("test_ser".to_string());
-        let order_id = OrderId::from("order_1".to_string());
-        let trade_id = TradeId::from("trade_1".to_string());
-
-        let series = Series {
+    fn test_series(series_id: &SeriesId) -> Series {
+        Series {
             series_id: series_id.clone(),
             underlying: "BTC".to_string(),
             expiry_ns: 2000000000,
             payoff_type: PayoffType::Call,
-            strike: Some(Price::new(50_000_000, 6)), // $50.00
+            strike: Some(Price::new(50_000_000, 6)),
             price_precision: 6,
             payout_unit: PayoutUnit::usd(),
             oracle_source: "oracle".to_string(),
@@ -426,24 +421,35 @@ mod tests {
             created_at_ns: 1000000000,
             title: "Test".to_string(),
             description: Description::plain("Test Description"),
-        };
+        }
+    }
 
-        // Maker has a Buy Limit Order
+    fn test_order(order_id: &OrderId, series_id: &SeriesId, creator: User) -> LimitOrder {
+        LimitOrder {
+            order_id: order_id.clone(),
+            creator,
+            series_id: series_id.clone(),
+            side: Side::Buy,
+            qty: 1,
+            price: Price::new(60_000_000, 6),
+            blocked_margin_usd: 60_000_000,
+        }
+    }
+
+    #[test]
+    fn test_market_order_atomicity_on_execution_failure() {
+        let maker = User(Principal::from_slice(&[1]));
+        let taker = User(Principal::from_slice(&[2]));
+        let series_id = SeriesId::from("test_ser".to_string());
+        let order_id = OrderId::from("order_1".to_string());
+        let trade_id = TradeId::from("trade_1".to_string());
+
+        let order = test_order(&order_id, &series_id, maker);
+
         LIMIT_ORDERS.with(|m| {
             let mut m = m.borrow_mut();
             m.clear();
-            m.insert(
-                order_id.clone(),
-                LimitOrder {
-                    order_id: order_id.clone(),
-                    creator: maker,
-                    series_id: series_id.clone(),
-                    side: Side::Buy,
-                    qty: 1,
-                    price: Price::new(60_000_000, 6), // $60.00
-                    blocked_margin_usd: 60_000_000,   // $60.00
-                },
-            );
+            m.insert(order_id.clone(), order.clone());
         });
 
         // Maker has enough funds, but Taker (Seller) has NO funds
@@ -452,7 +458,7 @@ mod tests {
             acc.clear();
 
             let mut m_acc = AccountState::new(maker);
-            m_acc.cash_balance_usd = 100_000_000; // $100
+            m_acc.cash_balance_usd = 100_000_000;
             m_acc.reserved_margin_usd = 60_000_000;
             acc.insert(maker, m_acc);
 
@@ -461,10 +467,8 @@ mod tests {
             acc.insert(taker, t_acc);
         });
 
-        // Taker tries to Sell (Market Order)
-        let result = submit_market_order_impl(taker, order_id.clone(), trade_id, series);
+        let result = submit_market_order_impl(taker, order, trade_id, test_series(&series_id));
 
-        // Result should be Err(InsufficientMargin) for taker
         assert!(result.is_err());
 
         // Verify Limit Order STILL EXISTS (atomicity check)
@@ -475,45 +479,18 @@ mod tests {
 
     #[test]
     fn test_market_order_normal_flow() {
-        let maker_p = Principal::from_slice(&[1]);
-        let taker_p = Principal::from_slice(&[2]);
-        let maker = User(maker_p);
-        let taker = User(taker_p);
+        let maker = User(Principal::from_slice(&[1]));
+        let taker = User(Principal::from_slice(&[2]));
         let series_id = SeriesId::from("test_ser".to_string());
         let order_id = OrderId::from("order_1".to_string());
         let trade_id = TradeId::from("trade_1".to_string());
 
-        let series = Series {
-            series_id: series_id.clone(),
-            underlying: "BTC".to_string(),
-            expiry_ns: 2000000000,
-            payoff_type: PayoffType::Call,
-            strike: Some(Price::new(50_000_000, 6)), // $50.00
-            price_precision: 6,
-            payout_unit: PayoutUnit::usd(),
-            oracle_source: "oracle".to_string(),
-            creator: Principal::anonymous(),
-            created_at_ns: 1000000000,
-            title: "Test".to_string(),
-            description: Description::plain("Test Description"),
-        };
+        let order = test_order(&order_id, &series_id, maker);
 
-        // Maker has a Buy Limit Order
         LIMIT_ORDERS.with(|m| {
             let mut m = m.borrow_mut();
             m.clear();
-            m.insert(
-                order_id.clone(),
-                LimitOrder {
-                    order_id: order_id.clone(),
-                    creator: maker,
-                    series_id: series_id.clone(),
-                    side: Side::Buy,
-                    qty: 1,
-                    price: Price::new(60_000_000, 6), // $60.00
-                    blocked_margin_usd: 60_000_000,   // $60.00
-                },
-            );
+            m.insert(order_id.clone(), order.clone());
         });
 
         // Both have enough funds
@@ -531,7 +508,7 @@ mod tests {
             acc.insert(taker, t_acc);
         });
 
-        let result = submit_market_order_impl(taker, order_id.clone(), trade_id, series);
+        let result = submit_market_order_impl(taker, order, trade_id, test_series(&series_id));
 
         assert!(result.is_ok());
 
@@ -539,5 +516,31 @@ mod tests {
         LIMIT_ORDERS.with(|m| {
             assert!(!m.borrow().contains_key(&order_id));
         });
+    }
+
+    /// Simulates the scenario where a limit order is cancelled by a concurrent
+    /// call between the initial read in `submit_market_order` and the execution
+    /// in `submit_market_order_impl`. The impl should return `OrderNotFound`.
+    #[test]
+    fn test_market_order_cancelled_during_await() {
+        let maker = User(Principal::from_slice(&[1]));
+        let taker = User(Principal::from_slice(&[2]));
+        let series_id = SeriesId::from("test_ser".to_string());
+        let order_id = OrderId::from("order_1".to_string());
+        let trade_id = TradeId::from("trade_1".to_string());
+
+        // The order was read before the await, but is NOT in the map anymore
+        // (simulating a concurrent cancel_limit_order).
+        let order = test_order(&order_id, &series_id, maker);
+
+        LIMIT_ORDERS.with(|m| m.borrow_mut().clear());
+        ACCOUNT_STATES.with(|acc| acc.borrow_mut().clear());
+
+        let result = submit_market_order_impl(taker, order, trade_id, test_series(&series_id));
+
+        assert!(
+            matches!(&result, Err(TradeError::OrderNotFound(id)) if *id == order_id),
+            "expected OrderNotFound for a cancelled order, got: {result:?}"
+        );
     }
 }
