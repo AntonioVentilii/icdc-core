@@ -35,3 +35,5 @@ pub const MAX_SERIES_DESCRIPTION_LEN: usize = 1024;
 
 /// Default insurance fund fee ratio in basis points (10 bps = 0.1%).
 pub const DEFAULT_INSURANCE_FEE_RATIO: u16 = 10;
+/// Default protocol fee ratio in basis points (5 bps = 0.05%).
+pub const DEFAULT_PROTOCOL_FEE_RATIO: u16 = 5;

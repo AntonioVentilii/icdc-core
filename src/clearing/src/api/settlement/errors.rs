@@ -19,5 +19,8 @@ pub enum SettlementError {
         total_collateral_usd: u128,
     },
     /// Settlement price inconsistent with already executing plan.
-    InconsistentSettlementPrice { existing: Price, requested: Price },
+    InconsistentSettlementPrice {
+        existing: Box<Price>,
+        requested: Box<Price>,
+    },
 }

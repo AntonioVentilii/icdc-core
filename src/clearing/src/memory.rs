@@ -20,7 +20,7 @@ use crate::{
 };
 
 thread_local! {
-    pub static CONFIG: RefCell<Config> = const { RefCell::new(Config { insurance_fund_fee_ratio: 10, evm_rpc: Principal::anonymous(), signer_canister: Principal::anonymous() }) };
+    pub static CONFIG: RefCell<Config> = const { RefCell::new(Config { insurance_fund_fee_ratio: 10, protocol_fee_ratio: 5, evm_rpc: Principal::anonymous(), signer_canister: Principal::anonymous() }) };
     pub static POSITIONS: RefCell<BTreeMap<(User, SeriesId), Position>> = const { RefCell::new(BTreeMap::new()) };
     pub static ACCOUNT_STATES: RefCell<BTreeMap<User, AccountState>> = const { RefCell::new(BTreeMap::new()) };
     pub static SERIES: RefCell<BTreeMap<SeriesId, Series>> = const { RefCell::new(BTreeMap::new()) };

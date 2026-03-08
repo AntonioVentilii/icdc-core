@@ -6,7 +6,10 @@ use shared::types::{Price, Series};
 use super::{errors::SettlementError, params::SettleSeriesParams, results::SettleSeriesResult};
 use crate::{
     guards::caller_is_not_anonymous,
-    memory::{ACCOUNT_STATES, CONFIG, POSITIONS, REGISTRY_CANISTER, SERIES, SETTLEMENT_PLANS},
+    memory::{
+        ACCOUNT_STATES, COLLATERAL_ASSETS, CONFIG, INSURANCE_FUND, POSITIONS, REGISTRY_CANISTER,
+        SERIES, SETTLEMENT_PLANS, TREASURY,
+    },
     payoffs::get_settlement_value,
     types::{
         errors::CommonError,
@@ -27,7 +30,10 @@ use crate::{
 /// series. It is intended to be called by an off-chain oracle or automation.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
-    let insurance_fund_fee_ratio = CONFIG.with(|c| c.borrow().insurance_fund_fee_ratio);
+    let (insurance_fund_fee_ratio, protocol_fee_ratio) = CONFIG.with(|c| {
+        let c = c.borrow();
+        (c.insurance_fund_fee_ratio, c.protocol_fee_ratio)
+    });
 
     let result: Result<(), SettlementError> = (async {
         let SettleSeriesParams {
@@ -80,8 +86,8 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
             if existing.settlement_price != settlement_price {
                 return Err(SettlementError::InconsistentSettlementPrice {
-                    existing: existing.settlement_price,
-                    requested: settlement_price,
+                    existing: Box::new(existing.settlement_price),
+                    requested: Box::new(settlement_price),
                 });
             }
             existing
@@ -108,11 +114,11 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                     let mut plan_data = Vec::new();
                     for user in users {
                         if let Some(pos) = positions.remove(&(user, series_id.clone())) {
-                            settlement_data.push((user, pos.net_qty));
-                            plan_data.push((user, pos.net_qty));
+                            settlement_data.push((user, pos.net_qty, pos.reserved_margin_usd));
+                            plan_data.push((user, pos.net_qty, pos.reserved_margin_usd));
                         }
                     }
-                    Ok::<(Vec<(User, i128)>, Vec<(User, i128)>), SettlementError>((
+                    Ok::<(Vec<(User, i128, u128)>, Vec<(User, i128, u128)>), SettlementError>((
                         settlement_data,
                         plan_data,
                     ))
@@ -121,24 +127,33 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
             check_settlement_solvency(&ser, &settlement_price, &positions_to_settle)?;
 
-            // Compute accounting updates
+            // Compute accounting updates using centralized fee utilities
             let mut accounting_updates: Vec<(User, i128)> = Vec::new();
             let mut total_insurance_fee: u128 = 0;
+            let mut total_protocol_fee: u128 = 0;
 
-            for (user, net_qty) in positions_to_settle.iter().copied() {
+            for (user, net_qty, _) in positions_to_settle.iter().copied() {
                 let payoff_u128 = get_settlement_value(&ser, &settlement_price, net_qty);
-                let insurance_fee = (payoff_u128 * (insurance_fund_fee_ratio as u128)) / 10000;
-                total_insurance_fee += insurance_fee;
 
-                // Cashflow is payoff - fee
-                let cashflow: i128 = (payoff_u128 as i128) - (insurance_fee as i128);
+                let i_fee = crate::payoffs::fees::calculate_insurance_fee(
+                    payoff_u128,
+                    insurance_fund_fee_ratio,
+                );
+                let p_fee =
+                    crate::payoffs::fees::calculate_insurance_fee(payoff_u128, protocol_fee_ratio);
+
+                total_insurance_fee += i_fee;
+                total_protocol_fee += p_fee;
+
+                // Cashflow is payoff - total fees
+                let cashflow: i128 = (payoff_u128 as i128) - (i_fee as i128) - (p_fee as i128);
                 accounting_updates.push((user, cashflow));
             }
 
             SettlementPlan::get_or_create(SettlementPlanParams {
                 series_id: series_id.clone(),
                 settlement_price: settlement_price.clone(),
-                fee: 0, // Protocol fee not yet implemented in this rewrite
+                fee: total_protocol_fee,
                 insurance_fee: total_insurance_fee,
                 positions: positions_for_plan,
                 accounting_updates,
@@ -162,28 +177,46 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                         // 1. Update cash balance (PnL)
                         account.cash_balance_usd += cashflow;
 
-                        // 2. Release margin (Maintenance margin should be recalculated)
-                        // For now we just reset it to 0 as a placeholder if it was the only series.
-                        // TODO: proper margin recalculation after each settlement.
-                        account.reserved_margin_usd = 0;
+                        // 2. Release margin
+                        if let Some((_, _, old_margin)) =
+                            plan.positions.iter().find(|(u, _, _)| u == &user)
+                        {
+                            account.reserved_margin_usd =
+                                account.reserved_margin_usd.saturating_sub(*old_margin);
+                        }
                     }
 
                     plan.accounting_cursor += 1;
-                    if plan.accounting_cursor % 50 == 0 {
-                        SETTLEMENT_PLANS
-                            .with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
+
+                    // Idiomatic chunking: we process in slices to avoid instruction limits.
+                    // If we've processed 100 items, we yield and wait for the next call.
+                    if plan.accounting_cursor % 100 == 0 {
+                        break;
                     }
+                }
+
+                if plan.accounting_cursor == plan.accounting_updates.len() {
+                    plan.accounting_applied = true;
                 }
             });
 
-            plan.accounting_applied = true;
+            SETTLEMENT_PLANS.with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
 
-            // Distribute collected insurance fees (internal only)
+            // Distribute collected fees (internal USD accounting)
+            let insurance_fee_total = plan.insurance_fee_usd;
+            let protocol_fee_total = plan.fee_usd;
 
-            // Since we don't have a single payout asset anymore, we account fees in USD
-            // But the insurance fund/treasury are per asset.
-            // For now, we omit this or map it to a default "Accounting USD" asset.
-            // TODO: decide how to store USD-based fees in the multi-asset fund.
+            TREASURY.with(|t| {
+                let mut t = t.borrow_mut();
+                let current = t.get("vUSD").copied().unwrap_or(0);
+                t.insert("vUSD".to_string(), current + protocol_fee_total);
+            });
+
+            INSURANCE_FUND.with(|i| {
+                let mut i = i.borrow_mut();
+                let current = i.get("vUSD").copied().unwrap_or(0);
+                i.insert("vUSD".to_string(), current + insurance_fee_total);
+            });
 
             SETTLEMENT_PLANS.with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
         }
@@ -207,19 +240,33 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 fn check_settlement_solvency(
     series: &Series,
     price: &Price,
-    positions: &[(User, i128)],
+    positions: &[(User, i128, u128)],
 ) -> Result<(), SettlementError> {
     let mut total_payoff: u128 = 0;
 
-    for (_, net_qty) in positions.iter().copied() {
+    for (_, net_qty, _) in positions.iter().copied() {
         let payoff = get_settlement_value(series, price, net_qty);
         total_payoff = total_payoff
             .checked_add(payoff)
             .ok_or(SettlementError::MathOverflow)?;
     }
 
-    // TODO: Compare total_payoff against global system equity.
-    // At this stage, we assume the system is solvent enough to process accounting updates.
+    // Verify system solvency by comparing aggregated payouts against system equity
+    let total_system_equity_usd = ACCOUNT_STATES.with(|accounts| {
+        let accounts = accounts.borrow();
+        let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
+        accounts
+            .values()
+            .map(|acc| acc.calculate_equity_usd(&configs))
+            .sum::<u128>()
+    });
+
+    if total_payoff > total_system_equity_usd {
+        return Err(SettlementError::SolvencyViolation {
+            total_payoff,
+            total_collateral_usd: total_system_equity_usd,
+        });
+    }
 
     Ok(())
 }

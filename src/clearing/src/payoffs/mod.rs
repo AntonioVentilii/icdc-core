@@ -1,3 +1,4 @@
+pub(crate) mod fees;
 pub(crate) mod types;
 pub(crate) mod utils;
 

@@ -49,7 +49,8 @@ type CommonError = variant {
 type Config = record {
 	insurance_fund_fee_ratio : nat16;
 	signer_canister : principal;
-	evm_rpc : principal
+	evm_rpc : principal;
+	protocol_fee_ratio : nat16
 };
 type DecimalValue = record { decimals : nat8; value : nat };
 type DepositCollateralError = variant { MathOverflow; Asset : AssetError };

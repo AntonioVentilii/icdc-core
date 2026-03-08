@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use candid::{CandidType, Principal};
 use serde::Deserialize;
 use shared::{
-    constants::DEFAULT_INSURANCE_FEE_RATIO,
+    constants::{DEFAULT_INSURANCE_FEE_RATIO, DEFAULT_PROTOCOL_FEE_RATIO},
     types::{Series, SeriesId},
 };
 
@@ -37,6 +37,8 @@ pub struct PositionProof {
 pub struct Config {
     /// The global insurance fund fee ratio in basis points (1 bp = 0.01%).
     pub insurance_fund_fee_ratio: u16,
+    /// The global protocol fee ratio (Treasury) in basis points.
+    pub protocol_fee_ratio: u16,
     /// The principal of the EVM RPC canister.
     pub evm_rpc: Principal,
     /// The principal of the Chain Fusion Signer canister.
@@ -46,6 +48,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             insurance_fund_fee_ratio: DEFAULT_INSURANCE_FEE_RATIO,
+            protocol_fee_ratio: DEFAULT_PROTOCOL_FEE_RATIO,
             evm_rpc: Principal::anonymous(),
             signer_canister: Principal::anonymous(),
         }

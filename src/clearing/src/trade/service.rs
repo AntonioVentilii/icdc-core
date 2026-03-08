@@ -98,7 +98,9 @@ pub(crate) async fn internal_execute_trade(params: ExecuteTradeParams) -> Result
                 buyer_acc.reserved_margin_usd = buyer_acc.reserved_margin_usd.saturating_sub(amt);
             }
 
-            // Apply delta and check equity
+            // Apply delta and check equity.
+            // With upfront cash payment, the user's cash balance covers the cost,
+            // but we still track reserved_margin_usd for consistency across different series types.
             let target_reserved = if buyer_margin_delta > 0 {
                 buyer_acc.reserved_margin_usd + (buyer_margin_delta as u128)
             } else {
@@ -107,15 +109,6 @@ pub(crate) async fn internal_execute_trade(params: ExecuteTradeParams) -> Result
                     .saturating_sub(buyer_margin_delta.unsigned_abs())
             };
 
-            // Note: with upfront cash payment, we don't need to add to reserved_margin_usd
-            // periodically, but we must check that the user is still solvent.
-            // For now, we keep the margin accounting but it will effectively be 0 for this position
-            // if new_buyer_margin_usd is not added to reserved_margin_usd.
-            // Wait, internal_execute_trade currently adds/subtracts margin_delta from
-            // reserved_margin_usd. If we want to transition to fully
-            // cash-collateralized, we should make margin_delta 0. Available is (equity
-            // - reserved). If we increase reserved, we need to check if we stay >= 0.
-            // New available would be equity - target_reserved.
             let equity = buyer_acc.calculate_equity_usd(&configs);
 
             if (equity as i128) < (target_reserved as i128) {

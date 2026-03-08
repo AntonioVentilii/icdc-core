@@ -61,8 +61,8 @@ pub struct SettlementPlanParams {
     pub fee: u128,
     /// The insurance fee collected for this settlement session (in USD units).
     pub insurance_fee: u128,
-    /// A list of positions involved in the settlement.
-    pub positions: Vec<(User, i128)>,
+    /// A list of positions involved in the settlement: (user, qty, reserved_margin_usd).
+    pub positions: Vec<(User, i128, u128)>,
     /// List of accounting updates: (user, cashflow_usd).
     pub accounting_updates: Vec<(User, i128)>,
 }
@@ -195,8 +195,8 @@ pub struct SettlementPlan {
     pub fee_usd: u128,
     /// The insurance fee (in USD units).
     pub insurance_fee_usd: u128,
-    /// Detailed position snapshots at the time of settlement.
-    pub positions: Vec<(User, i128)>,
+    /// Detailed position snapshots: (user, qty, reserved_margin_usd).
+    pub positions: Vec<(User, i128, u128)>,
     /// List of accounting updates: (user, cashflow_usd).
     pub accounting_updates: Vec<(User, i128)>,
     /// Tracks progress through accounting updates.

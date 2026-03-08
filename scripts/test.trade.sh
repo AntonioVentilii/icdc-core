@@ -54,6 +54,7 @@ echo "🚀 Initializing clearing canister..."
 dfx canister call clearing set_registry_canister "(principal \"$REGISTRY\")"
 dfx canister call clearing update_config "(record { 
     insurance_fund_fee_ratio = 10; 
+    protocol_fee_ratio = 5;
     signer_canister = principal \"$PRINCIPAL\"; 
     evm_rpc = principal \"aaaaa-aa\" 
 })"
@@ -165,10 +166,11 @@ DELTA_SECONDARY=$((FINAL_BAL_SECONDARY - BAL_START_SECONDARY))
 
 # PnL = (1.0 - 0.55) * 10 = 0.45 * 10 = 4.5 USD = 4,500,000 (e6)
 PROFIT=4500000
-# Note: default insurance fee is 10 bps (0.1%) of payout.
+# Note: insurance fee is 10 bps (0.1%), protocol fee is 5 bps (0.05%).
+# Total fee = 0.15% of Payout.
 # Payout = 10 * 1.0 = 10 USD = 10,000,000.
-# 0.1% fee = 10,000.
-FEE=10000
+# 0.15% fee = 15,000.
+FEE=15000
 EXPECTED_DELTA_DEFAULT=$((PROFIT - FEE)) # Profit minus fee
 EXPECTED_DELTA_SECONDARY=$((-PROFIT))    # Loss (seller doesn't pay payout fee)
 
@@ -181,3 +183,6 @@ else
   echo "❌ TRADE TEST FAILED!"
   exit 1
 fi
+
+echo "🚀 Verifying internal fee collection..."
+dfx canister call clearing get_funds
