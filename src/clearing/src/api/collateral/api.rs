@@ -1,6 +1,9 @@
 use candid::Nat;
 use ic_cdk_macros::update;
-use shared::{constants::USD_DECIMALS, types::asset::errors::AssetError};
+use shared::{
+    constants::{USD_DECIMALS, VUSD_ASSET_ID},
+    types::asset::errors::AssetError,
+};
 
 use super::{
     errors::{DepositCollateralError, WithdrawCollateralError},
@@ -122,7 +125,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
                     .entry(user)
                     .or_insert_with(|| AccountState::new(user));
 
-                if asset_id == "vUSD" {
+                if asset_id == VUSD_ASSET_ID {
                     let amount_usd = if config.decimals > USD_DECIMALS {
                         (amount_u128 / 10u128.pow((config.decimals - USD_DECIMALS) as u32)) as i128
                     } else {
@@ -247,7 +250,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             ACCOUNT_STATES.with(|accounts| {
                 let mut accounts = accounts.borrow_mut();
                 if let Some(state) = accounts.get_mut(&user) {
-                    if asset_id == "vUSD" {
+                    if asset_id == VUSD_ASSET_ID {
                         let amount_usd = if config.decimals > USD_DECIMALS {
                             (amount_u128 / 10u128.pow((config.decimals - USD_DECIMALS) as u32))
                                 as i128
@@ -302,7 +305,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                         ACCOUNT_STATES.with(|accounts| {
                             let mut accounts = accounts.borrow_mut();
                             if let Some(state) = accounts.get_mut(&user) {
-                                if asset_id == "vUSD" {
+                                if asset_id == VUSD_ASSET_ID {
                                     let reserved_usd = if config.decimals > USD_DECIMALS {
                                         (reserved
                                             / 10u128.pow((config.decimals - USD_DECIMALS) as u32))

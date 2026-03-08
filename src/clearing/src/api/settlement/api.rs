@@ -1,7 +1,10 @@
 use candid::Principal;
 use ic_cdk::api::is_controller;
 use ic_cdk_macros::update;
-use shared::types::{Price, Series};
+use shared::{
+    constants::VUSD_ASSET_ID,
+    types::{Price, Series},
+};
 
 use super::{errors::SettlementError, params::SettleSeriesParams, results::SettleSeriesResult};
 use crate::{
@@ -206,14 +209,14 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 
                     TREASURY.with(|t| {
                         let mut t = t.borrow_mut();
-                        let current = t.get("vUSD").copied().unwrap_or(0);
-                        t.insert("vUSD".to_string(), current + protocol_fee_total);
+                        let current = t.get(VUSD_ASSET_ID).copied().unwrap_or(0);
+                        t.insert(VUSD_ASSET_ID.to_string(), current + protocol_fee_total);
                     });
 
                     INSURANCE_FUND.with(|i| {
                         let mut i = i.borrow_mut();
-                        let current = i.get("vUSD").copied().unwrap_or(0);
-                        i.insert("vUSD".to_string(), current + insurance_fee_total);
+                        let current = i.get(VUSD_ASSET_ID).copied().unwrap_or(0);
+                        i.insert(VUSD_ASSET_ID.to_string(), current + insurance_fee_total);
                     });
                 }
             });
