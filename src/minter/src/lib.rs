@@ -80,7 +80,7 @@ async fn mint_vusd(to: Principal, amount: Nat) -> Result<Nat, String> {
 
 // ICRC-1 Types
 #[allow(non_camel_case_types)]
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize, Debug)]
 struct icrc1_transfer_args {
     from_subaccount: Option<vec_u8>,
     to: record_account,
@@ -94,21 +94,21 @@ struct icrc1_transfer_args {
 type vec_u8 = Vec<u8>;
 
 #[allow(non_camel_case_types)]
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize, Debug)]
 struct record_account {
     owner: Principal,
     subaccount: Option<vec_u8>,
 }
 
 #[allow(non_camel_case_types)]
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Serialize, Deserialize, Debug)]
 enum icrc1_transfer_result {
     Ok(Nat),
     Err(icrc1_transfer_error),
 }
 
 #[allow(non_camel_case_types)]
-#[derive(CandidType, Deserialize, Debug)]
+#[derive(CandidType, Serialize, Deserialize, Debug)]
 enum icrc1_transfer_error {
     BadFee { expected_fee: Nat },
     BadBurn { min_burn_amount: Nat },

@@ -1,12 +1,12 @@
-mod types;
-mod utils;
+pub(crate) mod types;
+pub(crate) mod utils;
 
 use shared::{
     constants::USD_DECIMALS,
     types::{PayoffType, Price, Series},
 };
-
-use crate::payoffs::{types::RoundingMode, utils::scale_price};
+pub(crate) use types::RoundingMode;
+pub(crate) use utils::scale_price;
 
 /// Calculates the actual payout at settlement based on the series type.
 ///

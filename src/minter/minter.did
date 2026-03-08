@@ -1,0 +1,12 @@
+type MinterConfig = record {
+	vusd_ledger : principal;
+	authorized_callers : vec principal
+};
+
+type Result = variant { Ok : nat; Err : text };
+
+service : (MinterConfig) -> {
+	get_config : () -> (opt MinterConfig) query;
+	update_config : (MinterConfig) -> ();
+	mint_vusd : (principal, nat) -> (Result)
+}
