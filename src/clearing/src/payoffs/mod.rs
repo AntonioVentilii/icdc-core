@@ -325,12 +325,7 @@ mod tests {
         // Settle: $150.00 (8 decimals) -> 15,000,000,000
         let settle_price = Price::new(15_000_000_000, 8);
 
-        let series = mock_series(
-            PayoffType::Call,
-            Some(strike_price),
-            6,
-            shared::types::PayoutUnit::usd(),
-        );
+        let series = mock_series(PayoffType::Call, Some(strike_price), 6, PayoutUnit::usd());
 
         // (150.00 - 100.00) = 50.00 -> 50,000,000 in USD (6 decimals)
         assert_eq!(get_settlement_value(&series, &settle_price, 1), 50_000_000);
@@ -342,7 +337,7 @@ mod tests {
             PayoffType::Put,
             Some(Price::new(100_000_000, 6)),
             6,
-            shared::types::PayoutUnit::usd(),
+            PayoutUnit::usd(),
         );
         let current_price = Price::new(80_000_000, 8); // $0.80
 

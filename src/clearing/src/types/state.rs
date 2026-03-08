@@ -4,7 +4,7 @@ use candid::{CandidType, Principal};
 use serde::Deserialize;
 use shared::{
     constants::{DEFAULT_INSURANCE_FEE_RATIO, DEFAULT_PROTOCOL_FEE_RATIO},
-    types::{Price, Series, SeriesId},
+    types::{AssetId, CollateralAssetConfig, Price, Series, SeriesId},
 };
 
 use crate::types::{
@@ -91,11 +91,11 @@ pub struct StableState {
     /// Active limit orders.
     pub limit_orders: BTreeMap<OrderId, LimitOrder>,
     /// Accumulated fees in the insurance fund, per asset.
-    pub insurance_fund: BTreeMap<shared::types::AssetId, u128>,
+    pub insurance_fund: BTreeMap<AssetId, u128>,
     /// Accumulated fees in the treasury (main fund), per asset.
-    pub treasury: BTreeMap<shared::types::AssetId, u128>,
+    pub treasury: BTreeMap<AssetId, u128>,
     /// Configuration for supported collateral assets.
-    pub collateral_assets: BTreeMap<shared::types::AssetId, shared::types::CollateralAssetConfig>,
+    pub collateral_assets: BTreeMap<AssetId, CollateralAssetConfig>,
     /// Cached EVM addresses derived for principals.
     pub evm_addresses: BTreeMap<Principal, String>,
 }

@@ -1,6 +1,6 @@
 use candid::{Nat, Principal};
 use ic_cdk_macros::{query, update};
-use shared::types::CollateralAssetConfig;
+use shared::types::{AssetId, CollateralAssetConfig};
 
 use super::{
     params::{FundType, UpdateCollateralAssetParams, WithdrawFundParams},
@@ -177,7 +177,7 @@ pub fn debug_get_registry_canister() -> Principal {
 }
 
 pub(crate) fn deduct_fund_balance_impl(
-    asset_id: &shared::types::AssetId,
+    asset_id: &AssetId,
     amount: u128,
     fund_type: FundType,
 ) -> Result<(), AdminError> {
@@ -196,11 +196,7 @@ pub(crate) fn deduct_fund_balance_impl(
     })
 }
 
-pub(crate) fn rollback_fund_deduction_impl(
-    asset_id: &shared::types::AssetId,
-    amount: u128,
-    fund_type: FundType,
-) {
+pub(crate) fn rollback_fund_deduction_impl(asset_id: &AssetId, amount: u128, fund_type: FundType) {
     let store = match fund_type {
         FundType::Insurance => &INSURANCE_FUND,
         FundType::Treasury => &TREASURY,

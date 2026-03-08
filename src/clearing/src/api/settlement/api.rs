@@ -3,7 +3,7 @@ use ic_cdk::api::is_controller;
 use ic_cdk_macros::update;
 use shared::{
     constants::VUSD_ASSET_ID,
-    types::{Price, Series},
+    types::{Price, Series, SeriesId},
 };
 
 use super::{errors::SettlementError, params::SettleSeriesParams, results::SettleSeriesResult};
@@ -181,7 +181,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 /// This is extracted for unit testing atomicity and solvency checks.
 pub(crate) fn prepare_settlement_impl(
     ser: &Series,
-    series_id: &shared::types::SeriesId,
+    series_id: &SeriesId,
     settlement_price: &Price,
     insurance_fund_fee_ratio: u16,
     protocol_fee_ratio: u16,
