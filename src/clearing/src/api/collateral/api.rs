@@ -318,17 +318,35 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                         ACCOUNT_STATES.with(|accounts| {
                             let mut accounts = accounts.borrow_mut();
                             if let Some(state) = accounts.get_mut(&user) {
-                                if let Some(usd) = reserved_cash {
-                                    state.cash_balance_usd += usd;
-                                } else if let Some(tokens) = reserved_tokens {
-                                    let current = state
-                                        .collateral_balances
-                                        .get(&asset_id)
-                                        .copied()
-                                        .unwrap_or(0);
-                                    state
-                                        .collateral_balances
-                                        .insert(asset_id.clone(), current + tokens);
+                                match (reserved_cash, reserved_tokens) {
+                                    (Some(usd), None) => {
+                                        state.cash_balance_usd += usd;
+                                    }
+
+                                    (None, Some(tokens)) => {
+                                        let current = state
+                                            .collateral_balances
+                                            .get(&asset_id)
+                                            .copied()
+                                            .unwrap_or(0);
+                                        state
+                                            .collateral_balances
+                                            .insert(asset_id.clone(), current + tokens);
+                                    }
+
+                                    (Some(usd), Some(tokens)) => {
+                                        state.cash_balance_usd += usd;
+                                        let current = state
+                                            .collateral_balances
+                                            .get(&asset_id)
+                                            .copied()
+                                            .unwrap_or(0);
+                                        state
+                                            .collateral_balances
+                                            .insert(asset_id.clone(), current + tokens);
+                                    }
+
+                                    (None, None) => {}
                                 }
                             }
                         });
