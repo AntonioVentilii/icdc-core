@@ -1,4 +1,5 @@
 use candid::{Nat, Principal};
+use ic_cdk::export_candid;
 use ic_cdk_macros::{post_upgrade, pre_upgrade};
 use shared::types::{Series, SeriesId};
 
@@ -61,4 +62,4 @@ fn post_upgrade() {
     memory::restore_state();
 }
 
-ic_cdk::export_candid!();
+export_candid!();

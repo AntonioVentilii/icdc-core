@@ -1,11 +1,12 @@
 [workspace]
-members = ["src/clearing", "src/registry", "src/shared"]
+members = ["src/clearing", "src/minter", "src/registry", "src/shared"]
 resolver = "2"
 
 [workspace.dependencies]
 candid = "0.10"
 clearing = { path = "src/clearing" }
 registry = { path = "src/registry" }
+minter = { path = "src/minter" }
 shared = { path = "src/shared" }
 serde = { version = "1.0", features = ["derive"] }
 icrc-ledger-types = "0.1"

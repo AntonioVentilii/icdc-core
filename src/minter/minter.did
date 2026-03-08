@@ -1,0 +1,12 @@
+type Config = record {
+	authorized_callers : vec principal;
+	ledger_canister : principal
+};
+type ConfigResult = variant { Ok : Config; Err : text };
+type MintParams = record { to : principal; amount : nat };
+type MintResult = variant { Ok : nat; Err : text };
+service : (Config) -> {
+	config : () -> (ConfigResult) query;
+	mint : (MintParams) -> (MintResult);
+	update_config : (Config) -> ()
+}

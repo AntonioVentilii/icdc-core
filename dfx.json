@@ -10,6 +10,28 @@
 			"package": "registry",
 			"candid": "src/registry/registry.did"
 		},
+		"minter": {
+			"type": "rust",
+			"package": "minter",
+			"candid": "src/minter/minter.did"
+		},
+		"ledger": {
+			"type": "custom",
+			"candid": "https://github.com/dfinity/ic/releases/download/ledger-suite-icrc-2025-06-19/ledger.did",
+			"wasm": "https://github.com/dfinity/ic/releases/download/ledger-suite-icrc-2025-06-19/ic-icrc1-ledger.wasm.gz",
+			"init_arg_file": "out/build.ledger.args.did",
+			"pre_install": "scripts/build.ledger.args.sh",
+			"specified_id": "ap6gq-taaaa-aaaae-acsaq-cai"
+		},
+		"index": {
+			"dependencies": ["ledger"],
+			"type": "custom",
+			"candid": "https://github.com/dfinity/ic/releases/download/ledger-suite-icrc-2025-06-19/index-ng.did",
+			"wasm": "https://github.com/dfinity/ic/releases/download/ledger-suite-icrc-2025-06-19/ic-icrc1-index-ng.wasm.gz",
+			"init_arg_file": "out/build.index.args.did",
+			"pre_install": "scripts/build.index.args.sh",
+			"specified_id": "x3qir-tyaaa-aaaae-acr6a-cai"
+		},
 		"icp_ledger": {
 			"type": "custom",
 			"build": "scripts/build.icp_ledger.sh",
