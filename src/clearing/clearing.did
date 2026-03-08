@@ -114,7 +114,7 @@ type HttpResponse = record {
 type LimitOrder = record {
 	qty : int;
 	creator : principal;
-	block_index : nat;
+	blocked_margin_usd : nat;
 	series_id : text;
 	side : Side;
 	order_id : text;
@@ -230,6 +230,7 @@ type WithdrawCollateralParams = record {
 type WithdrawCollateralResult = variant { Ok; Err : WithdrawCollateralError };
 type WithdrawFundParams = record {
 	to : principal;
+	request_id : text;
 	fund_type : FundType;
 	asset_id : text;
 	amount : nat

@@ -82,7 +82,7 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
                         side,
                         qty,
                         price,
-                        block_index: required_margin_usd, // Now represents USD
+                        blocked_margin_usd: required_margin_usd,
                     },
                 );
             });
@@ -120,8 +120,8 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
         })?;
 
         let (buyer, seller, b_unblock, s_unblock) = match order.side {
-            Side::Buy => (order.creator, taker, Some(order.block_index), None),
-            Side::Sell => (taker, order.creator, None, Some(order.block_index)),
+            Side::Buy => (order.creator, taker, Some(order.blocked_margin_usd), None),
+            Side::Sell => (taker, order.creator, None, Some(order.blocked_margin_usd)),
         };
 
         internal_execute_trade(ExecuteTradeParams {
@@ -174,7 +174,9 @@ pub async fn cancel_limit_order(params: CancelLimitOrderParams) -> SubmitMatched
         ACCOUNT_STATES.with(|accounts| {
             let mut accounts = accounts.borrow_mut();
             if let Some(acc) = accounts.get_mut(&caller) {
-                acc.reserved_margin_usd = acc.reserved_margin_usd.saturating_sub(order.block_index);
+                acc.reserved_margin_usd = acc
+                    .reserved_margin_usd
+                    .saturating_sub(order.blocked_margin_usd);
             }
         });
 

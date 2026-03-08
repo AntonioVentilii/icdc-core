@@ -57,6 +57,5 @@ pub struct LimitOrder {
     /// Limit price in the precision defined by the associated series (`series.price_precision`).
     pub price: Price,
     /// Amount blocked in collateral (denominated in USD units, 6 decimals).
-    /// TODO: rename to `blocked_margin_usd` ???
-    pub block_index: u128,
+    pub blocked_margin_usd: u128,
 }
