@@ -2,7 +2,7 @@ use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 use shared::types::{AssetId, CollateralAssetConfig};
 
-#[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(CandidType, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FundType {
     Insurance,
     Treasury,

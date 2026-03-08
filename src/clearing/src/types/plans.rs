@@ -4,11 +4,12 @@ use shared::types::{AssetId, Price, SeriesId};
 
 use crate::{
     api::admin::params::FundType,
-    memory::{DEPOSIT_PLANS, SETTLEMENT_PLANS, WITHDRAWAL_PLANS},
+    memory::{DEPOSIT_PLANS, FUND_WITHDRAWAL_PLANS, SETTLEMENT_PLANS, WITHDRAWAL_PLANS},
     types::{
         payment::{PaymentIdempotency, PaymentReceipt},
         user::{DepositId, User, WithdrawalId},
     },
+    utils::system::now_ns,
 };
 
 /// The execution status of a background operation plan.
@@ -111,7 +112,7 @@ impl DepositPlan {
                 return existing.clone();
             }
 
-            let idempotency_ns = ic_cdk::api::time().into();
+            let idempotency_ns = now_ns().into();
 
             let plan = DepositPlan {
                 deposit_id,
@@ -171,7 +172,7 @@ impl WithdrawalPlan {
                 return existing.clone();
             }
 
-            let idempotency_ns = ic_cdk::api::time().into();
+            let idempotency_ns = now_ns().into();
 
             let plan = WithdrawalPlan {
                 withdrawal_id,
@@ -234,7 +235,7 @@ impl SettlementPlan {
                 return existing.clone();
             }
 
-            let idempotency_ns = ic_cdk::api::time().into();
+            let idempotency_ns = now_ns().into();
 
             let plan = SettlementPlan {
                 series_id,
@@ -285,14 +286,14 @@ pub struct FundWithdrawalPlan {
 impl FundWithdrawalPlan {
     /// Retrieves an existing fund withdrawal plan or creates a new one.
     pub fn get_or_create(params: FundWithdrawalPlanParams) -> Self {
-        crate::memory::FUND_WITHDRAWAL_PLANS.with(|m| {
+        FUND_WITHDRAWAL_PLANS.with(|m| {
             let mut m = m.borrow_mut();
 
             if let Some(existing) = m.get(&params.request_id) {
                 return existing.clone();
             }
 
-            let idempotency_ns = ic_cdk::api::time().into();
+            let idempotency_ns = now_ns().into();
 
             let plan = FundWithdrawalPlan {
                 request_id: params.request_id.clone(),

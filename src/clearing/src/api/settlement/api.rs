@@ -13,10 +13,10 @@ use crate::{
         ACCOUNT_STATES, COLLATERAL_ASSETS, CONFIG, INSURANCE_FUND, POSITIONS, REGISTRY_CANISTER,
         SERIES, SETTLEMENT_PLANS, TREASURY,
     },
-    payoffs::get_settlement_value,
+    payoffs::{fees::calculate_settlement_fee, get_settlement_value},
     types::{
         errors::CommonError,
-        plans::{PlanStatus, SettlementPlan, SettlementPlanParams},
+        plans::{PlanStatus, SettlementPlan, SettlementPlanParams, SettlementPosition},
     },
 };
 
@@ -94,64 +94,13 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             }
             existing
         } else {
-            let mut total_insurance_fee: u128 = 0;
-            let mut total_protocol_fee: u128 = 0;
-
-            // Gather positions for settlement and compute payoffs/fees.
-            let positions_to_settle = POSITIONS.with(|positions| {
-                let positions = positions.borrow();
-                let mut results = Vec::new();
-
-                for ((user, sid), pos) in positions.iter() {
-                    if sid != &series_id {
-                        continue;
-                    }
-
-                    let payoff_u128 = get_settlement_value(&ser, &settlement_price, pos.net_qty);
-
-                    let i_fee = crate::payoffs::fees::calculate_settlement_fee(
-                        payoff_u128,
-                        insurance_fund_fee_ratio,
-                    );
-
-                    let p_fee = crate::payoffs::fees::calculate_settlement_fee(
-                        payoff_u128,
-                        protocol_fee_ratio,
-                    );
-
-                    let cashflow: i128 = (payoff_u128 as i128) - (i_fee as i128) - (p_fee as i128);
-
-                    total_insurance_fee += i_fee;
-                    total_protocol_fee += p_fee;
-
-                    results.push(crate::types::plans::SettlementPosition {
-                        user: *user,
-                        net_qty: pos.net_qty,
-                        reserved_margin_usd: pos.reserved_margin_usd,
-                        cashflow_usd: cashflow,
-                    });
-                }
-                results
-            });
-
-            // Perform solvency check before any state modifications.
-            check_settlement_solvency(&ser, &settlement_price, &positions_to_settle)?;
-
-            // Now that solvency is verified, atomically remove positions and build the plan.
-            POSITIONS.with(|positions| {
-                let mut positions = positions.borrow_mut();
-                for pos in &positions_to_settle {
-                    positions.remove(&(pos.user, series_id.clone()));
-                }
-            });
-
-            SettlementPlan::get_or_create(SettlementPlanParams {
-                series_id: series_id.clone(),
-                settlement_price: settlement_price.clone(),
-                fee: total_protocol_fee,
-                insurance_fee: total_insurance_fee,
-                positions: positions_to_settle,
-            })
+            prepare_settlement_impl(
+                &ser,
+                &series_id,
+                &settlement_price,
+                insurance_fund_fee_ratio,
+                protocol_fee_ratio,
+            )?
         };
 
         if plan.status == PlanStatus::Finalised {
@@ -227,6 +176,71 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
     result.into()
 }
 
+/// Core synchronous logic for building a settlement plan and removing positions.
+///
+/// This is extracted for unit testing atomicity and solvency checks.
+pub(crate) fn prepare_settlement_impl(
+    ser: &Series,
+    series_id: &shared::types::SeriesId,
+    settlement_price: &Price,
+    insurance_fund_fee_ratio: u16,
+    protocol_fee_ratio: u16,
+) -> Result<SettlementPlan, SettlementError> {
+    let mut total_insurance_fee: u128 = 0;
+    let mut total_protocol_fee: u128 = 0;
+
+    // Gather positions for settlement and compute payoffs/fees.
+    let positions_to_settle = POSITIONS.with(|positions| {
+        let positions = positions.borrow();
+
+        let mut results = Vec::new();
+
+        for ((user, sid), pos) in positions.iter() {
+            if sid != series_id {
+                continue;
+            }
+
+            let payoff_u128 = get_settlement_value(ser, settlement_price, pos.net_qty);
+
+            let i_fee = calculate_settlement_fee(payoff_u128, insurance_fund_fee_ratio);
+
+            let p_fee = calculate_settlement_fee(payoff_u128, protocol_fee_ratio);
+
+            let cashflow: i128 = (payoff_u128 as i128) - (i_fee as i128) - (p_fee as i128);
+
+            total_insurance_fee += i_fee;
+            total_protocol_fee += p_fee;
+
+            results.push(SettlementPosition {
+                user: *user,
+                net_qty: pos.net_qty,
+                reserved_margin_usd: pos.reserved_margin_usd,
+                cashflow_usd: cashflow,
+            });
+        }
+        results
+    });
+
+    // Perform solvency check before any state modifications.
+    check_settlement_solvency(ser, settlement_price, &positions_to_settle)?;
+
+    // Now that solvency is verified, atomically remove positions and build the plan.
+    POSITIONS.with(|positions| {
+        let mut positions = positions.borrow_mut();
+        for pos in &positions_to_settle {
+            positions.remove(&(pos.user, series_id.clone()));
+        }
+    });
+
+    Ok(SettlementPlan::get_or_create(SettlementPlanParams {
+        series_id: series_id.clone(),
+        settlement_price: settlement_price.clone(),
+        fee: total_protocol_fee,
+        insurance_fee: total_insurance_fee,
+        positions: positions_to_settle,
+    }))
+}
+
 /// Validates aggregate solvency for a settlement batch.
 ///
 /// Under the new architecture, we only need to ensure the system is solvent
@@ -235,7 +249,7 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 fn check_settlement_solvency(
     series: &Series,
     price: &Price,
-    positions: &[crate::types::plans::SettlementPosition],
+    positions: &[SettlementPosition],
 ) -> Result<(), SettlementError> {
     let mut total_payoff: u128 = 0;
 
@@ -264,4 +278,150 @@ fn check_settlement_solvency(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use candid::Principal;
+    use shared::types::{Description, PayoffType, PayoutUnit, SeriesId};
+
+    use super::*;
+    use crate::{
+        memory::{ACCOUNT_STATES, COLLATERAL_ASSETS, POSITIONS},
+        types::{margin::AccountState, user::User},
+        Position,
+    };
+
+    #[test]
+    fn test_settle_series_atomicity_on_solvency_failure() {
+        let user_p = Principal::from_slice(&[1]);
+        let user = User(user_p);
+        let series_id = SeriesId::from("test_ser".to_string());
+
+        let series = Series {
+            series_id: series_id.clone(),
+            underlying: "BTC".to_string(),
+            expiry_ns: 2000000000,
+            payoff_type: PayoffType::Call,
+            strike: Some(Price::new(100, 0)),
+            price_precision: 0,
+            payout_unit: PayoutUnit::usd(),
+            oracle_source: "oracle".to_string(),
+            creator: Principal::anonymous(),
+            created_at_ns: 1000000000,
+            title: "Test".to_string(),
+            description: Description::plain("Test Description"),
+        };
+
+        let settlement_price = Price::new(200, 0); // payoff 100 per unit (200 - 100)
+
+        POSITIONS.with(|pos| {
+            let mut pos = pos.borrow_mut();
+            pos.clear();
+            pos.insert(
+                (user, series_id.clone()),
+                Position {
+                    user,
+                    series_id: series_id.clone(),
+                    net_qty: 1,
+                    reserved_margin_usd: 10,
+                },
+            );
+        });
+
+        // Set total system equity to 50 USD (less than 100 payoff)
+        ACCOUNT_STATES.with(|acc| {
+            let mut acc = acc.borrow_mut();
+            acc.clear();
+            let mut a = AccountState::new(user);
+            a.cash_balance_usd = 50_000_000; // 50 USD (6 decimals)
+            acc.insert(user, a);
+        });
+
+        // Mock collateral assets for calculate_equity_usd
+        COLLATERAL_ASSETS.with(|c| c.borrow_mut().clear());
+
+        let result = prepare_settlement_impl(&series, &series_id, &settlement_price, 0, 0);
+
+        assert!(result.is_err());
+        if let Err(SettlementError::SolvencyViolation {
+            total_payoff,
+            total_collateral_usd,
+        }) = result
+        {
+            assert_eq!(total_payoff, 100_000_000); // 100 USD (6 decimals)
+            assert_eq!(total_collateral_usd, 50_000_000); // 50 USD
+        } else {
+            panic!("Expected SolvencyViolation, got {:?}", result);
+        }
+
+        // Verify position STILL EXISTS (atomicity check)
+        POSITIONS.with(|pos| {
+            assert!(pos.borrow().contains_key(&(user, series_id)));
+        });
+    }
+
+    #[test]
+    fn test_settle_series_normal_flow() {
+        let user_p = Principal::from_slice(&[1]);
+        let user = User(user_p);
+        let series_id = SeriesId::from("test_ser".to_string());
+
+        let series = Series {
+            series_id: series_id.clone(),
+            underlying: "BTC".to_string(),
+            expiry_ns: 2000000000,
+            payoff_type: PayoffType::Call,
+            strike: Some(Price::new(100, 0)),
+            price_precision: 0,
+            payout_unit: PayoutUnit::usd(),
+            oracle_source: "oracle".to_string(),
+            creator: Principal::anonymous(),
+            created_at_ns: 1000000000,
+            title: "Test".to_string(),
+            description: Description::plain("Test Description"),
+        };
+
+        let settlement_price = Price::new(150, 0); // payoff 50 per unit
+
+        POSITIONS.with(|pos| {
+            let mut pos = pos.borrow_mut();
+            pos.clear();
+            pos.insert(
+                (user, series_id.clone()),
+                Position {
+                    user,
+                    series_id: series_id.clone(),
+                    net_qty: 1,
+                    reserved_margin_usd: 10,
+                },
+            );
+        });
+
+        // Set total system equity to 1000 USD
+        ACCOUNT_STATES.with(|acc| {
+            let mut acc = acc.borrow_mut();
+            acc.clear();
+            let mut a = AccountState::new(user);
+            a.cash_balance_usd = 1_000_000_000;
+            acc.insert(user, a);
+        });
+
+        let result = prepare_settlement_impl(&series, &series_id, &settlement_price, 10, 5); // 0.1% insurance, 0.05% protocol
+
+        assert!(result.is_ok());
+        let plan = result.unwrap();
+
+        // payoff = 50. i_fee = 50 * 0.001 = 0.05. p_fee = 50 * 0.0005 = 0.025
+        // fees are in USD units (6 decimals).
+        // 50 USD = 50_000_000. i_fee = 50_000. p_fee = 25_000.
+        assert_eq!(plan.insurance_fee_usd, 50_000);
+        assert_eq!(plan.fee_usd, 25_000);
+        assert_eq!(plan.positions[0].cashflow_usd, 50_000_000 - 50_000 - 25_000);
+
+        // Verify position WAS REMOVED
+        POSITIONS.with(|pos| {
+            assert!(!pos.borrow().contains_key(&(user, series_id)));
+        });
+    }
 }

@@ -11,7 +11,10 @@ use crate::{
         event::{Event, EventType},
         margin::{AccountState, Position},
     },
-    utils::series::ensure_series_registered,
+    utils::{
+        series::ensure_series_registered,
+        system::{canister_id, now_ns},
+    },
 };
 
 /// Internal shared logic for executing a trade and updating positions/margin.
@@ -220,13 +223,13 @@ pub(crate) fn execute_trade_impl(
         // Buyer Event
         events.push(Event {
             event_id,
-            clearing_id: ic_cdk::id(),
+            clearing_id: canister_id(),
             series_id: series_id.clone(),
             user: buyer,
             qty,
             price: price.clone(),
             event_type: EventType::Executed,
-            timestamp: ic_cdk::api::time(),
+            timestamp: now_ns(),
         });
 
         // Seller Event (using same event_id or should it be different? Usually history shows the
@@ -234,13 +237,13 @@ pub(crate) fn execute_trade_impl(
         // both users.
         events.push(Event {
             event_id,
-            clearing_id: ic_cdk::id(),
+            clearing_id: canister_id(),
             series_id: series_id.clone(),
             user: seller,
             qty: -qty,
             price,
             event_type: EventType::Executed,
-            timestamp: ic_cdk::api::time(),
+            timestamp: now_ns(),
         });
     });
 

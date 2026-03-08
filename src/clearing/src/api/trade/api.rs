@@ -1,4 +1,5 @@
 use ic_cdk_macros::{query, update};
+use shared::types::Series;
 
 use super::{
     errors::TradeError,
@@ -11,17 +12,20 @@ use super::{
 use crate::{
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
-        ACCEPTED_TRANSFERS, ACCOUNT_STATES, COLLATERAL_ASSETS, EVENTS, EXECUTED_TRADES,
-        FROZEN_TRANSFERS, LIMIT_ORDERS, POSITIONS,
+        ACCEPTED_TRANSFERS, ACCOUNT_STATES, COLLATERAL_ASSETS, EVENTS, FROZEN_TRANSFERS,
+        LIMIT_ORDERS, POSITIONS,
     },
     payoffs::get_required_margin,
-    trade::{service::internal_execute_trade, types::ExecuteTradeParams},
+    trade::{
+        service::{execute_trade_impl, internal_execute_trade},
+        types::ExecuteTradeParams,
+    },
     types::{
         errors::CommonError,
         event::{Event, EventType},
         margin::{AccountState, Position},
         state::PositionProof,
-        trade::{LimitOrder, Side},
+        trade::{LimitOrder, OrderId, Side, TradeId},
         user::User,
     },
     utils::series::ensure_series_registered,
@@ -108,23 +112,43 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
             matching_order_id,
         } = params;
 
-        if EXECUTED_TRADES.with(|m| m.borrow().contains_key(&trade_id)) {
-            return Ok(true);
-        }
-
-        let order = LIMIT_ORDERS.with(|m| {
+        let series_id = LIMIT_ORDERS.with(|m| {
             m.borrow()
                 .get(&matching_order_id)
-                .cloned()
+                .map(|o| o.series_id.clone())
                 .ok_or(TradeError::OrderNotFound(matching_order_id.clone()))
         })?;
 
-        let (buyer, seller, b_unblock, s_unblock) = match order.side {
-            Side::Buy => (order.creator, taker, Some(order.blocked_margin_usd), None),
-            Side::Sell => (taker, order.creator, None, Some(order.blocked_margin_usd)),
-        };
+        let series = ensure_series_registered(&series_id).await?;
 
-        internal_execute_trade(ExecuteTradeParams {
+        submit_market_order_impl(taker, matching_order_id, trade_id, series)
+    })
+    .await;
+
+    result.into()
+}
+
+pub(crate) fn submit_market_order_impl(
+    taker: User,
+    matching_order_id: OrderId,
+    trade_id: TradeId,
+    series: Series,
+) -> Result<bool, TradeError> {
+    let order = LIMIT_ORDERS.with(|m| {
+        m.borrow()
+            .get(&matching_order_id)
+            .cloned()
+            .ok_or(TradeError::OrderNotFound(matching_order_id.clone()))
+    })?;
+
+    let (buyer, seller, b_unblock, s_unblock) = match order.side {
+        Side::Buy => (order.creator, taker, Some(order.blocked_margin_usd), None),
+        Side::Sell => (taker, order.creator, None, Some(order.blocked_margin_usd)),
+    };
+
+    execute_trade_impl(
+        series,
+        ExecuteTradeParams {
             trade_id: trade_id.clone(),
             series_id: order.series_id,
             buyer,
@@ -133,19 +157,15 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
             price: order.price,
             buyer_unblock_amount: b_unblock,
             seller_unblock_amount: s_unblock,
-        })
-        .await?;
+        },
+    )?;
 
-        // Only remove the order after successful execution
-        LIMIT_ORDERS.with(|m| {
-            m.borrow_mut().remove(&matching_order_id);
-        });
+    // Only remove the order after successful execution
+    LIMIT_ORDERS.with(|m| {
+        m.borrow_mut().remove(&matching_order_id);
+    });
 
-        Ok(true)
-    })
-    .await;
-
-    result.into()
+    Ok(true)
 }
 
 /// Cancels an existing limit order and releases the reserved collateral.
@@ -373,4 +393,151 @@ pub fn list_orders(params: ListOrdersParams) -> Vec<LimitOrder> {
             None => orders.values().cloned().collect(),
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use candid::Principal;
+    use shared::types::{Description, PayoffType, PayoutUnit, Price, Series, SeriesId};
+
+    use super::*;
+    use crate::memory::{ACCOUNT_STATES, LIMIT_ORDERS};
+
+    #[test]
+    fn test_market_order_atomicity_on_execution_failure() {
+        let maker_p = Principal::from_slice(&[1]);
+        let taker_p = Principal::from_slice(&[2]);
+        let maker = User(maker_p);
+        let taker = User(taker_p);
+        let series_id = SeriesId::from("test_ser".to_string());
+        let order_id = OrderId::from("order_1".to_string());
+        let trade_id = TradeId::from("trade_1".to_string());
+
+        let series = Series {
+            series_id: series_id.clone(),
+            underlying: "BTC".to_string(),
+            expiry_ns: 2000000000,
+            payoff_type: PayoffType::Call,
+            strike: Some(Price::new(50_000_000, 6)), // $50.00
+            price_precision: 6,
+            payout_unit: PayoutUnit::usd(),
+            oracle_source: "oracle".to_string(),
+            creator: Principal::anonymous(),
+            created_at_ns: 1000000000,
+            title: "Test".to_string(),
+            description: Description::plain("Test Description"),
+        };
+
+        // Maker has a Buy Limit Order
+        LIMIT_ORDERS.with(|m| {
+            let mut m = m.borrow_mut();
+            m.clear();
+            m.insert(
+                order_id.clone(),
+                LimitOrder {
+                    order_id: order_id.clone(),
+                    creator: maker,
+                    series_id: series_id.clone(),
+                    side: Side::Buy,
+                    qty: 1,
+                    price: Price::new(60_000_000, 6), // $60.00
+                    blocked_margin_usd: 60_000_000,   // $60.00
+                },
+            );
+        });
+
+        // Maker has enough funds, but Taker (Seller) has NO funds
+        ACCOUNT_STATES.with(|acc| {
+            let mut acc = acc.borrow_mut();
+            acc.clear();
+
+            let mut m_acc = AccountState::new(maker);
+            m_acc.cash_balance_usd = 100_000_000; // $100
+            m_acc.reserved_margin_usd = 60_000_000;
+            acc.insert(maker, m_acc);
+
+            let mut t_acc = AccountState::new(taker);
+            t_acc.cash_balance_usd = 0; // Insolvency for seller
+            acc.insert(taker, t_acc);
+        });
+
+        // Taker tries to Sell (Market Order)
+        let result = submit_market_order_impl(taker, order_id.clone(), trade_id, series);
+
+        // Result should be Err(InsufficientMargin) for taker
+        assert!(result.is_err());
+
+        // Verify Limit Order STILL EXISTS (atomicity check)
+        LIMIT_ORDERS.with(|m| {
+            assert!(m.borrow().contains_key(&order_id));
+        });
+    }
+
+    #[test]
+    fn test_market_order_normal_flow() {
+        let maker_p = Principal::from_slice(&[1]);
+        let taker_p = Principal::from_slice(&[2]);
+        let maker = User(maker_p);
+        let taker = User(taker_p);
+        let series_id = SeriesId::from("test_ser".to_string());
+        let order_id = OrderId::from("order_1".to_string());
+        let trade_id = TradeId::from("trade_1".to_string());
+
+        let series = Series {
+            series_id: series_id.clone(),
+            underlying: "BTC".to_string(),
+            expiry_ns: 2000000000,
+            payoff_type: PayoffType::Call,
+            strike: Some(Price::new(50_000_000, 6)), // $50.00
+            price_precision: 6,
+            payout_unit: PayoutUnit::usd(),
+            oracle_source: "oracle".to_string(),
+            creator: Principal::anonymous(),
+            created_at_ns: 1000000000,
+            title: "Test".to_string(),
+            description: Description::plain("Test Description"),
+        };
+
+        // Maker has a Buy Limit Order
+        LIMIT_ORDERS.with(|m| {
+            let mut m = m.borrow_mut();
+            m.clear();
+            m.insert(
+                order_id.clone(),
+                LimitOrder {
+                    order_id: order_id.clone(),
+                    creator: maker,
+                    series_id: series_id.clone(),
+                    side: Side::Buy,
+                    qty: 1,
+                    price: Price::new(60_000_000, 6), // $60.00
+                    blocked_margin_usd: 60_000_000,   // $60.00
+                },
+            );
+        });
+
+        // Both have enough funds
+        ACCOUNT_STATES.with(|acc| {
+            let mut acc = acc.borrow_mut();
+            acc.clear();
+
+            let mut m_acc = AccountState::new(maker);
+            m_acc.cash_balance_usd = 1_000_000_000;
+            m_acc.reserved_margin_usd = 60_000_000;
+            acc.insert(maker, m_acc);
+
+            let mut t_acc = AccountState::new(taker);
+            t_acc.cash_balance_usd = 1_000_000_000;
+            acc.insert(taker, t_acc);
+        });
+
+        let result = submit_market_order_impl(taker, order_id.clone(), trade_id, series);
+
+        assert!(result.is_ok());
+
+        // Verify Limit Order WAS REMOVED
+        LIMIT_ORDERS.with(|m| {
+            assert!(!m.borrow().contains_key(&order_id));
+        });
+    }
 }
