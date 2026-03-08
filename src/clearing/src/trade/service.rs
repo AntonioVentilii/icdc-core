@@ -1,3 +1,5 @@
+use shared::types::Series;
+
 use crate::{
     api::trade::errors::TradeError,
     memory::{
@@ -14,6 +16,21 @@ use crate::{
 
 /// Internal shared logic for executing a trade and updating positions/margin.
 pub(crate) async fn internal_execute_trade(params: ExecuteTradeParams) -> Result<bool, TradeError> {
+    let series_id = params.series_id.clone();
+
+    let series = ensure_series_registered(&series_id).await?;
+
+    execute_trade_impl(series, params)
+}
+
+pub(crate) fn execute_trade_impl(
+    series: Series,
+    params: ExecuteTradeParams,
+) -> Result<bool, TradeError> {
+    if EXECUTED_TRADES.with(|m| m.borrow().contains_key(&params.trade_id)) {
+        return Ok(true);
+    }
+
     let ExecuteTradeParams {
         trade_id,
         series_id,
@@ -25,11 +42,6 @@ pub(crate) async fn internal_execute_trade(params: ExecuteTradeParams) -> Result
         seller_unblock_amount,
     } = params;
 
-    if EXECUTED_TRADES.with(|m| m.borrow().contains_key(&trade_id)) {
-        return Ok(true);
-    }
-
-    let series = ensure_series_registered(&series_id).await?;
     let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
 
     // Calculate upfront collateral (cost) for both sides
@@ -252,8 +264,8 @@ mod tests {
         types::{trade::TradeId, user::User},
     };
 
-    #[tokio::test]
-    async fn test_trade_atomicity_on_failure() {
+    #[test]
+    fn test_trade_atomicity_on_failure() {
         let buyer_p = Principal::from_slice(&[1]);
         let seller_p = Principal::from_slice(&[2]);
         let buyer = User(buyer_p);
@@ -276,7 +288,7 @@ mod tests {
         };
 
         // Initialize state
-        SERIES.with(|s| s.borrow_mut().insert(series_id.clone(), series));
+        SERIES.with(|s| s.borrow_mut().insert(series_id.clone(), series.clone()));
 
         ACCOUNT_STATES.with(|accounts| {
             let mut accounts = accounts.borrow_mut();
@@ -305,7 +317,7 @@ mod tests {
         };
 
         // Trade should fail for seller due to insufficient margin
-        let result = internal_execute_trade(params).await;
+        let result = execute_trade_impl(series, params);
         assert!(result.is_err());
 
         if let Err(TradeError::InsufficientMargin { user, .. }) = result {

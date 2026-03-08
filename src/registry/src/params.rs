@@ -306,7 +306,7 @@ mod tests {
             let mut s3 = s1.clone();
             s3.series_id = SeriesId::from("test-id-3".to_string());
 
-            let items = vec![
+            let items = [
                 (s1.series_id.clone(), s1),
                 (s2.series_id.clone(), s2),
                 (s3.series_id.clone(), s3),

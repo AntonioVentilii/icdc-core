@@ -22,4 +22,17 @@ for canister in "${CANISTERS[@]}"; do
     --locked \
     --target wasm32-unknown-unknown \
     --all-features
+
+  cargo clippy \
+    --manifest-path "$manifest_path" \
+    --locked \
+    --all-features \
+    --tests
+
+  cargo clippy \
+    --manifest-path "$manifest_path" \
+    --locked \
+    --all-features \
+    --examples \
+    --benches
 done
