@@ -17,3 +17,4 @@ function generate_did() {
 
 generate_did clearing
 generate_did registry
+generate_did minter

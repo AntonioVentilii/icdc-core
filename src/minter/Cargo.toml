@@ -1,0 +1,14 @@
+[package]
+name = "minter"
+version = "0.0.1"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+candid = { workspace = true }
+ic-cdk = { workspace = true }
+ic-cdk-macros = { workspace = true }
+icrc-ledger-types = { workspace = true }
+serde = { workspace = true }
