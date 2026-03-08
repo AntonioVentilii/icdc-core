@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use candid::Principal;
 use ic_cdk::api::is_controller;
@@ -23,6 +23,7 @@ use crate::{
             PlanStatus, SettlementPlan, SettlementPlanParams, SettlementPosition,
             SettlementStatusView,
         },
+        user::User,
     },
 };
 
@@ -312,7 +313,9 @@ pub(crate) fn prepare_settlement_impl(
     // Perform solvency check before any state modifications.
     // Uses the aggregate net payoff (post-fee) — fees stay in the system
     // (TREASURY + INSURANCE_FUND) so they don't reduce system equity.
-    check_settlement_solvency(total_net_payoff)?;
+    // We pass the settlement positions so that the check can compute
+    // expected post-settlement equity (accounting for max(0,...) clamping).
+    check_settlement_solvency(total_net_payoff, &positions_to_settle)?;
 
     // Now that solvency is verified, atomically remove positions and build the plan.
     POSITIONS.with(|positions| {
@@ -334,25 +337,49 @@ pub(crate) fn prepare_settlement_impl(
 
 /// Validates aggregate solvency for a settlement batch.
 ///
-/// Ensures that the total **net** payoff (post-fee, i.e. the amount actually paid
-/// out to users) does not exceed total system equity.  Fees are credited to the
-/// TREASURY and INSURANCE_FUND and therefore remain inside the system.
-/// Individual user insolvency is handled by the liquidator.
-fn check_settlement_solvency(total_net_payoff: u128) -> Result<(), SettlementError> {
-    // Verify system solvency by comparing net payouts against system equity.
-    let total_system_equity_usd = ACCOUNT_STATES.with(|accounts| {
+/// Computes the **expected post-settlement** system equity by simulating the
+/// cashflows on each account and clamping to zero.  This is more conservative
+/// than using pre-settlement equity because `calculate_equity_usd` returns
+/// `max(0, cash + collateral)` — a loser whose equity would go negative
+/// contributes 0 post-settlement, but their full positive equity would have
+/// been counted in a pre-settlement snapshot, inflating the apparent resources.
+///
+/// Fees are credited to the TREASURY and INSURANCE_FUND and therefore remain
+/// inside the system.  Individual user insolvency is handled by the liquidator.
+fn check_settlement_solvency(
+    total_net_payoff: u128,
+    positions: &[SettlementPosition],
+) -> Result<(), SettlementError> {
+    // Build a map of user -> total cashflow for quick lookup.
+    let mut cashflow_by_user = HashMap::<User, i128>::new();
+    for pos in positions {
+        *cashflow_by_user.entry(pos.user).or_default() += pos.cashflow_usd;
+    }
+
+    // Compute expected post-settlement equity per account.
+    let total_post_settlement_equity = ACCOUNT_STATES.with(|accounts| {
         let accounts = accounts.borrow();
         let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
+
         accounts
             .values()
-            .map(|acc| acc.calculate_equity_usd(&configs))
+            .map(|acc| {
+                let current_equity = acc.calculate_raw_equity_i128(&configs);
+                let cashflow = cashflow_by_user.get(&acc.user).copied().unwrap_or(0);
+                let post_equity = current_equity + cashflow;
+                if post_equity < 0 {
+                    0u128
+                } else {
+                    post_equity as u128
+                }
+            })
             .sum::<u128>()
     });
 
-    if total_net_payoff > total_system_equity_usd {
+    if total_net_payoff > total_post_settlement_equity {
         return Err(SettlementError::SolvencyViolation {
             total_net_payoff,
-            total_collateral_usd: total_system_equity_usd,
+            total_collateral_usd: total_post_settlement_equity,
         });
     }
 
@@ -373,7 +400,7 @@ mod tests {
 
     #[test]
     fn test_settle_series_atomicity_on_solvency_failure() {
-        let user_p = Principal::from_slice(&[1]);
+        let user_p = Principal::from_slice(&[3]);
         let user = User(user_p);
         let series_id = SeriesId::from("test_ser".to_string());
 
@@ -392,7 +419,8 @@ mod tests {
             description: Description::plain("Test Description"),
         };
 
-        let settlement_price = Price::new(200, 0); // payoff 100 per unit (200 - 100)
+        // Settlement price 200 → Call payoff = 200 - 100 = 100 USD per unit.
+        let settlement_price = Price::new(200, 0);
 
         POSITIONS.with(|pos| {
             let mut pos = pos.borrow_mut();
@@ -408,16 +436,19 @@ mod tests {
             );
         });
 
-        // Set total system equity to 50 USD (less than 100 payoff)
+        // User already underwater from prior losses: cash = -10 USD.
+        // Pre-settlement equity  = max(0, -10) = 0.
+        // Cashflow = +100 (no fees).
+        // Post-settlement equity = max(0, -10 + 100) = 90.
+        // Net payoff = 100 > 90 → SolvencyViolation.
         ACCOUNT_STATES.with(|acc| {
             let mut acc = acc.borrow_mut();
             acc.clear();
             let mut a = AccountState::new(user);
-            a.cash_balance_usd = 50_000_000; // 50 USD (6 decimals)
+            a.cash_balance_usd = -10_000_000; // -10 USD
             acc.insert(user, a);
         });
 
-        // Mock collateral assets for calculate_equity_usd
         COLLATERAL_ASSETS.with(|c| c.borrow_mut().clear());
 
         let result = prepare_settlement_impl(&series, &series_id, &settlement_price, 0, 0);
@@ -428,8 +459,8 @@ mod tests {
             total_collateral_usd,
         }) = result
         {
-            assert_eq!(total_net_payoff, 100_000_000); // 100 USD net (no fees)
-            assert_eq!(total_collateral_usd, 50_000_000); // 50 USD
+            assert_eq!(total_net_payoff, 100_000_000); // 100 USD
+            assert_eq!(total_collateral_usd, 90_000_000); // 90 USD post-settlement
         } else {
             panic!("Expected SolvencyViolation, got {:?}", result);
         }
@@ -777,6 +808,87 @@ mod tests {
 
         // Cleanup
         SETTLEMENT_PLANS.with(|m| m.borrow_mut().remove(&series_id));
+        ACCOUNT_STATES.with(|acc| acc.borrow_mut().clear());
+    }
+
+    /// Validates that the solvency check uses post-settlement equity (with clamping).
+    ///
+    /// Scenario with two accounts:
+    /// - Winner: equity = 10 USD, will receive +95 USD cashflow
+    /// - Loser:  equity = 100 USD, will pay -200 USD cashflow (goes to -100 → clamped to 0)
+    ///
+    /// Pre-settlement total equity = 110 USD → a net payoff of 95 would pass naively.
+    /// Post-settlement total equity = max(0, 105) + max(0, -100) = 105 + 0 = 105 USD.
+    ///
+    /// We set net payoff to 106 to be above post-settlement equity (105) but below
+    /// pre-settlement equity (110), proving the check uses the correct baseline.
+    #[test]
+    fn test_solvency_check_accounts_for_post_settlement_clamping() {
+        let winner_p = Principal::from_slice(&[10]);
+        let winner = User(winner_p);
+        let loser_p = Principal::from_slice(&[11]);
+        let loser = User(loser_p);
+
+        // Set up account states: winner = 10 USD, loser = 100 USD
+        ACCOUNT_STATES.with(|acc| {
+            let mut acc = acc.borrow_mut();
+            acc.clear();
+            let mut w = AccountState::new(winner);
+            w.cash_balance_usd = 10_000_000; // 10 USD
+            acc.insert(winner, w);
+            let mut l = AccountState::new(loser);
+            l.cash_balance_usd = 100_000_000; // 100 USD
+            acc.insert(loser, l);
+        });
+
+        COLLATERAL_ASSETS.with(|c| c.borrow_mut().clear());
+
+        // Pre-settlement total equity = 110 USD
+        // Simulate: winner gets +95, loser gets -200
+        // Post-settlement: winner = 105, loser = max(0, -100) = 0 → total = 105
+        let positions = vec![
+            SettlementPosition {
+                user: winner,
+                net_qty: 1,
+                reserved_margin_usd: 5_000_000,
+                cashflow_usd: 95_000_000, // +95 USD
+            },
+            SettlementPosition {
+                user: loser,
+                net_qty: -1,
+                reserved_margin_usd: 50_000_000,
+                cashflow_usd: -200_000_000, // -200 USD
+            },
+        ];
+
+        // Net payoff = 106 USD (only positive cashflows count, but we test the
+        // solvency threshold directly).
+        // 106 > 105 (post-settlement) but 106 < 110 (pre-settlement).
+        let result = check_settlement_solvency(106_000_000, &positions);
+
+        assert!(
+            result.is_err(),
+            "Expected SolvencyViolation because post-settlement equity (105) < net payoff (106)"
+        );
+        if let Err(SettlementError::SolvencyViolation {
+            total_net_payoff,
+            total_collateral_usd,
+        }) = result
+        {
+            assert_eq!(total_net_payoff, 106_000_000);
+            assert_eq!(total_collateral_usd, 105_000_000); // post-settlement clamped equity
+        } else {
+            panic!("Expected SolvencyViolation");
+        }
+
+        // Also verify that a payoff within post-settlement equity passes.
+        let result_ok = check_settlement_solvency(105_000_000, &positions);
+        assert!(
+            result_ok.is_ok(),
+            "Expected success when net payoff equals post-settlement equity"
+        );
+
+        // Cleanup
         ACCOUNT_STATES.with(|acc| acc.borrow_mut().clear());
     }
 }

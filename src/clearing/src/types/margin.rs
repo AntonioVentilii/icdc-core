@@ -65,6 +65,22 @@ impl AccountState {
     /// value_usd = (balance * price_value * (10000 - haircut_bps)) / (10000 * 10^(decimals +
     /// price_decimals - 6))
     pub fn calculate_equity_usd(&self, configs: &BTreeMap<AssetId, CollateralAssetConfig>) -> u128 {
+        let raw = self.calculate_raw_equity_i128(configs);
+        if raw < 0 {
+            0
+        } else {
+            raw as u128
+        }
+    }
+
+    /// Returns the raw (unclamped, signed) equity.
+    ///
+    /// Use this when you need to simulate post-settlement equity by adding a
+    /// cashflow before applying the `max(0, ...)` floor.
+    pub fn calculate_raw_equity_i128(
+        &self,
+        configs: &BTreeMap<AssetId, CollateralAssetConfig>,
+    ) -> i128 {
         let mut total_equity_usd: i128 = self.cash_balance_usd;
 
         let target_decimals = USD_DECIMALS as u32;
@@ -79,13 +95,6 @@ impl AccountState {
                     let haircut_multiplier =
                         (BPS_BASE as u128).saturating_sub(config.haircut_bps as u128);
 
-                    // Intermediate numerator: balance * price * multiplier
-                    // Max potential: 10^38 * 10^18 * 10^4 = 10^60 (Fits comfortably in u128 which
-                    // is ~3.4 * 10^38... wait) Actually, u128 max is 3.4e38.
-                    // balance (u128 tokens) * price (u128) * 10000 can easily overflow u128.
-                    // We must use BigUint (candid::Nat) for the intermediate calculation to be
-                    // safe.
-
                     let numerator = Nat::from(*balance)
                         * Nat::from(price_value)
                         * Nat::from(haircut_multiplier);
@@ -97,8 +106,6 @@ impl AccountState {
                             * Nat::from(10u128.pow(total_source_decimals - target_decimals));
                         numerator / divisor
                     } else {
-                        // This case is unlikely (decimals + price_decimals < 6), but for
-                        // completeness:
                         let multiplier =
                             Nat::from(10u128.pow(target_decimals - total_source_decimals));
                         (numerator * multiplier) / Nat::from(BPS_BASE)
@@ -110,11 +117,7 @@ impl AccountState {
             }
         }
 
-        if total_equity_usd < 0 {
-            0
-        } else {
-            total_equity_usd as u128
-        }
+        total_equity_usd
     }
 
     /// Calculates the available equity (excess margin) in USD.
