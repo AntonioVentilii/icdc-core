@@ -1,11 +1,10 @@
 use candid::Principal;
-use shared::types::{Series, SeriesId};
+use shared::types::{PayoutUnit, Series, SeriesId};
 
 use crate::{
     api::trade::errors::TradeError,
     memory::{REGISTRY_CANISTER, SERIES},
     types::errors::CommonError,
-    utils::asset::is_supported_asset,
 };
 
 /// Ensures that a derivative series is registered and cached locally.
@@ -17,7 +16,7 @@ use crate::{
 ///
 /// # Returns
 /// * [`Series`] if successfully registered or already present.
-/// * [`TradeError`] if the registry is not set, the series is not found, or the asset is
+/// * [`TradeError`] if the registry is not set, the series is not found, or the payout unit is
 ///   unsupported.
 pub async fn ensure_series_registered(series_id: &SeriesId) -> Result<Series, TradeError> {
     if let Some(series) = SERIES.with(|s| s.borrow().get(series_id).cloned()) {
@@ -38,15 +37,12 @@ pub async fn ensure_series_registered(series_id: &SeriesId) -> Result<Series, Tr
 
     let series = series_opt.ok_or_else(|| TradeError::SeriesNotFound(series_id.clone()))?;
 
-    let asset = series.settlement_asset.to_asset();
-
-    if !is_supported_asset(&asset) {
-        // Technically this could be a separate error, but let's reuse a logical one or add if
-        // needed. For now, let's say it's an internal-ish error that the registry has a
-        // series with unsupported asset.
-        return Err(TradeError::Common(CommonError::Internal(
-            "Unsupported settlement asset in registry".to_string(),
-        )));
+    // Only USD-payout contracts are supported by this clearing canister version.
+    if series.payout_unit != PayoutUnit::usd() {
+        return Err(TradeError::Common(CommonError::Internal(format!(
+            "Unsupported payout unit in series: {:?}. Only USD is supported.",
+            series.payout_unit
+        ))));
     }
 
     SERIES.with(|s| {

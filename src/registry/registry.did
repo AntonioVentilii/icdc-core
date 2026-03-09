@@ -7,27 +7,28 @@ type AddSeriesParams = record {
 	title : text;
 	strike : opt Price;
 	payoff_type : PayoffType;
+	payout_unit : PayoutUnit;
 	expiry_ns : nat64;
-	settlement_asset : SettlementAsset;
 	underlying : text;
 	description : Description;
 	price_precision : nat8;
 	oracle_source : text
 };
 type AddSeriesResult = variant { Ok : text; Err : SeriesError };
-type Chain = variant { Bsc; Base; Ethereum; Polygon };
+type CanonicalCryptoUnit = variant { Btc; Eth; Icp; Usdc; Usdt };
 type DecimalValue = record { decimals : nat8; value : nat };
 type Description = record {
 	html : opt text;
 	markdown : opt text;
 	plain : text
 };
+type FiatUnit = variant { Chf; Eur; Gbp; Usd };
 type ListSeriesParams = record {
 	strike : opt Price;
 	creator : opt principal;
 	payoff_type : opt PayoffType;
+	payout_unit : opt PayoutUnit;
 	pagination : opt PaginationParams;
-	settlement_asset : opt SettlementAsset;
 	underlying : opt text;
 	search_term : opt text;
 	oracle_source : opt text
@@ -37,6 +38,7 @@ type ManageOraclePrincipalsParams = record {
 	remove_principals : vec principal;
 	oracle_id : text
 };
+type NonMonetaryUnit = variant { Points };
 type Oracle = record {
 	manager : principal;
 	registered_at_ns : nat64;
@@ -57,6 +59,11 @@ type OracleMetadata = record {
 type OracleResult = variant { Ok; Err : OracleError };
 type PaginationParams = record { cursor : opt text; limit : opt nat64 };
 type PayoffType = variant { Put; Binary; Call };
+type PayoutUnit = variant {
+	Fiat : FiatUnit;
+	Crypto : CanonicalCryptoUnit;
+	NonMonetary : NonMonetaryUnit
+};
 type Price = record {
 	timestamp : opt nat64;
 	oracle_id : opt text;
@@ -67,9 +74,9 @@ type Series = record {
 	strike : opt Price;
 	creator : principal;
 	payoff_type : PayoffType;
+	payout_unit : PayoutUnit;
 	expiry_ns : nat64;
 	series_id : text;
-	settlement_asset : SettlementAsset;
 	underlying : text;
 	description : Description;
 	created_at_ns : nat64;
@@ -83,13 +90,6 @@ type SeriesError = variant {
 	SeriesAlreadyExists
 };
 type SeriesPage = record { next_cursor : opt text; items : vec Series };
-type SettlementAsset = variant {
-	Icp;
-	Usdc : Chain;
-	Usdt : Chain;
-	Native : Chain;
-	CkUsdc
-};
 type UpdateOracleMetadataParams = record {
 	metadata : OracleMetadata;
 	oracle_id : text

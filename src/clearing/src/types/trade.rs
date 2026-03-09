@@ -9,18 +9,33 @@ use crate::types::user::User;
     CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
 pub struct TradeId(String);
+impl From<String> for TradeId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
 
 /// A unique identifier for a limit order.
 #[derive(
     CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
 pub struct OrderId(String);
+impl From<String> for OrderId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
 
 /// A unique identifier for a position transfer operation.
 #[derive(
     CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
 pub struct TransferId(String);
+impl From<String> for TransferId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
 
 /// Represents the side of an order or trade.
 #[derive(CandidType, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,7 +56,6 @@ pub struct LimitOrder {
     pub qty: i128,
     /// Limit price in the precision defined by the associated series (`series.price_precision`).
     pub price: Price,
-    /// Amount blocked in collateral (in settlement asset's base units).
-    /// TODO: double-check if the above is true
-    pub block_index: u128,
+    /// Amount blocked in collateral (denominated in USD units, 6 decimals).
+    pub blocked_margin_usd: u128,
 }

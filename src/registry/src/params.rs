@@ -1,8 +1,6 @@
-use candid::{CandidType, Deserialize};
+use candid::{CandidType, Deserialize, Principal};
 use serde::Serialize;
-use shared::types::{
-    Description, OracleMetadata, PayoffType, Price, Series, SeriesId, SettlementAsset,
-};
+use shared::types::{Description, OracleMetadata, PayoffType, PayoutUnit, Price, Series, SeriesId};
 
 /// Input parameters for registering a new derivative series.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -17,8 +15,8 @@ pub struct AddSeriesParams {
     pub strike: Option<Price>,
     /// The number of decimals used for prices and strikes in this series.
     pub price_precision: u8,
-    /// The asset in which the contract is settled.
-    pub settlement_asset: SettlementAsset,
+    /// The unit in which the contract payoff is expressed.
+    pub payout_unit: PayoutUnit,
     /// The price oracle identifier (case-insensitive, e.g., "Coingecko").
     pub oracle_source: String,
     /// A short, descriptive title for the series.
@@ -86,12 +84,12 @@ pub struct ListSeriesParams {
     pub payoff_type: Option<PayoffType>,
     /// Filter by the strike price.
     pub strike: Option<Price>,
-    /// Filter by the settlement asset.
-    pub settlement_asset: Option<SettlementAsset>,
+    /// Filter by the payout unit.
+    pub payout_unit: Option<PayoutUnit>,
     /// Filter by the price oracle identifier (case-insensitive, partial match).
     pub oracle_source: Option<String>,
     /// Filter by the principal identifier of the creator.
-    pub creator: Option<candid::Principal>,
+    pub creator: Option<Principal>,
     /// Filter by a search term in the title or description (case-insensitive, partial match).
     pub search_term: Option<String>,
     /// Optional pagination parameters.
@@ -118,8 +116,8 @@ impl ListSeriesParams {
             }
         }
 
-        if let Some(settlement_asset) = &self.settlement_asset {
-            if &series.settlement_asset != settlement_asset {
+        if let Some(payout_unit) = &self.payout_unit {
+            if &series.payout_unit != payout_unit {
                 return false;
             }
         }
@@ -171,7 +169,7 @@ pub struct AddOracleParams {
     /// Initial information about the oracle.
     pub metadata: OracleMetadata,
     /// Initial list of authorised principals.
-    pub authorized_principals: Vec<candid::Principal>,
+    pub authorized_principals: Vec<Principal>,
 }
 
 /// Input parameters for updating an existing oracle's metadata.
@@ -189,15 +187,15 @@ pub struct ManageOraclePrincipalsParams {
     /// The unique identifier of the oracle.
     pub oracle_id: String,
     /// Principals to be added to the authorised list.
-    pub add_principals: Vec<candid::Principal>,
+    pub add_principals: Vec<Principal>,
     /// Principals to be removed from the authorised list.
-    pub remove_principals: Vec<candid::Principal>,
+    pub remove_principals: Vec<Principal>,
 }
 
 #[cfg(test)]
 mod tests {
     use candid::Principal;
-    use shared::types::{Description, PayoffType, SeriesId, SettlementAsset};
+    use shared::types::{Description, PayoffType, PayoutUnit, SeriesId};
 
     use super::*;
 
@@ -209,7 +207,7 @@ mod tests {
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(100, 8)),
             price_precision: 8,
-            settlement_asset: SettlementAsset::Icp,
+            payout_unit: PayoutUnit::usd(),
             oracle_source: "Coingecko".to_string(),
             creator: Principal::anonymous(),
             created_at_ns: 0,
@@ -308,7 +306,7 @@ mod tests {
             let mut s3 = s1.clone();
             s3.series_id = SeriesId::from("test-id-3".to_string());
 
-            let items = vec![
+            let items = [
                 (s1.series_id.clone(), s1),
                 (s2.series_id.clone(), s2),
                 (s3.series_id.clone(), s3),

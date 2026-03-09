@@ -20,6 +20,17 @@ pub const MONTH_NS: u64 = 30 * DAY_NS;
 pub const ICP_LEDGER: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
 /// Principal ID of the ckUSDC Ledger canister
 pub const CKUSDC_LEDGER: &str = "yfumr-cyaaa-aaaar-qaela-cai";
+/// Principal ID of the ckUSDT Ledger canister
+pub const CKUSDT_LEDGER: &str = "6rdls-viaaa-aaaar-qaelq-cai";
+/// The identifier for the virtual USD (vUSD) asset.
+pub const VUSD_ASSET_ID: &str = "vUSD";
+/// Principal ID of the virtual USD (vUSD) Ledger canister (Internal ghost token)
+pub const VUSD_LEDGER: &str = "ap6gq-taaaa-aaaae-acsaq-cai";
+/// Principal ID of the virtual USD (vUSD) Index canister
+pub const VUSD_INDEX: &str = "x3qir-tyaaa-aaaae-acr6a-cai";
+
+/// The canonical number of decimals for internal USD accounting.
+pub const USD_DECIMALS: u8 = 6;
 
 /// Maximum length of a series title in characters.
 pub const MAX_SERIES_TITLE_LEN: usize = 128;
@@ -28,3 +39,8 @@ pub const MAX_SERIES_DESCRIPTION_LEN: usize = 1024;
 
 /// Default insurance fund fee ratio in basis points (10 bps = 0.1%).
 pub const DEFAULT_INSURANCE_FEE_RATIO: u16 = 10;
+/// Default protocol fee ratio in basis points (5 bps = 0.05%).
+pub const DEFAULT_PROTOCOL_FEE_RATIO: u16 = 5;
+
+/// The base for basis points (100% = 10,000 bps).
+pub const BPS_BASE: u16 = 10_000;

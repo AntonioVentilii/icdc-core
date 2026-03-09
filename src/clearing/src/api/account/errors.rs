@@ -2,13 +2,13 @@ use candid::CandidType;
 use serde::{Deserialize, Serialize};
 use shared::types::asset::errors::AssetError;
 
-/// Errors related to margin account retrieval or state.
+/// Errors related to account state retrieval or state.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
-pub enum MarginAccountError {
+pub enum AccountStateError {
     /// An error occurred while interacting with the asset.
     Asset(AssetError),
-    /// No margin account exists for the specified user and asset.
-    NoMarginAccountFound,
+    /// No account state exists for the specified user.
+    NoAccountStateFound,
     /// Overflow during account state calculation.
     MathOverflow,
 }

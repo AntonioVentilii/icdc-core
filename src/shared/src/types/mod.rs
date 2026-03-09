@@ -1,15 +1,19 @@
 pub mod asset;
+pub mod collateral;
 pub mod decimal;
 pub mod description;
 pub mod oracle;
+pub mod payout;
 pub mod price;
 pub mod series;
 pub mod status;
 
 pub use asset::*;
+pub use collateral::*;
 pub use decimal::*;
 pub use description::*;
 pub use oracle::*;
+pub use payout::*;
 pub use price::*;
 pub use series::*;
 pub use status::*;

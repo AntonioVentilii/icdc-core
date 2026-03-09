@@ -2,10 +2,10 @@ use candid::{CandidType, Deserialize};
 use serde::Serialize;
 use shared::types::SeriesId;
 
-/// Input parameters for retrieving a margin account.
+/// Input parameters for retrieving an account state.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
-pub struct GetMarginAccountParams {
-    /// Whether to force a recalculation of the margin status.
+pub struct GetAccountStateParams {
+    /// Whether to force a recalculation of the margin status (e.g. refresh from ledgers).
     pub refresh: Option<bool>,
 }
 

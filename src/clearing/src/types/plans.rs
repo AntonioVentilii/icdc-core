@@ -1,13 +1,15 @@
-use candid::CandidType;
+use candid::{CandidType, Nat, Principal};
 use serde::{Deserialize, Serialize};
-use shared::types::{Asset, Price, SeriesId};
+use shared::types::{AssetId, Price, SeriesId};
 
 use crate::{
-    memory::{DEPOSIT_PLANS, SETTLEMENT_PLANS, WITHDRAWAL_PLANS},
+    api::admin::params::FundType,
+    memory::{DEPOSIT_PLANS, FUND_WITHDRAWAL_PLANS, SETTLEMENT_PLANS, WITHDRAWAL_PLANS},
     types::{
         payment::{PaymentIdempotency, PaymentReceipt},
         user::{DepositId, User, WithdrawalId},
     },
+    utils::system::now_ns,
 };
 
 /// The execution status of a background operation plan.
@@ -28,10 +30,10 @@ pub struct DepositPlanParams {
     pub deposit_id: DepositId,
     /// The user making the deposit.
     pub user: User,
-    /// The asset being deposited.
-    pub asset: Asset,
+    /// The collateral asset being deposited.
+    pub asset_id: AssetId,
     /// The amount being deposited.
-    pub amount: candid::Nat,
+    pub amount: Nat,
 }
 
 /// Input parameters for creating a [`WithdrawalPlan`].
@@ -41,12 +43,12 @@ pub struct WithdrawalPlanParams {
     pub withdrawal_id: WithdrawalId,
     /// The user making the withdrawal.
     pub user: User,
-    /// The asset being withdrawn.
-    pub asset: Asset,
+    /// The collateral asset being withdrawn.
+    pub asset_id: AssetId,
     /// The amount being withdrawn.
-    pub amount: candid::Nat,
+    pub amount: Nat,
     /// The destination principal and optional subaccount.
-    pub to_account: (candid::Principal, Option<[u8; 32]>),
+    pub to_account: (Principal, Option<[u8; 32]>),
 }
 
 /// Input parameters for creating a [`SettlementPlan`].
@@ -56,20 +58,23 @@ pub struct SettlementPlanParams {
     pub series_id: SeriesId,
     /// The final settlement price from the oracle.
     pub settlement_price: Price,
-    /// The asset in which the settlement occurs.
-    pub settlement_asset: Asset,
-    /// The protocol fee applied to the settlement.
+    /// The oracle source identifier for authorization.
+    pub oracle_source: String,
+    /// The protocol fee applied to the settlement (in USD units).
     pub fee: u128,
-    /// The insurance fee collected for this settlement session.
+    /// The insurance fee collected for this settlement session (in USD units).
     pub insurance_fee: u128,
-    /// A list of positions involved in the settlement.
-    pub positions: Vec<(User, i128)>,
-    /// Users who owe collateral for the settlement.
-    pub payers: Vec<(User, u128)>,
-    /// Users who are owed collateral for the settlement.
-    pub receivers: Vec<(User, u128)>,
-    /// List of accounting updates: (user, net_qty, sign, profit_loss, margin_to_release).
-    pub accounting_updates: Vec<(User, i128, i8, u128, u128)>,
+    /// A list of positions involved in the settlement with their accounting data.
+    pub positions: Vec<SettlementPosition>,
+}
+
+/// Snapshot of a single user's position and its settlement accounting.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct SettlementPosition {
+    pub user: User,
+    pub net_qty: i128,
+    pub reserved_margin_usd: u128,
+    pub cashflow_usd: i128,
 }
 
 /// A plan for processing a collateral deposit in the background.
@@ -79,10 +84,10 @@ pub struct DepositPlan {
     pub deposit_id: DepositId,
     /// The user making the deposit.
     pub user: User,
-    /// The asset being deposited.
-    pub asset: Asset,
+    /// The collateral asset being deposited.
+    pub asset_id: AssetId,
     /// The amount being deposited.
-    pub amount: candid::Nat,
+    pub amount: Nat,
     /// Current execution status of the plan.
     pub status: PlanStatus,
     /// Idempotency key in nanoseconds for ledger transfers.
@@ -99,7 +104,7 @@ impl DepositPlan {
             let DepositPlanParams {
                 deposit_id,
                 user,
-                asset,
+                asset_id,
                 amount,
             } = params;
 
@@ -109,12 +114,12 @@ impl DepositPlan {
                 return existing.clone();
             }
 
-            let idempotency_ns = ic_cdk::api::time().into();
+            let idempotency_ns = now_ns().into();
 
             let plan = DepositPlan {
                 deposit_id,
                 user,
-                asset,
+                asset_id,
                 amount,
                 status: PlanStatus::Planned,
                 idempotency_ns,
@@ -134,20 +139,22 @@ pub struct WithdrawalPlan {
     pub withdrawal_id: WithdrawalId,
     /// The user making the withdrawal.
     pub user: User,
-    /// The asset being withdrawn.
-    pub asset: Asset,
+    /// The collateral asset being withdrawn.
+    pub asset_id: AssetId,
     /// The amount being withdrawn.
-    pub amount: candid::Nat,
+    pub amount: Nat,
     /// The destination principal and optional subaccount.
-    pub to_account: (candid::Principal, Option<[u8; 32]>),
+    pub to_account: (Principal, Option<[u8; 32]>),
     /// Current execution status of the plan.
     pub status: PlanStatus,
     /// Idempotency key in nanoseconds for ledger transfers.
     pub idempotency_ns: PaymentIdempotency,
     /// Proof of successful transfer, if completed.
     pub receipt: Option<PaymentReceipt>,
-    /// The amount successfully reserved for withdrawal.
+    /// The amount successfully reserved for withdrawal (token units).
     pub reserved_amount: Option<u128>,
+    /// Sum of internal cash (USD) reserved for withdrawal (internal units).
+    pub reserved_cash_usd: Option<i128>,
 }
 impl WithdrawalPlan {
     /// Retrieves an existing withdrawal plan or creates a new one if it doesn't exist.
@@ -158,7 +165,7 @@ impl WithdrawalPlan {
             let WithdrawalPlanParams {
                 withdrawal_id,
                 user,
-                asset,
+                asset_id,
                 amount,
                 to_account,
             } = params;
@@ -169,18 +176,19 @@ impl WithdrawalPlan {
                 return existing.clone();
             }
 
-            let idempotency_ns = ic_cdk::api::time().into();
+            let idempotency_ns = now_ns().into();
 
             let plan = WithdrawalPlan {
                 withdrawal_id,
                 user,
-                asset,
+                asset_id,
                 amount,
                 to_account,
                 status: PlanStatus::Planned,
                 idempotency_ns,
                 receipt: None,
                 reserved_amount: None,
+                reserved_cash_usd: None,
             };
 
             m.insert(key, plan.clone());
@@ -196,48 +204,25 @@ pub struct SettlementPlan {
     pub series_id: SeriesId,
     /// The final settlement price.
     pub settlement_price: Price,
-    /// The asset used for settlement.
-    pub settlement_asset: Asset,
-    /// The protocol fee.
-    pub fee: u128,
-    /// The insurance fee.
-    pub insurance_fee: u128,
-    /// Detailed position snapshots at the time of settlement.
-    pub positions: Vec<(User, i128)>,
-    /// List of payers and their respective owed amounts.
-    pub payers: Vec<(User, u128)>,
-    /// List of receivers and their respective owed amounts.
-    pub receivers: Vec<(User, u128)>,
-    /// List of accounting updates: (user, net_qty, sign, profit_loss, margin_to_release).
-    pub accounting_updates: Vec<(User, i128, i8, u128, u128)>,
-    /// Tracks progress through the payers list.
-    pub payer_cursor: usize,
-    /// Tracks progress through the receivers list.
-    pub receiver_cursor: usize,
+    /// The oracle source identifier for authorization.
+    pub oracle_source: String,
+    /// The protocol fee (in USD units).
+    pub fee_usd: u128,
+    /// The insurance fee (in USD units).
+    pub insurance_fee_usd: u128,
+    /// Detailed position snapshots and accounting updates.
+    pub positions: Vec<SettlementPosition>,
     /// Tracks progress through accounting updates.
     pub accounting_cursor: usize,
-    /// Whether all accounting updates have been applied to margin accounts.
+    /// Whether all accounting updates have been applied to account states.
     pub accounting_applied: bool,
     /// Current execution status of the plan.
     pub status: PlanStatus,
-    /// Base idempotency key in nanoseconds for transfers.
+    /// Base idempotency key in nanoseconds.
     pub idempotency_ns: PaymentIdempotency,
-    /// Receipts for successful payer transfers.
-    pub payer_receipts: Vec<Option<PaymentReceipt>>,
-    /// Receipts for successful receiver transfers.
-    pub receiver_receipts: Vec<Option<PaymentReceipt>>,
 }
+
 impl SettlementPlan {
-    /// Returns a unique idempotency step identifier for a payer transfer.
-    pub fn payer_step(&self, idx: u32) -> u64 {
-        idx as u64
-    }
-
-    /// Returns a unique idempotency step identifier for a receiver transfer.
-    pub fn receiver_step(&self, idx: u32) -> u64 {
-        10_000u64 + (idx as u64)
-    }
-
     /// Retrieves an existing settlement plan or creates a new one if it doesn't exist.
     pub fn get_or_create(params: SettlementPlanParams) -> Self {
         SETTLEMENT_PLANS.with(|m| {
@@ -246,13 +231,10 @@ impl SettlementPlan {
             let SettlementPlanParams {
                 series_id,
                 settlement_price,
-                settlement_asset,
-                fee,
-                insurance_fee,
+                oracle_source,
+                fee: fee_usd,
+                insurance_fee: insurance_fee_usd,
                 positions,
-                payers,
-                receivers,
-                accounting_updates,
             } = params;
 
             let key = series_id.clone();
@@ -261,33 +243,110 @@ impl SettlementPlan {
                 return existing.clone();
             }
 
-            let idempotency_ns = ic_cdk::api::time().into();
-
-            let payers_len = payers.len();
-            let receivers_len = receivers.len();
+            let idempotency_ns = now_ns().into();
 
             let plan = SettlementPlan {
                 series_id,
                 settlement_price,
-                settlement_asset,
-                fee,
-                insurance_fee,
+                oracle_source,
+                fee_usd,
+                insurance_fee_usd,
                 positions,
-                payers: payers.clone(),
-                receivers: receivers.clone(),
-                accounting_updates,
-                payer_cursor: 0,
-                receiver_cursor: 0,
                 accounting_cursor: 0,
                 accounting_applied: false,
                 status: PlanStatus::Planned,
                 idempotency_ns,
-                payer_receipts: vec![None; payers_len],
-                receiver_receipts: vec![None; receivers_len],
             };
 
             m.insert(key, plan.clone());
             plan
         })
+    }
+}
+
+/// Input parameters for creating a [`FundWithdrawalPlan`].
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct FundWithdrawalPlanParams {
+    /// Controller-provided unique identifier for this withdrawal request.
+    pub request_id: String,
+    /// Whether to withdraw from Insurance or Treasury.
+    pub fund_type: FundType,
+    /// The specific asset to withdraw.
+    pub asset_id: AssetId,
+    /// The amount to withdraw.
+    pub amount: u128,
+    /// The destination principal.
+    pub to: Principal,
+}
+
+/// A plan for processing an admin fund withdrawal in the background.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct FundWithdrawalPlan {
+    pub request_id: String,
+    pub fund_type: FundType,
+    pub asset_id: AssetId,
+    pub amount: u128,
+    pub to: Principal,
+    pub status: PlanStatus,
+    pub idempotency_ns: PaymentIdempotency,
+    pub receipt: Option<PaymentReceipt>,
+}
+
+impl FundWithdrawalPlan {
+    /// Retrieves an existing fund withdrawal plan or creates a new one.
+    pub fn get_or_create(params: FundWithdrawalPlanParams) -> Self {
+        FUND_WITHDRAWAL_PLANS.with(|m| {
+            let mut m = m.borrow_mut();
+
+            if let Some(existing) = m.get(&params.request_id) {
+                return existing.clone();
+            }
+
+            let idempotency_ns = now_ns().into();
+
+            let plan = FundWithdrawalPlan {
+                request_id: params.request_id.clone(),
+                fund_type: params.fund_type,
+                asset_id: params.asset_id,
+                amount: params.amount,
+                to: params.to,
+                status: PlanStatus::Planned,
+                idempotency_ns,
+                receipt: None,
+            };
+
+            m.insert(params.request_id, plan.clone());
+            plan
+        })
+    }
+}
+
+/// Public settlement progress for a derivative series.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct SettlementStatusView {
+    pub series_id: SeriesId,
+    pub settlement_price: Price,
+    pub oracle_source: String,
+    pub fee_usd: u128,
+    pub insurance_fee_usd: u128,
+    pub accounting_cursor: usize,
+    pub accounting_applied: bool,
+    pub status: PlanStatus,
+    pub total_positions: usize,
+}
+
+impl From<&SettlementPlan> for SettlementStatusView {
+    fn from(plan: &SettlementPlan) -> Self {
+        Self {
+            series_id: plan.series_id.clone(),
+            settlement_price: plan.settlement_price.clone(),
+            oracle_source: plan.oracle_source.clone(),
+            fee_usd: plan.fee_usd,
+            insurance_fee_usd: plan.insurance_fee_usd,
+            accounting_cursor: plan.accounting_cursor,
+            accounting_applied: plan.accounting_applied,
+            status: plan.status.clone(),
+            total_positions: plan.positions.len(),
+        }
     }
 }

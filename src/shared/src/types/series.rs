@@ -2,7 +2,7 @@ use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::types::{asset::SettlementAsset, description::Description, price::Price};
+use crate::types::{description::Description, payout::PayoutUnit, price::Price};
 
 /// A unique identifier for a derivative series.
 /// Encapsulates a hex-encoded string derived from series parameters.
@@ -58,8 +58,8 @@ pub struct Series {
     pub strike: Option<Price>,
     /// The canonical number of decimals used for prices and strikes in this series.
     pub price_precision: u8,
-    /// The asset used to settle the contract payoff and store collateral.
-    pub settlement_asset: SettlementAsset,
+    /// The unit in which the contract payoff is expressed.
+    pub payout_unit: PayoutUnit,
     /// The identifier of the oracle providing the settlement data.
     pub oracle_source: String,
     /// The principal identifier of the series creator.
@@ -82,7 +82,7 @@ impl Series {
         payoff_type: &PayoffType,
         strike: Option<&Price>,
         price_precision: u8,
-        settlement_asset: &SettlementAsset,
+        payout_unit: &PayoutUnit,
         oracle_source: &str,
     ) -> SeriesId {
         let mut hasher = Sha256::new();
@@ -112,8 +112,8 @@ impl Series {
         hasher.update(b"|PRECISION|");
         hasher.update([price_precision]);
 
-        hasher.update(b"|SETTLEMENT|");
-        hasher.update(settlement_asset.as_id_bytes());
+        hasher.update(b"|PAYOUT_UNIT|");
+        hasher.update(payout_unit.as_id_bytes());
 
         hasher.update(b"|ORACLE|");
         hasher.update(oracle_source.as_bytes());
@@ -135,7 +135,7 @@ mod tests {
         let payoff_type = PayoffType::Call;
         let strike = Some(Price::new(100, 8));
         let precision = 8;
-        let settlement_asset = SettlementAsset::Icp;
+        let payout_unit = PayoutUnit::usd();
         let oracle_source = "coingecko";
 
         let id1 = Series::generate_id(
@@ -144,7 +144,7 @@ mod tests {
             &payoff_type,
             strike.as_ref(),
             precision,
-            &settlement_asset,
+            &payout_unit,
             oracle_source,
         );
 
@@ -154,7 +154,7 @@ mod tests {
             &payoff_type,
             strike.as_ref(),
             precision,
-            &settlement_asset,
+            &payout_unit,
             oracle_source,
         );
 
@@ -167,7 +167,7 @@ mod tests {
         let payoff_type = PayoffType::Call;
         let strike = Some(Price::new(100, 8));
         let precision = 8;
-        let settlement_asset = SettlementAsset::Icp;
+        let payout_unit = PayoutUnit::usd();
         let oracle_source = "coingecko";
 
         let id1 = Series::generate_id(
@@ -176,7 +176,7 @@ mod tests {
             &payoff_type,
             strike.as_ref(),
             precision,
-            &settlement_asset,
+            &payout_unit,
             oracle_source,
         );
 
@@ -186,7 +186,7 @@ mod tests {
             &payoff_type,
             strike.as_ref(),
             precision,
-            &settlement_asset,
+            &payout_unit,
             oracle_source,
         );
 
@@ -199,7 +199,7 @@ mod tests {
         let expiry = 100;
         let payoff_type = PayoffType::Call;
         let strike = Some(Price::new(100, 8));
-        let settlement_asset = SettlementAsset::Icp;
+        let payout_unit = PayoutUnit::usd();
         let oracle_source = "coingecko";
 
         let id1 = Series::generate_id(
@@ -208,7 +208,7 @@ mod tests {
             &payoff_type,
             strike.as_ref(),
             8,
-            &settlement_asset,
+            &payout_unit,
             oracle_source,
         );
 
@@ -218,7 +218,7 @@ mod tests {
             &payoff_type,
             strike.as_ref(),
             10,
-            &settlement_asset,
+            &payout_unit,
             oracle_source,
         );
 
@@ -234,7 +234,7 @@ mod tests {
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(100, 8)),
             price_precision: 8,
-            settlement_asset: SettlementAsset::Icp,
+            payout_unit: PayoutUnit::usd(),
             oracle_source: "coingecko".to_string(),
             creator: Principal::anonymous(),
             created_at_ns: 1700000000,

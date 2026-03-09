@@ -1,18 +1,14 @@
-use std::collections::BTreeMap;
-
+use candid::Nat;
 use ic_cdk_macros::update;
-use shared::types::asset::errors::AssetError;
+use shared::{
+    constants::{BPS_BASE, USD_DECIMALS, VUSD_ASSET_ID},
+    types::asset::errors::AssetError,
+};
 
 use super::{
-    errors::{BlockingError, DepositCollateralError, WithdrawCollateralError},
-    params::{
-        BlockCollateralParams, DepositCollateralParams, UnblockCollateralParams,
-        WithdrawCollateralParams,
-    },
-    results::{
-        BlockCollateralResult, DepositCollateralResult, UnblockCollateralResult,
-        WithdrawCollateralResult,
-    },
+    errors::{DepositCollateralError, WithdrawCollateralError},
+    params::{DepositCollateralParams, WithdrawCollateralParams},
+    results::{DepositCollateralResult, WithdrawCollateralResult},
 };
 use crate::{
     assets::{
@@ -23,96 +19,21 @@ use crate::{
         types::AssetAmount,
     },
     guards::caller_is_not_anonymous,
-    memory::{DEPOSIT_PLANS, MARGIN_ACCOUNTS, WITHDRAWAL_PLANS},
+    memory::{ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, DEPOSIT_PLANS, WITHDRAWAL_PLANS},
     types::{
         account::AssetAccount,
-        margin::MarginAccount,
+        margin::AccountState,
         plans::{DepositPlan, DepositPlanParams, PlanStatus, WithdrawalPlan, WithdrawalPlanParams},
         user::User,
     },
-    utils::asset::is_supported_asset,
 };
 
-/// Blocks (reserves) collateral in the user's margin account.
-#[update(guard = "caller_is_not_anonymous")]
-pub fn block_collateral(params: BlockCollateralParams) -> BlockCollateralResult {
-    let result: Result<(), BlockingError> = (|| {
-        let user: User = ic_cdk::caller().into();
-        let BlockCollateralParams { amount, asset } = params;
-
-        let amount_u128: u128 = amount
-            .0
-            .try_into()
-            .map_err(|_| BlockingError::MathOverflow)?;
-
-        MARGIN_ACCOUNTS.with(|accounts| {
-            let mut accounts = accounts.borrow_mut();
-            let account = accounts.entry(user).or_insert(MarginAccount {
-                user,
-                balances: BTreeMap::new(),
-                reserved_balances: BTreeMap::new(),
-                required_margin: 0,
-            });
-
-            account
-                .reserve_balance(asset, amount_u128)
-                .map_err(|available| BlockingError::InsufficientAvailableBalance {
-                    available,
-                    requested: amount_u128,
-                })
-        })
-    })();
-
-    result.into()
-}
-
-/// Unblocks (releases) collateral in the user's margin account.
-#[update(guard = "caller_is_not_anonymous")]
-pub fn unblock_collateral(params: UnblockCollateralParams) -> UnblockCollateralResult {
-    let result: Result<(), BlockingError> = (|| {
-        let user: User = ic_cdk::caller().into();
-        let UnblockCollateralParams { amount, asset } = params;
-
-        let amount_u128: u128 = amount
-            .0
-            .try_into()
-            .map_err(|_| BlockingError::MathOverflow)?;
-
-        MARGIN_ACCOUNTS.with(|accounts| {
-            let mut accounts = accounts.borrow_mut();
-            let account =
-                accounts
-                    .get_mut(&user)
-                    .ok_or(BlockingError::InsufficientReservedBalance {
-                        reserved: 0,
-                        requested: amount_u128,
-                    })?;
-
-            account
-                .release_balance(asset, amount_u128)
-                .map_err(|reserved| BlockingError::InsufficientReservedBalance {
-                    reserved,
-                    requested: amount_u128,
-                })
-        })
-    })();
-
-    result.into()
-}
-
-/// Deposits collateral into the user's margin account.
+/// Deposits collateral into the user's account state.
 ///
 /// This is a multi-phase operation:
 /// 1. Building a [`DepositPlan`] for idempotency.
 /// 2. Executing the asynchronous ledger transfer (`transfer_from`).
-/// 3. Finalising the internal margin account balances.
-///
-/// # Arguments
-/// * `params` - The deposit details including amount, asset, and a unique deposit ID.
-///
-/// # Returns
-/// * [`DepositCollateralResult::Ok`] if the deposit was successfully planned or executed.
-/// * [`DepositCollateralResult::Err`] if the asset is unsupported or a transfer error occurs.
+/// 3. Finalising the internal collateral balances.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositCollateralResult {
     let result: Result<(), DepositCollateralError> = (async {
@@ -120,11 +41,20 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
 
         let DepositCollateralParams {
             amount,
-            asset,
+            asset_id,
             deposit_id,
         } = params;
 
-        if !is_supported_asset(&asset) {
+        // Verify the asset is supported and enabled
+        let config = COLLATERAL_ASSETS.with(|assets| {
+            assets
+                .borrow()
+                .get(&asset_id)
+                .cloned()
+                .ok_or(DepositCollateralError::Asset(AssetError::UnsupportedAsset))
+        })?;
+
+        if !config.is_enabled {
             return Err(DepositCollateralError::Asset(AssetError::UnsupportedAsset));
         }
 
@@ -132,7 +62,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
         let mut plan = DepositPlan::get_or_create(DepositPlanParams {
             deposit_id: deposit_id.clone(),
             user,
-            asset: asset.clone(),
+            asset_id: asset_id.clone(),
             amount: amount.clone(),
         });
 
@@ -144,14 +74,11 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
 
         // ---------- Phase B: Execute transfer (async, resumable) ----------
         if plan.receipt.is_none() {
-            // Mark executing (durably) before the await.
             plan.status = PlanStatus::Executing;
 
             DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
 
-            DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
-
-            let handler = get_handler(&asset).map_err(DepositCollateralError::Asset)?;
+            let handler = get_handler(&config.asset).map_err(DepositCollateralError::Asset)?;
 
             let amount_u128: u128 = amount
                 .0
@@ -161,7 +88,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
 
             let res = handler
                 .transfer_from(AssetTransferFromParams {
-                    asset: &asset,
+                    asset: &config.asset,
                     spender: AssetAccount::CanisterMain,
                     from: AssetAccount::external_principal(user.principal()),
                     to: AssetAccount::UserClearing(user),
@@ -172,16 +99,15 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
 
             match res {
                 Ok(block_index) => {
-                    plan.receipt = Some(candid::Nat::from(block_index).into());
+                    plan.receipt = Some(Nat::from(block_index).into());
                 }
                 Err(e) => {
-                    // Keep plan persisted so retry resumes safely.
                     DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
+
                     return Err(DepositCollateralError::Asset(e));
                 }
             }
 
-            // Persist progress AFTER success/duplicate, before doing anything else.
             DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
         }
 
@@ -193,20 +119,32 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
                 .try_into()
                 .map_err(|_| DepositCollateralError::MathOverflow)?;
 
-            MARGIN_ACCOUNTS.with(|accounts| {
+            ACCOUNT_STATES.with(|accounts| {
                 let mut accounts = accounts.borrow_mut();
-                let account = accounts.entry(user).or_insert(MarginAccount {
-                    user,
-                    balances: BTreeMap::new(),
-                    reserved_balances: BTreeMap::new(),
-                    required_margin: 0,
-                });
-                let current = account.get_balance(&asset);
-                account.set_balance(asset.clone(), current + amount_u128);
+                let state = accounts
+                    .entry(user)
+                    .or_insert_with(|| AccountState::new(user));
+
+                if asset_id == VUSD_ASSET_ID {
+                    let amount_usd = if config.decimals > USD_DECIMALS {
+                        (amount_u128 / 10u128.pow((config.decimals - USD_DECIMALS) as u32)) as i128
+                    } else {
+                        (amount_u128 * 10u128.pow((USD_DECIMALS - config.decimals) as u32)) as i128
+                    };
+                    state.cash_balance_usd += amount_usd;
+                } else {
+                    let current = state
+                        .collateral_balances
+                        .get(&asset_id)
+                        .copied()
+                        .unwrap_or(0);
+                    state
+                        .collateral_balances
+                        .insert(asset_id.clone(), current + amount_u128);
+                }
             });
 
             plan.status = PlanStatus::Finalised;
-
             DEPOSIT_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan));
         }
 
@@ -217,20 +155,12 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
     result.into()
 }
 
-/// Withdraws collateral from the user's margin account to an external address.
+/// Withdraws collateral from the user's account state to an external address.
 ///
-/// This is a multi-phase operation:
-/// 1. Building a [`WithdrawalPlan`] for idempotency.
-/// 2. Reserving the internal balance to prevent double-spending or risk violations.
-/// 3. Executing the asynchronous ledger transfer (`transfer`).
-/// 4. Finalising the plan status.
-///
-/// # Arguments
-/// * `params` - The withdrawal details including amount, asset, and a unique withdrawal ID.
-///
-/// # Returns
-/// * [`WithdrawalCollateralResult::Ok`] if the withdrawal was successfully planned or executed.
-/// * [`WithdrawalCollateralResult::Err`] if margin is insufficient or a transfer error occurs.
+/// This implements the "Deterministic Withdrawal Policy":
+/// 1. Calculate current account equity in USD.
+/// 2. Verify equity >= reserved_margin_usd (risk check).
+/// 3. If ok, proceed with asynchronous ledger transfer.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCollateralResult {
     let result: Result<(), WithdrawCollateralError> = (async {
@@ -238,19 +168,31 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
 
         let WithdrawCollateralParams {
             amount,
-            asset,
+            asset_id,
             withdrawal_id,
         } = params;
 
-        if !is_supported_asset(&asset) {
-            return Err(WithdrawCollateralError::Asset(AssetError::UnsupportedAsset));
-        }
+        let config = COLLATERAL_ASSETS.with(|assets| {
+            assets
+                .borrow()
+                .get(&asset_id)
+                .cloned()
+                .ok_or(WithdrawCollateralError::Asset(AssetError::UnsupportedAsset))
+        })?;
+
+        let metric = ASSET_METRICS.with(|metrics| {
+            metrics
+                .borrow()
+                .get(&asset_id)
+                .cloned()
+                .ok_or(WithdrawCollateralError::Asset(AssetError::UnsupportedAsset))
+        })?;
 
         // ---------- Phase A: Build plan (durable, no awaits) ----------
         let mut plan = WithdrawalPlan::get_or_create(WithdrawalPlanParams {
             withdrawal_id: withdrawal_id.clone(),
             user,
-            asset: asset.clone(),
+            asset_id: asset_id.clone(),
             amount: amount.clone(),
             to_account: (user.principal(), None),
         });
@@ -261,8 +203,6 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
 
         let key = (user, withdrawal_id.clone());
 
-        // ---------- Phase B: Reserve/debit INTERNAL balance BEFORE any await ----------
-        // Ensures we never send funds out unless the user is eligible (risk check).
         if plan.reserved_amount.is_none() {
             let amount_u128: u128 = amount
                 .0
@@ -270,57 +210,130 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                 .try_into()
                 .map_err(|_| WithdrawCollateralError::MathOverflow)?;
 
-            MARGIN_ACCOUNTS.with(|accounts| {
-                let mut accounts = accounts.borrow_mut();
+            let price_value = metric.price_usd.value;
+            let price_decimals = metric.price_usd.decimals as u32;
+            let asset_decimals = config.decimals as u32;
+            let target_decimals = USD_DECIMALS as u32;
 
-                let account = accounts.entry(user).or_insert(MarginAccount {
-                    user,
-                    balances: BTreeMap::new(),
-                    reserved_balances: BTreeMap::new(),
-                    required_margin: 0,
-                });
+            let withdrawal_value_usd_nat = {
+                let haircut_multiplier =
+                    (BPS_BASE as u128).saturating_sub(metric.haircut_bps as u128);
 
-                let available = account.get_available_balance(&asset);
+                let numerator =
+                    Nat::from(amount_u128) * Nat::from(price_value) * Nat::from(haircut_multiplier);
 
-                if available < amount_u128 {
-                    return Err(WithdrawCollateralError::InsufficientExcessMargin {
-                        available,
-                        requested: amount_u128,
-                    });
+                let total_source_decimals = asset_decimals + price_decimals;
+
+                if total_source_decimals >= target_decimals {
+                    let divisor = Nat::from(BPS_BASE)
+                        * Nat::from(10u128.pow(total_source_decimals - target_decimals));
+                    numerator / divisor
+                } else {
+                    let multiplier = Nat::from(10u128.pow(target_decimals - total_source_decimals));
+                    (numerator * multiplier) / Nat::from(BPS_BASE)
                 }
+            };
 
-                let current = account.get_balance(&asset);
+            let withdrawal_value_usd: u128 =
+                withdrawal_value_usd_nat.0.try_into().unwrap_or(u128::MAX);
 
-                account.set_balance(asset.clone(), current - amount_u128);
+            let (post_equity_usd, reserved_margin_usd, pre_equity_usd) =
+                ACCOUNT_STATES.with(|accounts| {
+                    let accounts = accounts.borrow();
+                    let state = accounts.get(&user).ok_or(
+                        WithdrawCollateralError::InsufficientExcessMargin {
+                            available: 0,
+                            requested: withdrawal_value_usd,
+                        },
+                    )?;
 
-                Ok(())
-            })?;
+                    let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
+                    let metrics = ASSET_METRICS.with(|m| m.borrow().clone());
+
+                    let pre_equity = state.calculate_equity_usd(&configs, &metrics);
+
+                    let mut temp_state = state.clone();
+                    if asset_id == VUSD_ASSET_ID {
+                        let amount_usd = if config.decimals > USD_DECIMALS {
+                            (amount_u128 / 10u128.pow((config.decimals - USD_DECIMALS) as u32))
+                                as i128
+                        } else {
+                            (amount_u128 * 10u128.pow((USD_DECIMALS - config.decimals) as u32))
+                                as i128
+                        };
+                        temp_state.cash_balance_usd -= amount_usd;
+                    } else {
+                        let current = temp_state
+                            .collateral_balances
+                            .get(&asset_id)
+                            .copied()
+                            .unwrap_or(0);
+                        temp_state
+                            .collateral_balances
+                            .insert(asset_id.clone(), current.saturating_sub(amount_u128));
+                    }
+
+                    let post_equity = temp_state.calculate_equity_usd(&configs, &metrics);
+                    Ok::<(u128, u128, u128), WithdrawCollateralError>((
+                        post_equity,
+                        temp_state.reserved_margin_usd,
+                        pre_equity,
+                    ))
+                })?;
+
+            if post_equity_usd < reserved_margin_usd {
+                return Err(WithdrawCollateralError::InsufficientExcessMargin {
+                    available: pre_equity_usd.saturating_sub(reserved_margin_usd),
+                    requested: withdrawal_value_usd,
+                });
+            }
+
+            let mut reserved_cash_usd: Option<i128> = None;
+
+            // Debit internal balance
+            ACCOUNT_STATES.with(|accounts| {
+                let mut accounts = accounts.borrow_mut();
+                if let Some(state) = accounts.get_mut(&user) {
+                    if asset_id == VUSD_ASSET_ID {
+                        let amount_usd = if config.decimals > USD_DECIMALS {
+                            (amount_u128 / 10u128.pow((config.decimals - USD_DECIMALS) as u32))
+                                as i128
+                        } else {
+                            (amount_u128 * 10u128.pow((USD_DECIMALS - config.decimals) as u32))
+                                as i128
+                        };
+                        state.cash_balance_usd -= amount_usd;
+                        reserved_cash_usd = Some(amount_usd);
+                    } else {
+                        let current = state
+                            .collateral_balances
+                            .get(&asset_id)
+                            .copied()
+                            .unwrap_or(0);
+                        state
+                            .collateral_balances
+                            .insert(asset_id.clone(), current.saturating_sub(amount_u128));
+                    }
+                }
+            });
 
             plan.reserved_amount = Some(amount_u128);
-
-            // Persist reservation so retries don’t double-debit.
+            plan.reserved_cash_usd = reserved_cash_usd;
             WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
         }
 
-        // ---------- Phase C: Execute transfer (async, resumable + ledger idempotency) ----------
+        // ---------- Phase C: Execute ledger transfer ----------
         if plan.receipt.is_none() {
-            // Persist that we’re executing before the await
             plan.status = PlanStatus::Executing;
-
             WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
 
-            let handler = get_handler(&asset).map_err(WithdrawCollateralError::Asset)?;
+            let handler = get_handler(&config.asset).map_err(WithdrawCollateralError::Asset)?;
 
-            let amount_u128: u128 = plan
-                .amount
-                .0
-                .clone()
-                .try_into()
-                .map_err(|_| WithdrawCollateralError::MathOverflow)?;
+            let amount_u128: u128 = plan.reserved_amount.unwrap();
 
             let res = handler
                 .transfer(AssetTransferParams {
-                    asset: &asset,
+                    asset: &config.asset,
                     from: AssetAccount::UserClearing(user),
                     to: AssetAccount::external_icrc(plan.to_account.0, plan.to_account.1),
                     amount: AssetAmount::Fixed(amount_u128),
@@ -330,44 +343,61 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
 
             match res {
                 Ok(block_index) => {
-                    plan.receipt = Some(candid::Nat::from(block_index).into());
+                    plan.receipt = Some(Nat::from(block_index).into());
                 }
                 Err(e) => {
-                    // Refund reserved balance on failure (compensation).
-                    if let Some(reserved) = plan.reserved_amount.take() {
-                        MARGIN_ACCOUNTS.with(|accounts| {
+                    // Compensation: refund internal balance on failure
+                    let reserved_tokens = plan.reserved_amount.take();
+                    let reserved_cash = plan.reserved_cash_usd.take();
+
+                    if reserved_tokens.is_some() || reserved_cash.is_some() {
+                        ACCOUNT_STATES.with(|accounts| {
                             let mut accounts = accounts.borrow_mut();
-                            let account = accounts.entry(user).or_insert(MarginAccount {
-                                user,
-                                balances: BTreeMap::new(),
-                                reserved_balances: BTreeMap::new(),
-                                required_margin: 0,
-                            });
-                            let current = account.get_balance(&asset);
-                            account.set_balance(asset.clone(), current + reserved);
+                            if let Some(state) = accounts.get_mut(&user) {
+                                match (reserved_cash, reserved_tokens) {
+                                    (Some(usd), None) => {
+                                        state.cash_balance_usd += usd;
+                                    }
+
+                                    (None, Some(tokens)) => {
+                                        let current = state
+                                            .collateral_balances
+                                            .get(&asset_id)
+                                            .copied()
+                                            .unwrap_or(0);
+                                        state
+                                            .collateral_balances
+                                            .insert(asset_id.clone(), current + tokens);
+                                    }
+
+                                    (Some(usd), Some(tokens)) => {
+                                        state.cash_balance_usd += usd;
+                                        let current = state
+                                            .collateral_balances
+                                            .get(&asset_id)
+                                            .copied()
+                                            .unwrap_or(0);
+                                        state
+                                            .collateral_balances
+                                            .insert(asset_id.clone(), current + tokens);
+                                    }
+
+                                    (None, None) => {}
+                                }
+                            }
                         });
                     }
-
-                    // Persist updated plan (reservation cleared) so retries behave correctly.
                     WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
-
                     return Err(WithdrawCollateralError::Asset(e));
                 }
             }
-
-            // Persist after successful transfer / duplicate
             WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan.clone()));
         }
 
-        // ---------- Phase D: Finalise (no awaits, idempotent) ----------
+        // ---------- Phase D: Finalise ----------
         if plan.receipt.is_some() && plan.status != PlanStatus::Finalised {
             plan.status = PlanStatus::Finalised;
-
-            // At this point, funds are already debited internally (reserved_amount is
-            // “consumed”). Keep it as-is for auditability, or set it to None if you
-            // prefer.
-
-            WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(key, plan));
+            WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(key.clone(), plan));
         }
 
         Ok(())
@@ -375,4 +405,53 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
     .await;
 
     result.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use shared::constants::BPS_BASE;
+
+    use super::*;
+
+    #[test]
+    fn test_withdrawal_value_calculation_with_haircut() {
+        let amount_u128 = 100_000_000u128; // 1 ICP (8 decimals)
+        let price_value = 10_000_000u128; // $10 (6 decimals)
+        let price_decimals = 6u32;
+        let asset_decimals = 8u32;
+        let target_decimals = 6u32;
+        let haircut_bps = 1000u16; // 10% haircut
+
+        // Manual calculation:
+        // Market value = (1e8 * 10e6) / 10^(8+6-6) = 1e14 / 1e8 = 1e6 ($1 USD, wait)
+        // No, 1 ICP * $10 = $10 USD.
+        // numerator = 1e8 * 10e6 = 1e15.
+        // divisor = 10^(8+6-6) = 10^8.
+        // 1e15 / 1e8 = 1e7 = 10 USD (with 6 decimals). Correct.
+
+        // With 10% haircut:
+        // multiplier = 10000 - 1000 = 9000
+        // numerator = 1e8 * 10e6 * 9000 = 9e18
+        // divisor = 10000 * 10^(8+6-6) = 1e4 * 1e8 = 1e12
+        // value = 9e18 / 1e12 = 9e6 = 9 USD. Correct.
+
+        let haircut_multiplier = (BPS_BASE as u128).saturating_sub(haircut_bps as u128);
+
+        let numerator =
+            Nat::from(amount_u128) * Nat::from(price_value) * Nat::from(haircut_multiplier);
+
+        let total_source_decimals = asset_decimals + price_decimals;
+
+        let value_usd_nat = if total_source_decimals >= target_decimals {
+            let divisor = Nat::from(BPS_BASE)
+                * Nat::from(10u128.pow(total_source_decimals - target_decimals));
+            numerator / divisor
+        } else {
+            let multiplier = Nat::from(10u128.pow(target_decimals - total_source_decimals));
+            (numerator * multiplier) / Nat::from(BPS_BASE)
+        };
+
+        let value_usd: u128 = value_usd_nat.0.try_into().unwrap();
+        assert_eq!(value_usd, 9_000_000); // $9 USD
+    }
 }

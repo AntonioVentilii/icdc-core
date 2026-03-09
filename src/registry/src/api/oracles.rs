@@ -1,3 +1,4 @@
+use candid::Principal;
 use ic_cdk::api::is_controller;
 use ic_cdk_macros::{query, update};
 use shared::types::Oracle;
@@ -105,7 +106,7 @@ pub fn get_oracle(oracle_id: String) -> Option<Oracle> {
 
 /// Checks if a principal is authorized to push settlement data for a given oracle.
 #[query]
-pub fn is_oracle_authorized(oracle_id: String, principal: candid::Principal) -> bool {
+pub fn is_oracle_authorized(oracle_id: String, principal: Principal) -> bool {
     ORACLE_STORE.with(|store| {
         if let Some(oracle) = store.borrow().get(&oracle_id) {
             oracle.authorized_principals.contains(&principal)

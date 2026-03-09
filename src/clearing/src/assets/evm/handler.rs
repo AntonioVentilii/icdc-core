@@ -101,7 +101,8 @@ impl EvmHandler {
     }
 
     pub async fn get_fee(&self, _asset: &Asset) -> Result<u128, AssetError> {
-        Ok(21000) // Placeholder for ETH transfer
+        // Standard gas limit for basic ETH/native transfers in this version.
+        Ok(21000)
     }
 
     async fn get_or_fetch_address(&self, principal: Principal) -> Result<String, AssetError> {

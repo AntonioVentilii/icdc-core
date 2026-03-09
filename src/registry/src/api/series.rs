@@ -35,7 +35,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
         payoff_type,
         strike,
         price_precision,
-        settlement_asset,
+        payout_unit,
         oracle_source,
         title,
         description,
@@ -58,7 +58,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
         &payoff_type,
         strike.as_ref(),
         price_precision,
-        &settlement_asset,
+        &payout_unit,
         &oracle_source,
     );
 
@@ -69,7 +69,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
         payoff_type,
         strike,
         price_precision,
-        settlement_asset,
+        payout_unit,
         oracle_source,
         creator: ic_cdk::caller(),
         created_at_ns: ic_cdk::api::time(),

@@ -61,6 +61,8 @@ pub struct FreezePositionForTransferParams {
     pub user: User,
     /// The derivative series identifier.
     pub series_id: SeriesId,
+    /// Optional valuation price to include in the proof.
+    pub valuation_price: Option<Price>,
 }
 
 /// Input parameters for cancelling a limit order.
