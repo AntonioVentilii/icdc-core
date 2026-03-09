@@ -50,8 +50,9 @@ B64_LOGO="$(encode_b64 "$LOGO_FILE")"
 DATA_URI="data:${MIME_TYPE};base64,${B64_LOGO}"
 
 PRINCIPAL="$(dfx identity get-principal)"
-MINTER_PRINCIPAL="${MINTER_PRINCIPAL:-$PRINCIPAL}"
-ECHO "Using minter principal: $MINTER_PRINCIPAL"
+MINTER_CANISTER_ID="$(dfx canister id minter 2>/dev/null || true)"
+MINTER_PRINCIPAL="${MINTER_PRINCIPAL:-${MINTER_CANISTER_ID:-$PRINCIPAL}}"
+echo "Using minter principal: $MINTER_PRINCIPAL"
 
 if [[ "$MODE" == "upgrade" ]]; then
   VARIANT="Upgrade"

@@ -1,18 +1,14 @@
 use std::collections::BTreeMap;
 
-use candid::Nat;
 use ic_cdk_macros::{query, update};
-use shared::{
-    constants::{BPS_BASE, USD_DECIMALS},
-    types::{AssetId, SeriesId},
-};
+use shared::types::{AssetId, SeriesId};
 
 use super::{
     errors::AccountStateError,
     params::{GetAccountStateParams, GetPositionParams},
 };
 use crate::{
-    api::account::results::{AccountStateResponse, AssetWorth},
+    api::account::service::AccountService,
     assets::asset::{handler::get_handler, params::AssetBalanceOfParams},
     guards::caller_is_not_anonymous,
     memory::{ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, POSITIONS},
@@ -31,18 +27,26 @@ use crate::{
 pub fn get_account_state_query() -> GetAccountStateResult {
     let user: User = ic_cdk::caller().into();
 
-    let state_res = ACCOUNT_STATES.with(|accounts| {
-        accounts
-            .borrow()
-            .get(&user)
-            .cloned()
-            .ok_or(AccountStateError::NoAccountStateFound)
-    });
-
-    match state_res {
-        Ok(state) => Ok(build_account_state_response(state)).into(),
-        Err(e) => Err(e).into(),
-    }
+    ACCOUNT_STATES
+        .with(|accounts| {
+            accounts
+                .borrow()
+                .get(&user)
+                .cloned()
+                .ok_or(AccountStateError::NoAccountStateFound)
+        })
+        .map(|state| {
+            COLLATERAL_ASSETS.with(|configs| {
+                ASSET_METRICS.with(|metrics| {
+                    AccountService::build_account_state_response(
+                        state,
+                        &configs.borrow(),
+                        &metrics.borrow(),
+                    )
+                })
+            })
+        })
+        .into()
 }
 
 /// Retrieves the current user's account state, optionally refreshing balances.
@@ -116,75 +120,19 @@ pub async fn get_account_state(params: GetAccountStateParams) -> GetAccountState
     .await;
 
     match result {
-        Ok(state) => Ok(build_account_state_response(state)).into(),
-        Err(e) => Err(e).into(),
-    }
-}
-
-fn build_account_state_response(state: AccountState) -> AccountStateResponse {
-    let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
-    let metrics = ASSET_METRICS.with(|m| m.borrow().clone());
-
-    let mut asset_worths = Vec::new();
-    let target_decimals = USD_DECIMALS as u32;
-
-    for (asset_id, balance) in &state.collateral_balances {
-        let mut value_usd = 0u128;
-        let mut pre_haircut_value_usd = 0u128;
-        let mut haircut_bps = 0u16;
-
-        if let (Some(config), Some(metric)) = (configs.get(asset_id), metrics.get(asset_id)) {
-            if config.is_enabled {
-                let price_value = metric.price_usd.value;
-                let price_decimals = metric.price_usd.decimals as u32;
-                let asset_decimals = config.decimals as u32;
-                haircut_bps = metric.haircut_bps;
-
-                let haircut_multiplier =
-                    (BPS_BASE as u128).saturating_sub(metric.haircut_bps as u128);
-
-                let numerator_pre = Nat::from(*balance) * Nat::from(price_value);
-                let numerator_post = numerator_pre.clone() * Nat::from(haircut_multiplier);
-
-                let total_source_decimals = asset_decimals + price_decimals;
-
-                let (v_post_nat, v_pre_nat) = if total_source_decimals >= target_decimals {
-                    let diff = total_source_decimals - target_decimals;
-                    let divisor_raw = Nat::from(10u128.pow(diff));
-                    let divisor_post = Nat::from(BPS_BASE) * divisor_raw.clone();
-
-                    (numerator_post / divisor_post, numerator_pre / divisor_raw)
-                } else {
-                    let diff = target_decimals - total_source_decimals;
-                    let multiplier_raw = Nat::from(10u128.pow(diff));
-                    (
-                        (numerator_post * multiplier_raw.clone()) / Nat::from(BPS_BASE),
-                        numerator_pre * multiplier_raw,
+        Ok(state) => {
+            let response = COLLATERAL_ASSETS.with(|configs| {
+                ASSET_METRICS.with(|metrics| {
+                    AccountService::build_account_state_response(
+                        state,
+                        &configs.borrow(),
+                        &metrics.borrow(),
                     )
-                };
-
-                value_usd = v_post_nat.0.try_into().unwrap_or(u128::MAX);
-                pre_haircut_value_usd = v_pre_nat.0.try_into().unwrap_or(u128::MAX);
-            }
+                })
+            });
+            Ok(response).into()
         }
-
-        asset_worths.push(AssetWorth {
-            asset_id: asset_id.clone(),
-            balance: *balance,
-            value_usd,
-            pre_haircut_value_usd,
-            haircut_bps,
-        });
-    }
-
-    let total_equity_usd = state.calculate_equity_usd(&configs, &metrics);
-    let available_equity_usd = state.get_available_equity_usd(&configs, &metrics);
-
-    AccountStateResponse {
-        state,
-        assets: asset_worths,
-        total_equity_usd,
-        available_equity_usd,
+        Err(e) => Err(e).into(),
     }
 }
 
