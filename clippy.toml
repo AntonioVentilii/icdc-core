@@ -1,0 +1,6 @@
+disallowed-macros = [
+    { path = "std::print", reason = "Use ic_cdk::print instead" },
+    { path = "std::println", reason = "Use ic_cdk::println instead" },
+    { path = "std::eprint", reason = "Use ic_cdk::eprint instead" },
+    { path = "std::eprintln", reason = "Use ic_cdk::eprintln instead" },
+]

@@ -13,8 +13,8 @@ use super::{errors::SettlementError, params::SettleSeriesParams, results::Settle
 use crate::{
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
-        ACCOUNT_STATES, COLLATERAL_ASSETS, CONFIG, INSURANCE_FUND, POSITIONS, REGISTRY_CANISTER,
-        SERIES, SETTLEMENT_PLANS, TREASURY,
+        ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, CONFIG, INSURANCE_FUND, POSITIONS,
+        REGISTRY_CANISTER, SERIES, SETTLEMENT_PLANS, TREASURY,
     },
     payoffs::{fees::calculate_settlement_fee, get_settlement_value},
     types::{
@@ -117,6 +117,24 @@ pub fn get_settlement_status(series_id: SeriesId) -> Option<SettlementStatusView
     SETTLEMENT_PLANS.with(|m| m.borrow().get(&series_id).map(SettlementStatusView::from))
 }
 
+/// Admin function to manually resume a stuck settlement plan, e.g., if the timer was dropped during
+/// upgrade.
+#[update(guard = "caller_is_controller")]
+pub async fn resume_settlement(series_id: SeriesId) -> SettleSeriesResult {
+    let plan = SETTLEMENT_PLANS.with(|m| m.borrow().get(&series_id).cloned());
+    if let Some(p) = plan {
+        let params = SettleSeriesParams {
+            series_id: p.series_id,
+            settlement_price: p.settlement_price,
+        };
+        settle_series_inner(params).await
+    } else {
+        SettleSeriesResult::Err(SettlementError::Common(CommonError::Internal(
+            "Plan not found".to_string(),
+        )))
+    }
+}
+
 /// Internal settlement logic — caller has already been authorized.
 ///
 /// This function is also used by the timer-based self-resumption so that
@@ -200,28 +218,32 @@ pub(crate) async fn settle_series_inner(params: SettleSeriesParams) -> SettleSer
                         break;
                     }
                 }
-
-                if plan.accounting_cursor == plan.positions.len() {
-                    plan.accounting_applied = true;
-
-                    let insurance_fee_total = plan.insurance_fee_usd;
-                    let protocol_fee_total = plan.fee_usd;
-
-                    TREASURY.with(|t| {
-                        let mut t = t.borrow_mut();
-                        let current = t.get(VUSD_ASSET_ID).copied().unwrap_or(0);
-                        t.insert(VUSD_ASSET_ID.to_string(), current + protocol_fee_total);
-                    });
-
-                    INSURANCE_FUND.with(|i| {
-                        let mut i = i.borrow_mut();
-                        let current = i.get(VUSD_ASSET_ID).copied().unwrap_or(0);
-                        i.insert(VUSD_ASSET_ID.to_string(), current + insurance_fee_total);
-                    });
-                }
             });
 
+            let newly_applied =
+                plan.accounting_cursor == plan.positions.len() && !plan.accounting_applied;
+            if newly_applied {
+                plan.accounting_applied = true;
+            }
+
             SETTLEMENT_PLANS.with(|m| m.borrow_mut().insert(series_id.clone(), plan.clone()));
+
+            if newly_applied {
+                let insurance_fee_total = plan.insurance_fee_usd;
+                let protocol_fee_total = plan.fee_usd;
+
+                TREASURY.with(|t| {
+                    let mut t = t.borrow_mut();
+                    let current = t.get(VUSD_ASSET_ID).copied().unwrap_or(0);
+                    t.insert(VUSD_ASSET_ID.to_string(), current + protocol_fee_total);
+                });
+
+                INSURANCE_FUND.with(|i| {
+                    let mut i = i.borrow_mut();
+                    let current = i.get(VUSD_ASSET_ID).copied().unwrap_or(0);
+                    i.insert(VUSD_ASSET_ID.to_string(), current + insurance_fee_total);
+                });
+            }
         }
 
         // ---------- Phase C: finalise ----------
@@ -360,11 +382,12 @@ fn check_settlement_solvency(
     let total_post_settlement_equity = ACCOUNT_STATES.with(|accounts| {
         let accounts = accounts.borrow();
         let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
+        let metrics = ASSET_METRICS.with(|m| m.borrow().clone());
 
         accounts
             .values()
             .map(|acc| {
-                let current_equity = acc.calculate_raw_equity_i128(&configs);
+                let current_equity = acc.calculate_raw_equity_i128(&configs, &metrics);
                 let cashflow = cashflow_by_user.get(&acc.user).copied().unwrap_or(0);
                 let post_equity = current_equity + cashflow;
                 if post_equity < 0 {

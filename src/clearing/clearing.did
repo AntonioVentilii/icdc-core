@@ -10,12 +10,6 @@ type AccountStateError = variant {
 	Asset : AssetError;
 	NoAccountStateFound
 };
-type AdminError = variant {
-	TransferFailed : text;
-	InsufficientFunds;
-	Common : CommonError
-};
-type AdminResult = variant { Ok : nat; Err : AdminError };
 type Asset = variant {
 	Erc20 : ErcToken;
 	Icrc : principal;
@@ -30,15 +24,32 @@ type AssetError = variant {
 	InvalidAssetForHandler;
 	UnsupportedAsset
 };
+type AssetMetrics = record {
+	haircut_bps : nat16;
+	latest_transfer_fee : opt nat;
+	insurance_fee_ratio : opt nat16;
+	last_updated_ns : opt nat64;
+	protocol_fee_ratio : opt nat16;
+	price_usd : DecimalValue
+};
+type CancelFundWithdrawalError = variant {
+	PlanNotFound;
+	InvalidPlanStatus;
+	Common : CommonError
+};
+type CancelFundWithdrawalParams = record { request_id : text };
+type CancelFundWithdrawalResult = variant {
+	Ok;
+	Err : CancelFundWithdrawalError
+};
 type CancelLimitOrderParams = record { order_id : text };
 type CanonicalCryptoUnit = variant { Btc; Eth; Icp; Usdc; Usdt };
 type CollateralAssetConfig = record {
 	decimals : nat8;
-	haircut_bps : nat16;
 	asset : Asset;
 	is_enabled : bool;
+	oracle_id : opt text;
 	asset_id : text;
-	price_usd : DecimalValue;
 	symbol : text
 };
 type CommonError = variant {
@@ -250,6 +261,18 @@ type TradeError = variant {
 	SeriesNotFound : text;
 	Common : CommonError
 };
+type UpdateAssetMetricsParams = record {
+	metrics : AssetMetrics;
+	asset_id : text
+};
+type UpdateAssetPriceError = variant {
+	AssetNotFound;
+	AssetMetricsNotInitialized;
+	OracleNotConfigured;
+	Common : CommonError
+};
+type UpdateAssetPriceParams = record { price : Price; asset_id : text };
+type UpdateAssetPriceResult = variant { Ok; Err : UpdateAssetPriceError };
 type UpdateCollateralAssetParams = record { config : CollateralAssetConfig };
 type WithdrawCollateralError = variant {
 	InsufficientExcessMargin : record { requested : nat; available : nat };
@@ -262,6 +285,11 @@ type WithdrawCollateralParams = record {
 	amount : nat
 };
 type WithdrawCollateralResult = variant { Ok; Err : WithdrawCollateralError };
+type WithdrawFundError = variant {
+	TransferFailed : text;
+	InsufficientFunds;
+	Common : CommonError
+};
 type WithdrawFundParams = record {
 	to : principal;
 	request_id : text;
@@ -269,12 +297,19 @@ type WithdrawFundParams = record {
 	asset_id : text;
 	amount : nat
 };
+type WithdrawFundResult = variant { Ok : nat; Err : WithdrawFundError };
 service : {
 	// Accepts a position transfer from another clearing canister.
 	//
 	// This method validates the series and increases the target user's position based on the provided
 	// proof. This method is gated to canister controllers.
 	accept_position_transfer : (PositionProof) -> (AcceptPositionTransferResult);
+	// Cancels a stuck fund withdrawal and refunds the internal ledger balance.
+	//
+	// This method is gated to canister controllers.
+	cancel_fund_withdrawal : (CancelFundWithdrawalParams) -> (
+		CancelFundWithdrawalResult
+	);
 	// Cancels an existing limit order and releases the reserved collateral.
 	//
 	// Only the creator of the order can cancel it.
@@ -333,6 +368,9 @@ service : {
 	//
 	// This method is gated to canister controllers.
 	metrics : () -> (text) query;
+	// Admin function to manually resume a stuck settlement plan, e.g., if the timer was dropped during
+	// upgrade.
+	resume_settlement : (text) -> (SettleSeriesResult);
 	// Sets the principal of the Series Registry canister.
 	//
 	// This principal is used to discover and validate derivative series.
@@ -373,6 +411,14 @@ service : {
 	submit_matched_trade : (SubmitMatchedTradeParams) -> (
 		SubmitMatchedTradeResult
 	);
+	// Adds or updates dynamic metrics for a collateral asset.
+	//
+	// This method is gated to canister controllers.
+	update_asset_metrics : (UpdateAssetMetricsParams) -> ();
+	// Updates the price of an asset.
+	//
+	// This method can be called by canister controllers or authorized oracles.
+	update_asset_price : (UpdateAssetPriceParams) -> (UpdateAssetPriceResult);
 	// Adds or updates a collateral asset configuration.
 	//
 	// This method is gated to canister controllers.
@@ -393,5 +439,5 @@ service : {
 	// Withdraws assets from the Insurance Fund or Treasury to an external wallet.
 	//
 	// This method is gated to canister controllers.
-	withdraw_fund : (WithdrawFundParams) -> (AdminResult)
+	withdraw_fund : (WithdrawFundParams) -> (WithdrawFundResult)
 }

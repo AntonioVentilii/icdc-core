@@ -4,7 +4,7 @@ use candid::{CandidType, Principal};
 use serde::Deserialize;
 use shared::{
     constants::{DEFAULT_INSURANCE_FEE_RATIO, DEFAULT_PROTOCOL_FEE_RATIO},
-    types::{AssetId, CollateralAssetConfig, Price, Series, SeriesId},
+    types::{AssetId, AssetMetrics, CollateralAssetConfig, Price, Series, SeriesId},
 };
 
 use crate::types::{
@@ -98,4 +98,6 @@ pub struct StableState {
     pub collateral_assets: BTreeMap<AssetId, CollateralAssetConfig>,
     /// Cached EVM addresses derived for principals.
     pub evm_addresses: BTreeMap<Principal, String>,
+    /// Dynamic metrics for collateral assets.
+    pub asset_metrics: BTreeMap<AssetId, AssetMetrics>,
 }

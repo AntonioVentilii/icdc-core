@@ -93,7 +93,13 @@ pub async fn get_account_state(params: GetAccountStateParams) -> GetAccountState
                 .entry(user)
                 .or_insert_with(|| AccountState::new(user));
 
-            state.collateral_balances = fresh_collateral_balances;
+            // Merge refreshed balances for enabled assets into existing balances
+            // instead of overwriting the entire map, so that balances for assets
+            // that are no longer enabled are not silently discarded.
+            for (asset_id, balance) in fresh_collateral_balances {
+                state.collateral_balances.insert(asset_id, balance);
+            }
+
             // Note: cash_balance_usd and reserved_margin_usd are updated by other processes
             // (trades, settlement)
             state.clone()

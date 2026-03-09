@@ -4,7 +4,7 @@ use candid::Principal;
 use ic_cdk::storage;
 use shared::{
     constants::{CKUSDC_LEDGER, ICP_LEDGER},
-    types::{AssetId, CollateralAssetConfig, Series, SeriesId},
+    types::{AssetId, AssetMetrics, CollateralAssetConfig, Series, SeriesId},
 };
 
 use crate::{
@@ -39,6 +39,7 @@ thread_local! {
     pub static TREASURY: RefCell<BTreeMap<AssetId, u128>> = const { RefCell::new(BTreeMap::new()) };
     pub static COLLATERAL_ASSETS: RefCell<BTreeMap<AssetId, CollateralAssetConfig>> = const { RefCell::new(BTreeMap::new()) };
     pub static EVM_ADDRESSES: RefCell<BTreeMap<Principal, String>> = const { RefCell::new(BTreeMap::new()) };
+    pub static ASSET_METRICS: RefCell<BTreeMap<AssetId, AssetMetrics>> = const { RefCell::new(BTreeMap::new()) };
 }
 
 pub fn save_state() {
@@ -68,6 +69,7 @@ pub fn save_state() {
     let collateral_assets: BTreeMap<AssetId, CollateralAssetConfig> =
         COLLATERAL_ASSETS.with(|f| f.borrow().clone());
     let evm_addresses: BTreeMap<Principal, String> = EVM_ADDRESSES.with(|f| f.borrow().clone());
+    let asset_metrics: BTreeMap<AssetId, AssetMetrics> = ASSET_METRICS.with(|f| f.borrow().clone());
 
     let state = StableState {
         config,
@@ -89,6 +91,7 @@ pub fn save_state() {
         treasury,
         collateral_assets,
         evm_addresses,
+        asset_metrics,
     };
 
     storage::stable_save((state,)).expect("Save failed");
@@ -117,6 +120,7 @@ pub fn restore_state() {
         treasury,
         collateral_assets,
         evm_addresses,
+        asset_metrics,
     } = state;
 
     POSITIONS.with(|p| {
@@ -144,6 +148,7 @@ pub fn restore_state() {
     TREASURY.with(|f| *f.borrow_mut() = treasury);
     COLLATERAL_ASSETS.with(|f| *f.borrow_mut() = collateral_assets);
     EVM_ADDRESSES.with(|f| *f.borrow_mut() = evm_addresses);
+    ASSET_METRICS.with(|f| *f.borrow_mut() = asset_metrics);
 }
 
 /// Returns the principal of the ICP ledger.

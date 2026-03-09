@@ -1,4 +1,4 @@
-use candid::{Nat, Principal};
+use candid::Principal;
 use ic_cdk::export_candid;
 use ic_cdk_macros::{post_upgrade, pre_upgrade};
 use shared::types::{CollateralAssetConfig, Series, SeriesId};
@@ -10,8 +10,14 @@ use crate::{
             results::GetAccountStateResult,
         },
         admin::{
-            params::{UpdateCollateralAssetParams, WithdrawFundParams},
-            results::{AdminResult, GetFundsResult},
+            params::{
+                CancelFundWithdrawalParams, UpdateAssetMetricsParams, UpdateAssetPriceParams,
+                UpdateCollateralAssetParams, WithdrawFundParams,
+            },
+            results::{
+                CancelFundWithdrawalResult, GetFundsResult, UpdateAssetPriceResult,
+                WithdrawFundResult,
+            },
         },
         collateral::{
             params::{DepositCollateralParams, WithdrawCollateralParams},

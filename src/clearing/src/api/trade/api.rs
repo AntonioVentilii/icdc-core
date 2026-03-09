@@ -12,8 +12,8 @@ use super::{
 use crate::{
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
-        ACCEPTED_TRANSFERS, ACCOUNT_STATES, COLLATERAL_ASSETS, EVENTS, FROZEN_TRANSFERS,
-        LIMIT_ORDERS, POSITIONS,
+        ACCEPTED_TRANSFERS, ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, EVENTS,
+        FROZEN_TRANSFERS, LIMIT_ORDERS, POSITIONS,
     },
     payoffs::get_required_margin,
     trade::{
@@ -53,6 +53,7 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
 
         let series = ensure_series_registered(&series_id).await?;
         let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
+        let metrics = ASSET_METRICS.with(|m| m.borrow().clone());
 
         // Calculate required margin for this order in USD
         let required_margin_usd = get_required_margin(&series, &price, qty);
@@ -63,7 +64,7 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
                 .entry(caller)
                 .or_insert_with(|| AccountState::new(caller));
 
-            let equity = acc.calculate_equity_usd(&configs);
+            let equity = acc.calculate_equity_usd(&configs, &metrics);
             let target_reserved = acc.reserved_margin_usd + required_margin_usd;
 
             if (equity as i128) < (target_reserved as i128) {

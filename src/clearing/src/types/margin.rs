@@ -4,7 +4,7 @@ use candid::{CandidType, Nat};
 use serde::{Deserialize, Serialize};
 use shared::{
     constants::{BPS_BASE, USD_DECIMALS},
-    types::{AssetId, CollateralAssetConfig, SeriesId},
+    types::{AssetId, AssetMetrics, CollateralAssetConfig, SeriesId},
 };
 
 use crate::types::user::User;
@@ -64,8 +64,12 @@ impl AccountState {
     /// Formula (all integer):
     /// value_usd = (balance * price_value * (10000 - haircut_bps)) / (10000 * 10^(decimals +
     /// price_decimals - 6))
-    pub fn calculate_equity_usd(&self, configs: &BTreeMap<AssetId, CollateralAssetConfig>) -> u128 {
-        let raw = self.calculate_raw_equity_i128(configs);
+    pub fn calculate_equity_usd(
+        &self,
+        configs: &BTreeMap<AssetId, CollateralAssetConfig>,
+        metrics: &BTreeMap<AssetId, AssetMetrics>,
+    ) -> u128 {
+        let raw = self.calculate_raw_equity_i128(configs, metrics);
         if raw < 0 {
             0
         } else {
@@ -80,20 +84,21 @@ impl AccountState {
     pub fn calculate_raw_equity_i128(
         &self,
         configs: &BTreeMap<AssetId, CollateralAssetConfig>,
+        metrics: &BTreeMap<AssetId, AssetMetrics>,
     ) -> i128 {
         let mut total_equity_usd: i128 = self.cash_balance_usd;
 
         let target_decimals = USD_DECIMALS as u32;
 
         for (asset_id, balance) in &self.collateral_balances {
-            if let Some(config) = configs.get(asset_id) {
+            if let (Some(config), Some(metric)) = (configs.get(asset_id), metrics.get(asset_id)) {
                 if config.is_enabled {
-                    let price_value = config.price_usd.value;
-                    let price_decimals = config.price_usd.decimals as u32;
+                    let price_value = metric.price_usd.value;
+                    let price_decimals = metric.price_usd.decimals as u32;
                     let asset_decimals = config.decimals as u32;
 
                     let haircut_multiplier =
-                        (BPS_BASE as u128).saturating_sub(config.haircut_bps as u128);
+                        (BPS_BASE as u128).saturating_sub(metric.haircut_bps as u128);
 
                     let numerator = Nat::from(*balance)
                         * Nat::from(price_value)
@@ -124,8 +129,9 @@ impl AccountState {
     pub fn get_available_equity_usd(
         &self,
         configs: &BTreeMap<AssetId, CollateralAssetConfig>,
+        metrics: &BTreeMap<AssetId, AssetMetrics>,
     ) -> i128 {
-        let equity = self.calculate_equity_usd(configs);
+        let equity = self.calculate_equity_usd(configs, metrics);
         (equity as i128) - (self.reserved_margin_usd as i128)
     }
 }

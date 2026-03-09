@@ -19,7 +19,7 @@ use crate::{
         types::AssetAmount,
     },
     guards::caller_is_not_anonymous,
-    memory::{ACCOUNT_STATES, COLLATERAL_ASSETS, DEPOSIT_PLANS, WITHDRAWAL_PLANS},
+    memory::{ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, DEPOSIT_PLANS, WITHDRAWAL_PLANS},
     types::{
         account::AssetAccount,
         margin::AccountState,
@@ -180,6 +180,14 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                 .ok_or(WithdrawCollateralError::Asset(AssetError::UnsupportedAsset))
         })?;
 
+        let metric = ASSET_METRICS.with(|metrics| {
+            metrics
+                .borrow()
+                .get(&asset_id)
+                .cloned()
+                .ok_or(WithdrawCollateralError::Asset(AssetError::UnsupportedAsset))
+        })?;
+
         // ---------- Phase A: Build plan (durable, no awaits) ----------
         let mut plan = WithdrawalPlan::get_or_create(WithdrawalPlanParams {
             withdrawal_id: withdrawal_id.clone(),
@@ -202,14 +210,14 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                 .try_into()
                 .map_err(|_| WithdrawCollateralError::MathOverflow)?;
 
-            let price_value = config.price_usd.value;
-            let price_decimals = config.price_usd.decimals as u32;
+            let price_value = metric.price_usd.value;
+            let price_decimals = metric.price_usd.decimals as u32;
             let asset_decimals = config.decimals as u32;
             let target_decimals = USD_DECIMALS as u32;
 
             let withdrawal_value_usd_nat = {
                 let haircut_multiplier =
-                    (BPS_BASE as u128).saturating_sub(config.haircut_bps as u128);
+                    (BPS_BASE as u128).saturating_sub(metric.haircut_bps as u128);
 
                 let numerator =
                     Nat::from(amount_u128) * Nat::from(price_value) * Nat::from(haircut_multiplier);
@@ -229,25 +237,53 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             let withdrawal_value_usd: u128 =
                 withdrawal_value_usd_nat.0.try_into().unwrap_or(u128::MAX);
 
-            let (equity_usd, reserved_margin_usd) = ACCOUNT_STATES.with(|accounts| {
-                let accounts = accounts.borrow();
-                let state = accounts.get(&user).ok_or(
-                    WithdrawCollateralError::InsufficientExcessMargin {
-                        available: 0,
-                        requested: withdrawal_value_usd,
-                    },
-                )?;
+            let (post_equity_usd, reserved_margin_usd, pre_equity_usd) =
+                ACCOUNT_STATES.with(|accounts| {
+                    let accounts = accounts.borrow();
+                    let state = accounts.get(&user).ok_or(
+                        WithdrawCollateralError::InsufficientExcessMargin {
+                            available: 0,
+                            requested: withdrawal_value_usd,
+                        },
+                    )?;
 
-                let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
-                let equity = state.calculate_equity_usd(&configs);
-                Ok::<(u128, u128), WithdrawCollateralError>((equity, state.reserved_margin_usd))
-            })?;
+                    let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
+                    let metrics = ASSET_METRICS.with(|m| m.borrow().clone());
 
-            if equity_usd < reserved_margin_usd
-                || equity_usd - reserved_margin_usd < withdrawal_value_usd
-            {
+                    let pre_equity = state.calculate_equity_usd(&configs, &metrics);
+
+                    let mut temp_state = state.clone();
+                    if asset_id == VUSD_ASSET_ID {
+                        let amount_usd = if config.decimals > USD_DECIMALS {
+                            (amount_u128 / 10u128.pow((config.decimals - USD_DECIMALS) as u32))
+                                as i128
+                        } else {
+                            (amount_u128 * 10u128.pow((USD_DECIMALS - config.decimals) as u32))
+                                as i128
+                        };
+                        temp_state.cash_balance_usd -= amount_usd;
+                    } else {
+                        let current = temp_state
+                            .collateral_balances
+                            .get(&asset_id)
+                            .copied()
+                            .unwrap_or(0);
+                        temp_state
+                            .collateral_balances
+                            .insert(asset_id.clone(), current.saturating_sub(amount_u128));
+                    }
+
+                    let post_equity = temp_state.calculate_equity_usd(&configs, &metrics);
+                    Ok::<(u128, u128, u128), WithdrawCollateralError>((
+                        post_equity,
+                        temp_state.reserved_margin_usd,
+                        pre_equity,
+                    ))
+                })?;
+
+            if post_equity_usd < reserved_margin_usd {
                 return Err(WithdrawCollateralError::InsufficientExcessMargin {
-                    available: equity_usd.saturating_sub(reserved_margin_usd),
+                    available: pre_equity_usd.saturating_sub(reserved_margin_usd),
                     requested: withdrawal_value_usd,
                 });
             }

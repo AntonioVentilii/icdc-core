@@ -60,10 +60,10 @@ BINARY_SERIES=$(register_series_usd "Binary Test" "variant { Binary }" "null" "I
 
 # Register Series: Put (Strike $1.00)
 # Price record requires 'decimal' field
-PUT_SERIES=$(register_series_usd "Put Test" "variant { Put }" "opt record { decimal = record { value = 1000000; decimals = 6 } }" "INT_PUT_${TIMESTAMP}" | grep -oE '"[a-f0-9]{64}"' | head -n 1 | tr -d '"')
+PUT_SERIES=$(register_series_usd "Put Test" "variant { Put }" "opt record { value = 1000000; decimals = 6 }" "INT_PUT_${TIMESTAMP}" | grep -oE '"[a-f0-9]{64}"' | head -n 1 | tr -d '"')
 
 # Register Series: Call (Strike $50,000) - e.g. BTC Call
-CALL_SERIES=$(register_series_usd "BTC Call Test" "variant { Call }" "opt record { decimal = record { value = 50000000000; decimals = 6 } }" "INT_CALL_${TIMESTAMP}" | grep -oE '"[a-f0-9]{64}"' | head -n 1 | tr -d '"')
+CALL_SERIES=$(register_series_usd "BTC Call Test" "variant { Call }" "opt record { value = 50000000000; decimals = 6 }" "INT_CALL_${TIMESTAMP}" | grep -oE '"[a-f0-9]{64}"' | head -n 1 | tr -d '"')
 
 if [ -z "$BINARY_SERIES" ] || [ -z "$PUT_SERIES" ] || [ -z "$CALL_SERIES" ]; then
   error "Failed to register series"
@@ -75,22 +75,22 @@ log "Registered Series: BINARY=$BINARY_SERIES, PUT=$PUT_SERIES, CALL=$CALL_SERIE
 log "Scenario 1: Binary Trade Matching..."
 dfx identity use default
 # Buy 10 @ 0.55 USD
-dfx canister call clearing submit_matched_trade "(record { trade_id = \"T1_${TIMESTAMP}\"; series_id = \"$BINARY_SERIES\"; buyer = principal \"$PRINCIPAL\"; seller = principal \"$SECONDARY\"; qty = 10 : int; price = record { decimal = record { value = 550000; decimals = 6 }; timestamp = null; oracle_id = null }; })" >/dev/null
+dfx canister call clearing submit_matched_trade "(record { trade_id = \"T1_${TIMESTAMP}\"; series_id = \"$BINARY_SERIES\"; buyer = principal \"$PRINCIPAL\"; seller = principal \"$SECONDARY\"; qty = 10 : int; price = record { value = 550000; decimals = 6; timestamp = null; oracle_id = null }; })" >/dev/null
 
 # --- 6. EXECUTION: PUT SCENARIO (Margin Enforcement) ---
 log "Scenario 2: Put Trade (Short side collateralizes strike)..."
 # Seller (Default) sells a Put @ 0.20 USD (Strike $1.0)
-dfx canister call clearing submit_matched_trade "(record { trade_id = \"T2_${TIMESTAMP}\"; series_id = \"$PUT_SERIES\"; buyer = principal \"$SECONDARY\"; seller = principal \"$PRINCIPAL\"; qty = 5 : int; price = record { decimal = record { value = 200000; decimals = 6 }; timestamp = null; oracle_id = null }; })" >/dev/null
+dfx canister call clearing submit_matched_trade "(record { trade_id = \"T2_${TIMESTAMP}\"; series_id = \"$PUT_SERIES\"; buyer = principal \"$SECONDARY\"; seller = principal \"$PRINCIPAL\"; qty = 5 : int; price = record { value = 200000; decimals = 6; timestamp = null; oracle_id = null }; })" >/dev/null
 
 # --- 7. SETTLEMENT & VERIFICATION ---
 log "Settling all series..."
 # Settle Binary @ $1.0 (Full Win for Default)
-dfx canister call clearing settle_series "(record { series_id = \"$BINARY_SERIES\"; settlement_price = record { decimal = record { value = 1000000; decimals = 6 }; timestamp = null; oracle_id = null }; })" >/dev/null
+dfx canister call clearing settle_series "(record { series_id = \"$BINARY_SERIES\"; settlement_price = record { value = 1000000; decimals = 6; timestamp = null; oracle_id = null }; })" >/dev/null
 
 # Settle Put @ $0.80 (In-the-money for Secondary)
 # Payoff for Put = max(Strike - Price, 0) = max(1.0 - 0.8, 0) = 0.20 per unit.
 # Secondary (Buyer) gets 5 * 0.20 = 1.00 USD.
-dfx canister call clearing settle_series "(record { series_id = \"$PUT_SERIES\"; settlement_price = record { decimal = record { value = 800000; decimals = 6 }; timestamp = null; oracle_id = null }; })" >/dev/null
+dfx canister call clearing settle_series "(record { series_id = \"$PUT_SERIES\"; settlement_price = record { value = 800000; decimals = 6; timestamp = null; oracle_id = null }; })" >/dev/null
 
 # Settle Call @ $60,000 (Very In-the-money) - but we didn't trade it, just verifying registration
 log "Skipping Call settlement as no trades were executed."

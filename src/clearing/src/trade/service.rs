@@ -3,7 +3,8 @@ use shared::types::Series;
 use crate::{
     api::trade::errors::TradeError,
     memory::{
-        ACCOUNT_STATES, COLLATERAL_ASSETS, EVENTS, EXECUTED_TRADES, NEXT_EVENT_ID, POSITIONS,
+        ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, EVENTS, EXECUTED_TRADES, NEXT_EVENT_ID,
+        POSITIONS,
     },
     payoffs::get_required_margin,
     trade::types::ExecuteTradeParams,
@@ -46,6 +47,7 @@ pub(crate) fn execute_trade_impl(
     } = params;
 
     let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
+    let metrics = ASSET_METRICS.with(|m| m.borrow().clone());
 
     // Calculate upfront collateral (cost) for both sides
     let buyer_cost = get_required_margin(&series, &price, qty) as i128;
@@ -118,11 +120,11 @@ pub(crate) fn execute_trade_impl(
                 .saturating_sub(buyer_margin_delta.unsigned_abs())
         };
 
-        let buyer_equity = temp_buyer.calculate_equity_usd(&configs);
-        if (buyer_equity as i128) < (target_buyer_reserved as i128) {
+        let buyer_equity = temp_buyer.calculate_raw_equity_i128(&configs, &metrics);
+        if buyer_equity < (target_buyer_reserved as i128) {
             return Err(TradeError::InsufficientMargin {
                 user: buyer,
-                balance: buyer_equity,
+                balance: temp_buyer.calculate_equity_usd(&configs, &metrics),
                 required: target_buyer_reserved,
             });
         }
@@ -147,11 +149,11 @@ pub(crate) fn execute_trade_impl(
                 .saturating_sub(seller_margin_delta.unsigned_abs())
         };
 
-        let seller_equity = temp_seller.calculate_equity_usd(&configs);
-        if (seller_equity as i128) < (target_seller_reserved as i128) {
+        let seller_equity = temp_seller.calculate_raw_equity_i128(&configs, &metrics);
+        if seller_equity < (target_seller_reserved as i128) {
             return Err(TradeError::InsufficientMargin {
                 user: seller,
-                balance: seller_equity,
+                balance: temp_seller.calculate_equity_usd(&configs, &metrics),
                 required: target_seller_reserved,
             });
         }
