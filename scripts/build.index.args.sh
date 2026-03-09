@@ -21,7 +21,12 @@ if ! dfx ping "$DFX_NETWORK" >/dev/null 2>&1; then
   exit 1
 fi
 
-CANISTER_ID_LEDGER="$(jq -re ".ledger.\"$DFX_NETWORK\"" canister_ids.json)"
+if [[ "$DFX_NETWORK" == "local" ]]; then
+  CANISTER_ID_LEDGER="$(dfx canister id ledger)"
+else
+  CANISTER_ID_LEDGER="$(jq -re ".ledger.\"$DFX_NETWORK\"" canister_ids.json)"
+fi
+
 ECHO "Using Ledger canister ID: $CANISTER_ID_LEDGER"
 
 if [[ "$MODE" == "upgrade" ]]; then
