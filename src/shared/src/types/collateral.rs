@@ -48,3 +48,10 @@ pub struct AssetMetrics {
     /// Last time the asset metrics were updated (in nanoseconds).
     pub last_updated_ns: Option<u64>,
 }
+
+/// Combined structure for public consumption of asset information.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct CollateralAssetInfo {
+    pub config: CollateralAssetConfig,
+    pub metrics: Option<AssetMetrics>,
+}

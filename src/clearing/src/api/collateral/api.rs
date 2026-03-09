@@ -1,8 +1,8 @@
 use candid::Nat;
-use ic_cdk_macros::update;
+use ic_cdk_macros::{query, update};
 use shared::{
     constants::{BPS_BASE, USD_DECIMALS, VUSD_ASSET_ID},
-    types::asset::errors::AssetError,
+    types::{asset::errors::AssetError, CollateralAssetInfo},
 };
 
 use super::{
@@ -405,6 +405,21 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
     .await;
 
     result.into()
+}
+
+/// Returns a list of all supported collateral assets with their metrics.
+#[query(guard = "caller_is_not_anonymous")]
+pub fn get_collateral_assets() -> Vec<CollateralAssetInfo> {
+    let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
+    let metrics = ASSET_METRICS.with(|m| m.borrow().clone());
+
+    configs
+        .into_iter()
+        .map(|(id, config)| CollateralAssetInfo {
+            config,
+            metrics: metrics.get(&id).cloned(),
+        })
+        .collect()
 }
 
 #[cfg(test)]
