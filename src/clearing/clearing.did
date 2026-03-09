@@ -43,7 +43,6 @@ type CancelFundWithdrawalResult = variant {
 	Err : CancelFundWithdrawalError
 };
 type CancelLimitOrderParams = record { order_id : text };
-type CanonicalCryptoUnit = variant { Btc; Eth; Icp; Usdc; Usdt };
 type CollateralAssetConfig = record {
 	decimals : nat8;
 	asset : Asset;
@@ -138,7 +137,7 @@ type PaymentIdempotency = variant { IcrcCreatedAtTimeNs : nat64 };
 type PayoffType = variant { Put; Binary; Call };
 type PayoutUnit = variant {
 	Fiat : FiatUnit;
-	Crypto : CanonicalCryptoUnit;
+	Asset : Asset;
 	NonMonetary : NonMonetaryUnit
 };
 type PlanStatus = variant { Finalised; Planned; Executing };

@@ -36,9 +36,11 @@ dfx canister call clearing update_config "(record {
 })" || error "Failed to update clearing config"
 
 # --- 2. ASSET SETUP ---
-log "Configuring ICP & vUSD collateral assets..."
+log "Configuring ICP, vUSD, TEST_ICP & TICRC1 collateral assets..."
 dfx canister call clearing update_collateral_asset "(record { config = record { asset_id = \"ICP\"; asset = variant { Icrc = principal \"$ICP_LEDGER\" }; symbol = \"ICP\"; decimals = 8; price_usd = record { value = 10000000; decimals = 6 }; haircut_bps = 0; is_enabled = true; } })" >/dev/null
 dfx canister call clearing update_collateral_asset "(record { config = record { asset_id = \"vUSD\"; asset = variant { Icrc = principal \"aaaaa-aa\" }; symbol = \"vUSD\"; decimals = 6; price_usd = record { value = 1000000; decimals = 6 }; haircut_bps = 0; is_enabled = true; } })" >/dev/null
+dfx canister call clearing update_collateral_asset "(record { config = record { asset_id = \"TESTICP\"; asset = variant { Icrc = principal \"xafvr-biaaa-aaaai-aql5q-cai\" }; symbol = \"TESTICP\"; decimals = 8; price_usd = record { value = 10000000; decimals = 6 }; haircut_bps = 0; is_enabled = true; } })" >/dev/null
+dfx canister call clearing update_collateral_asset "(record { config = record { asset_id = \"TICRC1\"; asset = variant { Icrc = principal \"3jkp5-oyaaa-aaaaj-azwqa-cai\" }; symbol = \"TICRC1\"; decimals = 8; price_usd = record { value = 1000000; decimals = 6 }; haircut_bps = 0; is_enabled = true; } })" >/dev/null
 
 # --- 3. IDENTITY SEEDING ---
 log "Seeding identities with test tokens..."

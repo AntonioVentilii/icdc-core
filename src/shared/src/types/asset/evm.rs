@@ -23,7 +23,7 @@ impl From<Chain> for ChainId {
 /// Chain IDs follow the standard used by EVM networks:
 /// https://chainlist.org/
 #[derive(
-    CandidType, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord,
+    CandidType, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
 pub enum Chain {
     Ethereum,
@@ -68,7 +68,9 @@ impl TryFrom<ChainId> for Chain {
 
 /// Represents a native asset on an EVM-compatible chain
 /// (for example ETH on Ethereum/Base, POL on Polygon, or BNB on BSC).
-#[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
 pub struct NativeEvmAsset {
     /// The EVM chain where this native asset is used.
     pub chain_id: ChainId,
@@ -100,7 +102,9 @@ impl fmt::Display for NativeEvmAsset {
 pub type ErcTokenId = String;
 
 /// Represents an ERC-20 token on a specific EVM chain.
-#[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
 pub struct ErcToken {
     /// The contract address of the token.
     pub token_address: ErcTokenId,

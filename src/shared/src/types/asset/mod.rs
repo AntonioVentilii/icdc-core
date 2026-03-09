@@ -1,3 +1,5 @@
+use std::fmt::{Display, Formatter};
+
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +12,9 @@ pub mod errors;
 pub mod evm;
 
 /// Represents a supported asset in the ICDC ecosystem.
-#[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
 pub enum Asset {
     /// An ICRC-compliant token identified by its canister [`Principal`].
     Icrc(Principal),
@@ -19,6 +23,7 @@ pub enum Asset {
     /// An ERC-20 token on an EVM-compatible chain.
     Erc20(ErcToken),
 }
+
 impl Asset {
     /// Returns the ledger canister if this asset is an ICRC token.
     pub fn as_icrc(&self) -> Result<&Principal, AssetError> {
@@ -35,6 +40,16 @@ impl Asset {
             Self::NativeEvm(a) => Ok(EvmAssetRef::Native(a)),
             Self::Erc20(t) => Ok(EvmAssetRef::Erc20(t)),
             _ => Err(AssetError::InvalidAssetForHandler),
+        }
+    }
+}
+
+impl Display for Asset {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Icrc(p) => write!(f, "ICRC-{}", p.to_text()),
+            Self::NativeEvm(n) => write!(f, "NATIVE-{}", n.chain_id),
+            Self::Erc20(t) => write!(f, "ERC20-{}-{}", t.chain_id, t.token_address),
         }
     }
 }

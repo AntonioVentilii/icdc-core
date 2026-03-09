@@ -15,12 +15,21 @@ type AddSeriesParams = record {
 	oracle_source : text
 };
 type AddSeriesResult = variant { Ok : text; Err : SeriesError };
-type CanonicalCryptoUnit = variant { Btc; Eth; Icp; Usdc; Usdt };
+type Asset = variant {
+	Erc20 : ErcToken;
+	Icrc : principal;
+	NativeEvm : NativeEvmAsset
+};
 type DecimalValue = record { decimals : nat8; value : nat };
 type Description = record {
 	html : opt text;
 	markdown : opt text;
 	plain : text
+};
+type ErcToken = record {
+	decimals : nat8;
+	token_address : text;
+	chain_id : nat64
 };
 type FiatUnit = variant { Chf; Eur; Gbp; Usd };
 type ListSeriesParams = record {
@@ -38,6 +47,7 @@ type ManageOraclePrincipalsParams = record {
 	remove_principals : vec principal;
 	oracle_id : text
 };
+type NativeEvmAsset = record { decimals : nat8; chain_id : nat64 };
 type NonMonetaryUnit = variant { Points };
 type Oracle = record {
 	manager : principal;
@@ -61,7 +71,7 @@ type PaginationParams = record { cursor : opt text; limit : opt nat64 };
 type PayoffType = variant { Put; Binary; Call };
 type PayoutUnit = variant {
 	Fiat : FiatUnit;
-	Crypto : CanonicalCryptoUnit;
+	Asset : Asset;
 	NonMonetary : NonMonetaryUnit
 };
 type Price = record {

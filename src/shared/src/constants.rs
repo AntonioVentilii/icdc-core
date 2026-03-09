@@ -29,6 +29,19 @@ pub const VUSD_LEDGER: &str = "ap6gq-taaaa-aaaae-acsaq-cai";
 /// Principal ID of the virtual USD (vUSD) Index canister
 pub const VUSD_INDEX: &str = "x3qir-tyaaa-aaaae-acr6a-cai";
 
+/// Principal ID of the TESTICP Ledger canister
+pub const TEST_ICP_LEDGER: &str = "xafvr-biaaa-aaaai-aql5q-cai";
+/// Principal ID of the TESTICP Index canister
+pub const TEST_ICP_INDEX: &str = "qcuy6-bqaaa-aaaai-aqmqq-cai";
+
+/// Principal ID of the TICRC1 Ledger canister
+pub const TICRC1_LEDGER: &str = "3jkp5-oyaaa-aaaaj-azwqa-cai";
+/// Principal ID of the TICRC1 Index canister
+pub const TICRC1_INDEX: &str = "qzre3-3iaaa-aaaai-aqmsa-cai";
+
+/// The common minting account principal for test tokens
+pub const TEST_MINTING_ACCOUNT: &str = "bnuz2-zaaaa-aaaal-arrba-cai";
+
 /// The canonical number of decimals for internal USD accounting.
 pub const USD_DECIMALS: u8 = 6;
 
