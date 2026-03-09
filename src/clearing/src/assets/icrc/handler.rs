@@ -26,7 +26,7 @@ impl IcrcHandler {
     pub async fn balance_of(&self, params: AssetBalanceOfParams<'_>) -> Result<u128, AssetError> {
         let ledger_id = params.asset.as_icrc()?;
 
-        let account = self.resolve_account(params.account);
+        let account = self.resolve_account(params.account)?;
 
         let (ledger_balance,): (Nat,) = ic_cdk::call(*ledger_id, "icrc1_balance_of", (account,))
             .await
