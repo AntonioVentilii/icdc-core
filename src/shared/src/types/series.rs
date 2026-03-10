@@ -22,6 +22,22 @@ impl SeriesId {
     }
 }
 
+/// A unique identifier for an outcome in a categorical market.
+#[derive(
+    CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
+pub struct OutcomeId(String);
+impl From<String> for OutcomeId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+impl OutcomeId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// Defines the payoff structure for a derivative contract.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum PayoffType {
@@ -31,7 +47,19 @@ pub enum PayoffType {
     Call,
     /// Payoff based on the positive difference between strike and underlying price.
     Put,
+    /// A categorical market with multiple mutually exclusive outcomes.
+    Categorical,
 }
+
+/// Input data for settling a series.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub enum SettlementInput {
+    /// Final price for scalar markets (Binary, Call, Put).
+    Price(Price),
+    /// Resolved winner for categorical markets.
+    Outcome(OutcomeId),
+}
+
 impl PayoffType {
     /// Returns the unique identifier bytes used for ID generation.
     pub fn as_id_bytes(&self) -> &'static [u8] {
@@ -39,6 +67,7 @@ impl PayoffType {
             PayoffType::Binary => b"BINARY",
             PayoffType::Call => b"CALL",
             PayoffType::Put => b"PUT",
+            PayoffType::Categorical => b"CATEGORICAL",
         }
     }
 }
@@ -60,6 +89,8 @@ pub struct Series {
     pub price_precision: u8,
     /// The unit in which the contract payoff is expressed.
     pub payout_unit: PayoutUnit,
+    /// The defined outcomes for categorical markets (ordered).
+    pub outcomes: Option<Vec<OutcomeId>>,
     /// The identifier of the oracle providing the settlement data.
     pub oracle_source: String,
     /// The principal identifier of the series creator.
@@ -83,6 +114,7 @@ impl Series {
         strike: Option<&Price>,
         price_precision: u8,
         payout_unit: &PayoutUnit,
+        outcomes: Option<&[OutcomeId]>,
         oracle_source: &str,
     ) -> SeriesId {
         let mut hasher = Sha256::new();
@@ -115,6 +147,17 @@ impl Series {
         hasher.update(b"|PAYOUT_UNIT|");
         hasher.update(payout_unit.as_id_bytes());
 
+        hasher.update(b"|OUTCOMES|");
+        match outcomes {
+            Some(list) => {
+                for outcome in list {
+                    hasher.update(outcome.as_str().as_bytes());
+                    hasher.update(b",");
+                }
+            }
+            None => hasher.update(b"NONE"),
+        }
+
         hasher.update(b"|ORACLE|");
         hasher.update(oracle_source.as_bytes());
 
@@ -145,6 +188,7 @@ mod tests {
             strike.as_ref(),
             precision,
             &payout_unit,
+            None,
             oracle_source,
         );
 
@@ -155,6 +199,7 @@ mod tests {
             strike.as_ref(),
             precision,
             &payout_unit,
+            None,
             oracle_source,
         );
 
@@ -177,6 +222,7 @@ mod tests {
             strike.as_ref(),
             precision,
             &payout_unit,
+            None,
             oracle_source,
         );
 
@@ -187,6 +233,7 @@ mod tests {
             strike.as_ref(),
             precision,
             &payout_unit,
+            None,
             oracle_source,
         );
 
@@ -209,6 +256,7 @@ mod tests {
             strike.as_ref(),
             8,
             &payout_unit,
+            None,
             oracle_source,
         );
 
@@ -219,6 +267,7 @@ mod tests {
             strike.as_ref(),
             10,
             &payout_unit,
+            None,
             oracle_source,
         );
 
@@ -235,6 +284,7 @@ mod tests {
             strike: Some(Price::new(100, 8)),
             price_precision: 8,
             payout_unit: PayoutUnit::usd(),
+            outcomes: None,
             oracle_source: "coingecko".to_string(),
             creator: Principal::anonymous(),
             created_at_ns: 1700000000,
