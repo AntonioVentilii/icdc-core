@@ -70,6 +70,7 @@ type CollateralAssetInfo = record {
 };
 type CommonError = variant {
 	Internal : text;
+	InvalidInput : text;
 	MathOverflow;
 	Unauthorized;
 	RegistryNotSet

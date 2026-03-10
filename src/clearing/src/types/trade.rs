@@ -52,7 +52,8 @@ pub struct LimitOrder {
     pub series_id: SeriesId,
     pub side: Side,
     /// Number of Series Units (contracts), where 1 unit represents exposure to 1.0 of the
-    /// underlying asset. It is positive for buy orders and negative for sell orders.
+    /// underlying asset. This value must always be positive; the direction (buy/long vs
+    /// sell/short) is determined by the `side` field.
     pub qty: i128,
     /// Limit price in the precision defined by the associated series (`series.price_precision`).
     pub price: Price,

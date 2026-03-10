@@ -16,7 +16,7 @@ pub struct SubmitLimitOrderParams {
     pub series_id: SeriesId,
     /// The side of the order (Buy or Sell).
     pub side: Side,
-    /// The quantity of the order.
+    /// The quantity of the order. Must be positive.
     pub qty: i128,
     /// The limit price of the order.
     pub price: Price,
@@ -43,6 +43,7 @@ pub struct SubmitMatchedTradeParams {
     /// The user opening or increasing a Short position (seller).
     pub seller: User,
     /// The quantity of the trade.
+    /// The quantity of the trade. Must be positive.
     pub qty: i128,
     /// The execution price of the trade.
     pub price: Price,

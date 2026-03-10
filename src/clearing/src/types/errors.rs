@@ -12,4 +12,6 @@ pub enum CommonError {
     Internal(String),
     /// A mathematical calculation resulted in an overflow or underflow.
     MathOverflow,
+    /// The input provided for the request is invalid.
+    InvalidInput(String),
 }
