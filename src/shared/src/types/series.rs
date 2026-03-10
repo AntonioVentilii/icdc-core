@@ -50,16 +50,6 @@ pub enum PayoffType {
     /// A categorical market with multiple mutually exclusive outcomes.
     Categorical,
 }
-
-/// Input data for settling a series.
-#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
-pub enum SettlementInput {
-    /// Final price for scalar markets (Binary, Call, Put).
-    Price(Price),
-    /// Resolved winner for categorical markets.
-    Outcome(OutcomeId),
-}
-
 impl PayoffType {
     /// Returns the unique identifier bytes used for ID generation.
     pub fn as_id_bytes(&self) -> &'static [u8] {
@@ -70,6 +60,15 @@ impl PayoffType {
             PayoffType::Categorical => b"CATEGORICAL",
         }
     }
+}
+
+/// Input data for settling a series.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub enum SettlementInput {
+    /// Final price for scalar markets (Binary, Call, Put).
+    Price(Price),
+    /// Resolved winner for categorical markets.
+    Outcome(OutcomeId),
 }
 
 /// Defines a specific derivative series (contract).
