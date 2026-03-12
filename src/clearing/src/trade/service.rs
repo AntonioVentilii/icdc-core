@@ -1,11 +1,12 @@
 use shared::types::Series;
+
 use crate::{
     api::trade::errors::TradeError,
     memory::{
         ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, EVENTS, EXECUTED_TRADES, NEXT_EVENT_ID,
         POSITIONS,
     },
-    payoffs::{get_required_margin, scale_price, types::RoundingMode},
+    payoffs::get_required_margin,
     trade::types::ExecuteTradeParams,
     types::{
         errors::CommonError,
@@ -49,7 +50,7 @@ pub(crate) fn execute_trade_impl(
         qty,
         price,
         buyer_unblock_amount,
-        seller_unblock_amount,
+        seller_unblock_amount: _,
         outcome_id,
     } = params;
 
@@ -91,26 +92,44 @@ pub(crate) fn execute_trade_impl(
             let new_seller_qty = old_seller_qty - qty;
 
             let new_buyer_margin_usd =
-                get_required_margin(&series, &price, new_buyer_qty, &outcome_id)
-                    .map_err(|e| TradeError::Common(CommonError::Internal(format!("Payoff calculation failed: {:?}", e))))?;
+                get_required_margin(&series, &price, new_buyer_qty, &outcome_id).map_err(|e| {
+                    TradeError::Common(CommonError::Internal(format!(
+                        "Payoff calculation failed: {:?}",
+                        e
+                    )))
+                })?;
             let new_seller_margin_usd =
-                get_required_margin(&series, &price, new_seller_qty, &outcome_id)
-                    .map_err(|e| TradeError::Common(CommonError::Internal(format!("Payoff calculation failed: {:?}", e))))?;
+                get_required_margin(&series, &price, new_seller_qty, &outcome_id).map_err(|e| {
+                    TradeError::Common(CommonError::Internal(format!(
+                        "Payoff calculation failed: {:?}",
+                        e
+                    )))
+                })?;
 
             let old_buyer_margin_at_price =
-                get_required_margin(&series, &price, old_buyer_qty, &outcome_id)
-                    .map_err(|e| TradeError::Common(CommonError::Internal(format!("Payoff calculation failed: {:?}", e))))?;
+                get_required_margin(&series, &price, old_buyer_qty, &outcome_id).map_err(|e| {
+                    TradeError::Common(CommonError::Internal(format!(
+                        "Payoff calculation failed: {:?}",
+                        e
+                    )))
+                })?;
             let old_seller_margin_at_price =
-                get_required_margin(&series, &price, old_seller_qty, &outcome_id)
-                    .map_err(|e| TradeError::Common(CommonError::Internal(format!("Payoff calculation failed: {:?}", e))))?;
+                get_required_margin(&series, &price, old_seller_qty, &outcome_id).map_err(|e| {
+                    TradeError::Common(CommonError::Internal(format!(
+                        "Payoff calculation failed: {:?}",
+                        e
+                    )))
+                })?;
 
             // Mark-to-Market Cashflow Model:
-            // We calculate the cash delta as the difference in required margin 
+            // We calculate the cash delta as the difference in required margin
             // Evaluated at the CURRENT trade price.
-            // This ensures that any PnL from the previous price to 'price' 
+            // This ensures that any PnL from the previous price to 'price'
             // is realized immediately into the cash balance.
-            let buyer_cash_delta = (new_buyer_margin_usd as i128) - (old_buyer_margin_at_price as i128);
-            let seller_cash_delta = (new_seller_margin_usd as i128) - (old_seller_margin_at_price as i128);
+            let buyer_cash_delta =
+                (new_buyer_margin_usd as i128) - (old_buyer_margin_at_price as i128);
+            let seller_cash_delta =
+                (new_seller_margin_usd as i128) - (old_seller_margin_at_price as i128);
 
             Ok((
                 buyer_cash_delta,
@@ -139,20 +158,22 @@ pub(crate) fn execute_trade_impl(
             .get(&buyer)
             .cloned()
             .unwrap_or_else(|| AccountState::new(buyer));
-        
+
         // Calculate target reserved margin based on the delta.
         let target_buyer_reserved = if buyer_reserved_delta > 0 {
             buyer_acc.reserved_margin_usd + (buyer_reserved_delta as u128)
         } else {
-            buyer_acc.reserved_margin_usd.saturating_sub(buyer_reserved_delta.unsigned_abs())
+            buyer_acc
+                .reserved_margin_usd
+                .saturating_sub(buyer_reserved_delta.unsigned_abs())
         };
 
         // Check equity against target margin.
-        // We use the account's CURRENT equity because in our model, 
+        // We use the account's CURRENT equity because in our model,
         // trades are always solvent if Equity >= Target Margin (collateral is already in equity).
         let buyer_equity = buyer_acc.calculate_raw_equity_i128(&configs, &metrics);
-        let buyer_unblock = buyer_unblock_amount.unwrap_or(0);
-        
+        let _buyer_unblock = buyer_unblock_amount.unwrap_or(0);
+
         // If unblocking, the equity remains the same but the requirement drops.
         if buyer_equity < (target_buyer_reserved as i128) {
             return Err(TradeError::InsufficientMargin {
@@ -167,11 +188,13 @@ pub(crate) fn execute_trade_impl(
             .get(&seller)
             .cloned()
             .unwrap_or_else(|| AccountState::new(seller));
-        
+
         let target_seller_reserved = if seller_reserved_delta > 0 {
             seller_acc.reserved_margin_usd + (seller_reserved_delta as u128)
         } else {
-            seller_acc.reserved_margin_usd.saturating_sub(seller_reserved_delta.unsigned_abs())
+            seller_acc
+                .reserved_margin_usd
+                .saturating_sub(seller_reserved_delta.unsigned_abs())
         };
 
         let seller_equity = seller_acc.calculate_raw_equity_i128(&configs, &metrics);

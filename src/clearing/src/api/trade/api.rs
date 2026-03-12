@@ -69,7 +69,12 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
         // For Sell orders, we pass -qty to get_required_margin to calculate Short margin.
         let margin_qty = if side == Side::Sell { -qty } else { qty };
         let required_margin_usd = get_required_margin(&series, &price, margin_qty, &outcome_id)
-            .map_err(|e| TradeError::Common(CommonError::Internal(format!("Payoff calculation failed: {:?}", e))))?;
+            .map_err(|e| {
+                TradeError::Common(CommonError::Internal(format!(
+                    "Payoff calculation failed: {:?}",
+                    e
+                )))
+            })?;
 
         ACCOUNT_STATES.with(|accounts| {
             let mut accounts = accounts.borrow_mut();
@@ -337,48 +342,55 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
                 ))
             })?;
 
-        POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| -> Result<(), TradeError> {
-            let mut positions = positions.borrow_mut();
-            let pos = positions
-                .entry((
-                    proof.user,
-                    proof.series_id.clone(),
-                    proof.outcome_id.clone(),
-                ))
-                .or_insert(Position {
-                    user: proof.user,
-                    series_id: proof.series_id.clone(),
-                    outcome_id: proof.outcome_id.clone(),
-                    net_qty: 0,
-                    reserved_margin_usd: 0,
+        POSITIONS.with(
+            |positions: &std::cell::RefCell<PositionsMap>| -> Result<(), TradeError> {
+                let mut positions = positions.borrow_mut();
+                let pos = positions
+                    .entry((
+                        proof.user,
+                        proof.series_id.clone(),
+                        proof.outcome_id.clone(),
+                    ))
+                    .or_insert(Position {
+                        user: proof.user,
+                        series_id: proof.series_id.clone(),
+                        outcome_id: proof.outcome_id.clone(),
+                        net_qty: 0,
+                        reserved_margin_usd: 0,
+                    });
+
+                let old_margin_usd = pos.reserved_margin_usd;
+                pos.net_qty += proof.qty;
+
+                // Recalculate margin for the updated position state
+                pos.reserved_margin_usd =
+                    get_required_margin(&series, &valuation_price, pos.net_qty, &proof.outcome_id)
+                        .map_err(|e| {
+                            TradeError::Common(CommonError::Internal(format!(
+                                "Payoff calculation failed: {:?}",
+                                e
+                            )))
+                        })?;
+                let margin_delta = (pos.reserved_margin_usd as i128) - (old_margin_usd as i128);
+
+                // Update the user's aggregate margin reservation in their AccountState
+                ACCOUNT_STATES.with(|accounts| {
+                    let mut accounts = accounts.borrow_mut();
+                    let acc = accounts
+                        .entry(proof.user)
+                        .or_insert_with(|| AccountState::new(proof.user));
+
+                    if margin_delta > 0 {
+                        acc.reserved_margin_usd += margin_delta as u128;
+                    } else {
+                        acc.reserved_margin_usd = acc
+                            .reserved_margin_usd
+                            .saturating_sub(margin_delta.unsigned_abs());
+                    }
                 });
-
-            let old_margin_usd = pos.reserved_margin_usd;
-            pos.net_qty += proof.qty;
-
-            // Recalculate margin for the updated position state
-            pos.reserved_margin_usd =
-                get_required_margin(&series, &valuation_price, pos.net_qty, &proof.outcome_id)
-                    .map_err(|e| TradeError::Common(CommonError::Internal(format!("Payoff calculation failed: {:?}", e))))?;
-            let margin_delta = (pos.reserved_margin_usd as i128) - (old_margin_usd as i128);
-
-            // Update the user's aggregate margin reservation in their AccountState
-            ACCOUNT_STATES.with(|accounts| {
-                let mut accounts = accounts.borrow_mut();
-                let acc = accounts
-                    .entry(proof.user)
-                    .or_insert_with(|| AccountState::new(proof.user));
-
-                if margin_delta > 0 {
-                    acc.reserved_margin_usd += margin_delta as u128;
-                } else {
-                    acc.reserved_margin_usd = acc
-                        .reserved_margin_usd
-                        .saturating_sub(margin_delta.unsigned_abs());
-                }
-            });
-            Ok(())
-        })?;
+                Ok(())
+            },
+        )?;
 
         ACCEPTED_TRANSFERS.with(
             |m: &std::cell::RefCell<std::collections::BTreeMap<TransferId, bool>>| {
@@ -508,7 +520,7 @@ pub(crate) fn mint_complete_set_logic(
     POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| {
         let mut positions = positions.borrow_mut();
         let share_of_margin = total_cost_usd.unsigned_abs() / outcomes.len() as u128;
-        
+
         for outcome_id in outcomes {
             let pos = positions
                 .entry((caller, series_id.clone(), Some(outcome_id.clone())))
@@ -590,15 +602,16 @@ pub(crate) fn redeem_complete_set_logic(
                 // Note: We use the stored reserved_margin_usd / net_qty to get the unit margin.
                 let unit_margin = pos.reserved_margin_usd / (pos.net_qty as u128);
                 let to_release = unit_margin * (qty as u128);
-                
+
                 pos.net_qty -= qty;
                 pos.reserved_margin_usd = pos.reserved_margin_usd.saturating_sub(to_release);
-                
+
                 // Also update account total
                 ACCOUNT_STATES.with(|accounts| {
                     let mut accounts = accounts.borrow_mut();
                     if let Some(acc) = accounts.get_mut(&caller) {
-                        acc.reserved_margin_usd = acc.reserved_margin_usd.saturating_sub(to_release);
+                        acc.reserved_margin_usd =
+                            acc.reserved_margin_usd.saturating_sub(to_release);
                     }
                 });
             }
