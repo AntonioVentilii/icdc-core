@@ -1,6 +1,6 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
-use shared::types::{OutcomeId, Price, SeriesId};
+use shared::types::{BalanceDomain, OutcomeId, Price, SeriesId};
 
 use crate::types::user::User;
 
@@ -60,4 +60,6 @@ pub struct LimitOrder {
     pub price: Price,
     /// Amount blocked in collateral (denominated in USD units, 6 decimals).
     pub blocked_margin_usd: u128,
+    /// The balance domain this order belongs to.
+    pub balance_domain: BalanceDomain,
 }

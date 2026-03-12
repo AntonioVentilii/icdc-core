@@ -2,7 +2,9 @@ use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::types::{description::Description, payout::PayoutUnit, price::Price};
+use crate::types::{
+    description::Description, domain::BalanceDomain, payout::PayoutUnit, price::Price,
+};
 
 /// A unique identifier for a derivative series.
 /// Encapsulates a hex-encoded string derived from series parameters.
@@ -117,6 +119,8 @@ pub struct Series {
     pub icon_url: Option<String>,
     /// An optional banner URL for the market.
     pub banner_url: Option<String>,
+    /// The domain this market belongs to (e.g. Playground, Settlement).
+    pub balance_domain: BalanceDomain,
 }
 impl Series {
     /// Generates a unique [`SeriesId`] based on the contract parameters.
@@ -133,11 +137,18 @@ impl Series {
             payout_unit,
             outcomes,
             oracle_source,
+            balance_domain: _,
         } = params;
         let mut hasher = Sha256::new();
 
         // 🔐 Domain separator (versioned for future upgrades)
-        hasher.update(b"DERIV_SERIES_V2");
+        hasher.update(b"DERIV_SERIES_V3");
+
+        hasher.update(b"|DOMAIN|");
+        match params.balance_domain {
+            BalanceDomain::Playground => hasher.update(b"PLAYGROUND"),
+            BalanceDomain::Settlement => hasher.update(b"SETTLEMENT"),
+        }
 
         // Explicit field separators to avoid ambiguity
         hasher.update(b"|UNDERLYING|");
@@ -194,6 +205,7 @@ pub struct SeriesIdParams<'a> {
     pub payout_unit: &'a PayoutUnit,
     pub outcomes: Option<&'a [Outcome]>,
     pub oracle_source: &'a str,
+    pub balance_domain: BalanceDomain,
 }
 
 #[cfg(test)]
@@ -219,6 +231,7 @@ mod tests {
             payout_unit: &payout_unit,
             outcomes: None,
             oracle_source,
+            balance_domain: BalanceDomain::Settlement,
         });
 
         let id2 = Series::generate_id(SeriesIdParams {
@@ -230,6 +243,7 @@ mod tests {
             payout_unit: &payout_unit,
             outcomes: None,
             oracle_source,
+            balance_domain: BalanceDomain::Settlement,
         });
 
         assert_eq!(id1, id2);
@@ -253,6 +267,7 @@ mod tests {
             payout_unit: &payout_unit,
             outcomes: None,
             oracle_source,
+            balance_domain: BalanceDomain::Settlement,
         });
 
         let id2 = Series::generate_id(SeriesIdParams {
@@ -264,6 +279,7 @@ mod tests {
             payout_unit: &payout_unit,
             outcomes: None,
             oracle_source,
+            balance_domain: BalanceDomain::Settlement,
         });
 
         assert_ne!(id1, id2);
@@ -287,6 +303,7 @@ mod tests {
             payout_unit: &payout_unit,
             outcomes: None,
             oracle_source,
+            balance_domain: BalanceDomain::Settlement,
         });
 
         let id2 = Series::generate_id(SeriesIdParams {
@@ -298,6 +315,7 @@ mod tests {
             payout_unit: &payout_unit,
             outcomes: None,
             oracle_source,
+            balance_domain: BalanceDomain::Settlement,
         });
 
         assert_ne!(id1, id2);
@@ -321,6 +339,7 @@ mod tests {
             description: Description::plain("A vanilla call option on ICP"),
             icon_url: None,
             banner_url: None,
+            balance_domain: BalanceDomain::Settlement,
         };
 
         assert_eq!(series.title, "Long ICP Call");

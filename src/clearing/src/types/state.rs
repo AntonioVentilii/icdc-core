@@ -59,7 +59,7 @@ impl Default for Config {
     }
 }
 
-/// Represents the complete state of the clearing canister for persistence.
+/// Represents the complete state of the clearing canister for persistence (V2).
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct StableState {
     /// The global configuration.

@@ -1,7 +1,7 @@
 use ic_cdk_macros::{query, update};
 use shared::{
     constants::USD_DECIMALS,
-    types::{PayoffType, Series, SeriesId},
+    types::{BalanceDomain, PayoffType, Series, SeriesId},
 };
 
 use super::{
@@ -82,18 +82,22 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
                 .entry(caller)
                 .or_insert_with(|| AccountState::new(caller));
 
-            let equity = acc.calculate_equity_usd(&configs, &metrics);
-            let target_reserved = acc.reserved_margin_usd + required_margin_usd;
+            let domain = series.balance_domain;
 
-            if (equity as i128) < (target_reserved as i128) {
-                return Err(TradeError::InsufficientMargin {
-                    user: caller,
-                    balance: equity,
-                    required: target_reserved,
-                });
+            // Margin/Collateral checks only apply to Settlement domain.
+            if domain == BalanceDomain::Settlement {
+                let equity = acc.calculate_equity_usd(domain, &configs, &metrics);
+                let target_reserved = acc.get_reserved_margin_usd(domain) + required_margin_usd;
+
+                if (equity as i128) < (target_reserved as i128) {
+                    return Err(TradeError::InsufficientMargin {
+                        user: caller,
+                        balance: equity,
+                        required: target_reserved,
+                    });
+                }
+                acc.set_reserved_margin_usd(domain, target_reserved);
             }
-
-            acc.reserved_margin_usd = target_reserved;
 
             LIMIT_ORDERS.with(|m| {
                 m.borrow_mut().insert(
@@ -106,7 +110,12 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
                         side,
                         qty,
                         price,
-                        blocked_margin_usd: required_margin_usd,
+                        blocked_margin_usd: if domain == BalanceDomain::Settlement {
+                            required_margin_usd
+                        } else {
+                            0
+                        },
+                        balance_domain: domain,
                     },
                 );
             });
@@ -216,9 +225,12 @@ pub async fn cancel_limit_order(params: CancelLimitOrderParams) -> SubmitMatched
         ACCOUNT_STATES.with(|accounts| {
             let mut accounts = accounts.borrow_mut();
             if let Some(acc) = accounts.get_mut(&caller) {
-                acc.reserved_margin_usd = acc
-                    .reserved_margin_usd
-                    .saturating_sub(order.blocked_margin_usd);
+                let domain = order.balance_domain;
+                let current = acc.get_reserved_margin_usd(domain);
+                acc.set_reserved_margin_usd(
+                    domain,
+                    current.saturating_sub(order.blocked_margin_usd),
+                );
             }
         });
 
@@ -359,6 +371,7 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
                         reserved_margin_usd: 0,
                     });
 
+                let domain = series.balance_domain;
                 let old_margin_usd = pos.reserved_margin_usd;
                 pos.net_qty += proof.qty;
 
@@ -380,12 +393,14 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
                         .entry(proof.user)
                         .or_insert_with(|| AccountState::new(proof.user));
 
+                    let current = acc.get_reserved_margin_usd(domain);
                     if margin_delta > 0 {
-                        acc.reserved_margin_usd += margin_delta as u128;
+                        acc.set_reserved_margin_usd(domain, current + (margin_delta as u128));
                     } else {
-                        acc.reserved_margin_usd = acc
-                            .reserved_margin_usd
-                            .saturating_sub(margin_delta.unsigned_abs());
+                        acc.set_reserved_margin_usd(
+                            domain,
+                            current.saturating_sub(margin_delta.unsigned_abs()),
+                        );
                     }
                 });
                 Ok(())
@@ -515,16 +530,23 @@ pub(crate) fn mint_complete_set_logic(
         let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
         let metrics = ASSET_METRICS.with(|m| m.borrow().clone());
 
-        let equity = acc.calculate_raw_equity_i128(&configs, &metrics);
-        if equity - total_cost_usd < (acc.reserved_margin_usd as i128) {
-            return Err(TradeError::InsufficientMargin {
-                user: caller,
-                balance: acc.calculate_equity_usd(&configs, &metrics),
-                required: acc.reserved_margin_usd + total_cost_usd.unsigned_abs(),
-            });
+        let domain = series.balance_domain;
+
+        if domain == BalanceDomain::Settlement {
+            let equity = acc.calculate_raw_equity_i128(domain, &configs, &metrics);
+            let current_reserved = acc.get_reserved_margin_usd(domain);
+            if equity - total_cost_usd < (current_reserved as i128) {
+                return Err(TradeError::InsufficientMargin {
+                    user: caller,
+                    balance: acc.calculate_equity_usd(domain, &configs, &metrics),
+                    required: current_reserved + total_cost_usd.unsigned_abs(),
+                });
+            }
+            acc.set_reserved_margin_usd(domain, current_reserved + total_cost_usd.unsigned_abs());
         }
-        acc.cash_balance_usd -= total_cost_usd;
-        acc.reserved_margin_usd += total_cost_usd.unsigned_abs();
+
+        let current_cash = acc.get_cash_balance_usd(domain);
+        acc.set_cash_balance_usd(domain, current_cash - total_cost_usd);
         Ok(())
     })?;
 
@@ -638,8 +660,9 @@ pub(crate) fn redeem_complete_set_logic(
                 ACCOUNT_STATES.with(|accounts| {
                     let mut accounts = accounts.borrow_mut();
                     if let Some(acc) = accounts.get_mut(&caller) {
-                        acc.reserved_margin_usd =
-                            acc.reserved_margin_usd.saturating_sub(to_release);
+                        let domain = series.balance_domain;
+                        let current = acc.get_reserved_margin_usd(domain);
+                        acc.set_reserved_margin_usd(domain, current.saturating_sub(to_release));
                     }
                 });
             }
@@ -654,7 +677,9 @@ pub(crate) fn redeem_complete_set_logic(
     ACCOUNT_STATES.with(|accounts| {
         let mut accounts = accounts.borrow_mut();
         if let Some(acc) = accounts.get_mut(&caller) {
-            acc.cash_balance_usd += total_credit_usd;
+            let domain = series.balance_domain;
+            let current = acc.get_cash_balance_usd(domain);
+            acc.set_cash_balance_usd(domain, current + total_credit_usd);
         }
     });
 
@@ -706,6 +731,7 @@ mod tests {
             description: Description::plain("Test Description"),
             icon_url: None,
             banner_url: None,
+            balance_domain: BalanceDomain::Settlement,
         }
     }
 
@@ -724,6 +750,7 @@ mod tests {
             qty: 1,
             price: Price::new(60_000_000, 6),
             blocked_margin_usd: 60_000_000,
+            balance_domain: BalanceDomain::Settlement,
         }
     }
 
@@ -749,12 +776,12 @@ mod tests {
             acc.clear();
 
             let mut m_acc = AccountState::new(maker);
-            m_acc.cash_balance_usd = 100_000_000;
-            m_acc.reserved_margin_usd = 60_000_000;
+            m_acc.set_cash_balance_usd(BalanceDomain::Settlement, 100_000_000);
+            m_acc.set_reserved_margin_usd(BalanceDomain::Settlement, 60_000_000);
             acc.insert(maker, m_acc);
 
             let mut t_acc = AccountState::new(taker);
-            t_acc.cash_balance_usd = 0; // Insolvency for seller
+            t_acc.set_cash_balance_usd(BalanceDomain::Settlement, 0); // Insolvency for seller
             acc.insert(taker, t_acc);
         });
 
@@ -790,12 +817,12 @@ mod tests {
             acc.clear();
 
             let mut m_acc = AccountState::new(maker);
-            m_acc.cash_balance_usd = 1_000_000_000;
-            m_acc.reserved_margin_usd = 60_000_000;
+            m_acc.set_cash_balance_usd(BalanceDomain::Settlement, 1_000_000_000);
+            m_acc.set_reserved_margin_usd(BalanceDomain::Settlement, 60_000_000);
             acc.insert(maker, m_acc);
 
             let mut t_acc = AccountState::new(taker);
-            t_acc.cash_balance_usd = 1_000_000_000;
+            t_acc.set_cash_balance_usd(BalanceDomain::Settlement, 1_000_000_000);
             acc.insert(taker, t_acc);
         });
 

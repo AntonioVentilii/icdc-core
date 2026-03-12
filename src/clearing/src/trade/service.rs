@@ -1,4 +1,4 @@
-use shared::types::Series;
+use shared::types::{BalanceDomain, Series};
 
 use crate::{
     api::trade::errors::TradeError,
@@ -161,11 +161,10 @@ pub(crate) fn execute_trade_impl(
     // leaving the system state exactly as it was.
     let (target_buyer_reserved, target_seller_reserved) = ACCOUNT_STATES.with(|accounts| {
         let accounts = accounts.borrow();
+        let domain = series.balance_domain;
 
         // 1. Validate Buyer
         // We check if the post-trade equity covers the target reserved margin.
-        // Post-trade equity = Pre-trade Equity + PnL - Fees.
-        // In the Full Collateral model, PnL is realised at trade time via cash deltas.
         let buyer_acc = accounts
             .get(&buyer)
             .cloned()
@@ -173,25 +172,25 @@ pub(crate) fn execute_trade_impl(
 
         // Calculate target reserved margin based on the delta.
         let target_buyer_reserved = if buyer_reserved_delta > 0 {
-            buyer_acc.reserved_margin_usd + (buyer_reserved_delta as u128)
+            buyer_acc.get_reserved_margin_usd(domain) + (buyer_reserved_delta as u128)
         } else {
             buyer_acc
-                .reserved_margin_usd
+                .get_reserved_margin_usd(domain)
                 .saturating_sub(buyer_reserved_delta.unsigned_abs())
         };
 
-        // Check equity against target margin.
-        // We use the account's CURRENT equity because in our model,
-        // trades are always solvent if Equity >= Target Margin (collateral is already in equity).
-        let buyer_equity = buyer_acc.calculate_raw_equity_i128(&configs, &metrics);
+        // Margin/Collateral checks only apply to Settlement domain.
+        if domain == BalanceDomain::Settlement {
+            // Check equity against target margin.
+            let buyer_equity = buyer_acc.calculate_raw_equity_i128(domain, &configs, &metrics);
 
-        // If unblocking, the equity remains the same but the requirement drops.
-        if buyer_equity < (target_buyer_reserved as i128) {
-            return Err(TradeError::InsufficientMargin {
-                user: buyer,
-                balance: buyer_acc.calculate_equity_usd(&configs, &metrics),
-                required: target_buyer_reserved,
-            });
+            if buyer_equity < (target_buyer_reserved as i128) {
+                return Err(TradeError::InsufficientMargin {
+                    user: buyer,
+                    balance: buyer_acc.calculate_equity_usd(domain, &configs, &metrics),
+                    required: target_buyer_reserved,
+                });
+            }
         }
 
         // 2. Validate Seller
@@ -201,20 +200,22 @@ pub(crate) fn execute_trade_impl(
             .unwrap_or_else(|| AccountState::new(seller));
 
         let target_seller_reserved = if seller_reserved_delta > 0 {
-            seller_acc.reserved_margin_usd + (seller_reserved_delta as u128)
+            seller_acc.get_reserved_margin_usd(domain) + (seller_reserved_delta as u128)
         } else {
             seller_acc
-                .reserved_margin_usd
+                .get_reserved_margin_usd(domain)
                 .saturating_sub(seller_reserved_delta.unsigned_abs())
         };
 
-        let seller_equity = seller_acc.calculate_raw_equity_i128(&configs, &metrics);
-        if seller_equity < (target_seller_reserved as i128) {
-            return Err(TradeError::InsufficientMargin {
-                user: seller,
-                balance: seller_acc.calculate_equity_usd(&configs, &metrics),
-                required: target_seller_reserved,
-            });
+        if domain == BalanceDomain::Settlement {
+            let seller_equity = seller_acc.calculate_raw_equity_i128(domain, &configs, &metrics);
+            if seller_equity < (target_seller_reserved as i128) {
+                return Err(TradeError::InsufficientMargin {
+                    user: seller,
+                    balance: seller_acc.calculate_equity_usd(domain, &configs, &metrics),
+                    required: target_seller_reserved,
+                });
+            }
         }
 
         Ok((target_buyer_reserved, target_seller_reserved))
@@ -223,20 +224,23 @@ pub(crate) fn execute_trade_impl(
     // Mutation Phase: Apply all changes only after all validations pass.
     ACCOUNT_STATES.with(|accounts| {
         let mut accounts = accounts.borrow_mut();
+        let domain = series.balance_domain;
 
         // Update Buyer
         let buyer_acc = accounts
             .entry(buyer)
             .or_insert_with(|| AccountState::new(buyer));
-        buyer_acc.cash_balance_usd -= buyer_cash_delta;
-        buyer_acc.reserved_margin_usd = target_buyer_reserved;
+        let buyer_cash = buyer_acc.get_cash_balance_usd(domain);
+        buyer_acc.set_cash_balance_usd(domain, buyer_cash - buyer_cash_delta);
+        buyer_acc.set_reserved_margin_usd(domain, target_buyer_reserved);
 
         // Update Seller
         let seller_acc = accounts
             .entry(seller)
             .or_insert_with(|| AccountState::new(seller));
-        seller_acc.cash_balance_usd -= seller_cash_delta;
-        seller_acc.reserved_margin_usd = target_seller_reserved;
+        let seller_cash = seller_acc.get_cash_balance_usd(domain);
+        seller_acc.set_cash_balance_usd(domain, seller_cash - seller_cash_delta);
+        seller_acc.set_reserved_margin_usd(domain, target_seller_reserved);
     });
 
     POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| {
@@ -346,6 +350,7 @@ mod tests {
             outcomes: None,
             icon_url: None,
             banner_url: None,
+            balance_domain: BalanceDomain::Settlement,
         };
 
         // Initialize state
@@ -357,12 +362,12 @@ mod tests {
 
             // Buyer has enough margin ($2000)
             let mut b_acc = AccountState::new(buyer);
-            b_acc.cash_balance_usd = 2_000_000_000;
+            b_acc.set_cash_balance_usd(BalanceDomain::Settlement, 2_000_000_000);
             accounts.insert(buyer, b_acc);
 
             // Seller has NO margin
             let mut s_acc = AccountState::new(seller);
-            s_acc.cash_balance_usd = 0;
+            s_acc.set_cash_balance_usd(BalanceDomain::Settlement, 0);
             accounts.insert(seller, s_acc);
         });
 
@@ -393,7 +398,8 @@ mod tests {
             let accounts = accounts.borrow();
             let b_acc = accounts.get(&buyer).unwrap();
             assert_eq!(
-                b_acc.cash_balance_usd, 2_000_000_000,
+                b_acc.get_cash_balance_usd(BalanceDomain::Settlement),
+                2_000_000_000,
                 "Buyer's cash should NOT be debited on seller failure"
             );
         });

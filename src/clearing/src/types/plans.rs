@@ -1,6 +1,6 @@
 use candid::{CandidType, Nat, Principal};
 use serde::{Deserialize, Serialize};
-use shared::types::{AssetId, OutcomeId, SeriesId, SettlementInput};
+use shared::types::{AssetId, BalanceDomain, OutcomeId, SeriesId, SettlementInput};
 
 use crate::{
     api::admin::params::FundType,
@@ -66,6 +66,8 @@ pub struct SettlementPlanParams {
     pub insurance_fee: u128,
     /// A list of positions involved in the settlement with their accounting data.
     pub positions: Vec<SettlementPosition>,
+    /// The domain of the series being settled.
+    pub balance_domain: BalanceDomain,
 }
 
 /// Snapshot of a single user's position and its settlement accounting.
@@ -221,6 +223,8 @@ pub struct SettlementPlan {
     pub status: PlanStatus,
     /// Base idempotency key in nanoseconds.
     pub idempotency_ns: PaymentIdempotency,
+    /// The domain of the series being settled.
+    pub balance_domain: BalanceDomain,
 }
 
 impl SettlementPlan {
@@ -236,6 +240,7 @@ impl SettlementPlan {
                 fee: fee_usd,
                 insurance_fee: insurance_fee_usd,
                 positions,
+                balance_domain,
             } = params;
 
             let key = series_id.clone();
@@ -257,6 +262,7 @@ impl SettlementPlan {
                 accounting_applied: false,
                 status: PlanStatus::Planned,
                 idempotency_ns,
+                balance_domain,
             };
 
             m.insert(key, plan.clone());
@@ -334,6 +340,7 @@ pub struct SettlementStatusView {
     pub accounting_applied: bool,
     pub status: PlanStatus,
     pub total_positions: usize,
+    pub balance_domain: BalanceDomain,
 }
 
 impl From<&SettlementPlan> for SettlementStatusView {
@@ -348,6 +355,7 @@ impl From<&SettlementPlan> for SettlementStatusView {
             accounting_applied: plan.accounting_applied,
             status: plan.status.clone(),
             total_positions: plan.positions.len(),
+            balance_domain: plan.balance_domain,
         }
     }
 }

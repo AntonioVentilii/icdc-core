@@ -2,7 +2,7 @@ use candid::Nat;
 use ic_cdk_macros::{query, update};
 use shared::{
     constants::{BPS_BASE, USD_DECIMALS, VUSD_ASSET_ID},
-    types::{asset::errors::AssetError, CollateralAssetInfo},
+    types::{asset::errors::AssetError, BalanceDomain, CollateralAssetInfo},
 };
 
 use super::{
@@ -125,22 +125,21 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
                     .entry(user)
                     .or_insert_with(|| AccountState::new(user));
 
+                // For now, defaults to Settlement domain for collateral deposits.
+                // In the future, this can be passed in params.
+                let domain = BalanceDomain::Settlement;
+
                 if asset_id == VUSD_ASSET_ID {
                     let amount_usd = if config.decimals > USD_DECIMALS {
                         (amount_u128 / 10u128.pow((config.decimals - USD_DECIMALS) as u32)) as i128
                     } else {
                         (amount_u128 * 10u128.pow((USD_DECIMALS - config.decimals) as u32)) as i128
                     };
-                    state.cash_balance_usd += amount_usd;
+                    let current_cash = state.get_cash_balance_usd(domain);
+                    state.set_cash_balance_usd(domain, current_cash + amount_usd);
                 } else {
-                    let current = state
-                        .collateral_balances
-                        .get(&asset_id)
-                        .copied()
-                        .unwrap_or(0);
-                    state
-                        .collateral_balances
-                        .insert(asset_id.clone(), current + amount_u128);
+                    let current = state.get_balance(domain, &asset_id);
+                    state.set_balance(domain, asset_id.clone(), current + amount_u128);
                 }
             });
 
@@ -250,7 +249,10 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                     let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
                     let metrics = ASSET_METRICS.with(|m| m.borrow().clone());
 
-                    let pre_equity = state.calculate_equity_usd(&configs, &metrics);
+                    // Default to Settlement domain for collateral withdrawals
+                    let domain = BalanceDomain::Settlement;
+
+                    let pre_equity = state.calculate_equity_usd(domain, &configs, &metrics);
 
                     let mut temp_state = state.clone();
                     if asset_id == VUSD_ASSET_ID {
@@ -261,22 +263,21 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                             (amount_u128 * 10u128.pow((USD_DECIMALS - config.decimals) as u32))
                                 as i128
                         };
-                        temp_state.cash_balance_usd -= amount_usd;
+                        let current_cash = temp_state.get_cash_balance_usd(domain);
+                        temp_state.set_cash_balance_usd(domain, current_cash - amount_usd);
                     } else {
-                        let current = temp_state
-                            .collateral_balances
-                            .get(&asset_id)
-                            .copied()
-                            .unwrap_or(0);
-                        temp_state
-                            .collateral_balances
-                            .insert(asset_id.clone(), current.saturating_sub(amount_u128));
+                        let current = temp_state.get_balance(domain, &asset_id);
+                        temp_state.set_balance(
+                            domain,
+                            asset_id.clone(),
+                            current.saturating_sub(amount_u128),
+                        );
                     }
 
-                    let post_equity = temp_state.calculate_equity_usd(&configs, &metrics);
+                    let post_equity = temp_state.calculate_equity_usd(domain, &configs, &metrics);
                     Ok::<(u128, u128, u128), WithdrawCollateralError>((
                         post_equity,
-                        temp_state.reserved_margin_usd,
+                        temp_state.get_reserved_margin_usd(domain),
                         pre_equity,
                     ))
                 })?;
@@ -294,6 +295,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             ACCOUNT_STATES.with(|accounts| {
                 let mut accounts = accounts.borrow_mut();
                 if let Some(state) = accounts.get_mut(&user) {
+                    let domain = BalanceDomain::Settlement;
                     if asset_id == VUSD_ASSET_ID {
                         let amount_usd = if config.decimals > USD_DECIMALS {
                             (amount_u128 / 10u128.pow((config.decimals - USD_DECIMALS) as u32))
@@ -302,17 +304,16 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                             (amount_u128 * 10u128.pow((USD_DECIMALS - config.decimals) as u32))
                                 as i128
                         };
-                        state.cash_balance_usd -= amount_usd;
+                        let current_cash = state.get_cash_balance_usd(domain);
+                        state.set_cash_balance_usd(domain, current_cash - amount_usd);
                         reserved_cash_usd = Some(amount_usd);
                     } else {
-                        let current = state
-                            .collateral_balances
-                            .get(&asset_id)
-                            .copied()
-                            .unwrap_or(0);
-                        state
-                            .collateral_balances
-                            .insert(asset_id.clone(), current.saturating_sub(amount_u128));
+                        let current = state.get_balance(domain, &asset_id);
+                        state.set_balance(
+                            domain,
+                            asset_id.clone(),
+                            current.saturating_sub(amount_u128),
+                        );
                     }
                 }
             });
@@ -354,32 +355,31 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                         ACCOUNT_STATES.with(|accounts| {
                             let mut accounts = accounts.borrow_mut();
                             if let Some(state) = accounts.get_mut(&user) {
+                                let domain = BalanceDomain::Settlement;
                                 match (reserved_cash, reserved_tokens) {
                                     (Some(usd), None) => {
-                                        state.cash_balance_usd += usd;
+                                        let current = state.get_cash_balance_usd(domain);
+                                        state.set_cash_balance_usd(domain, current + usd);
                                     }
 
                                     (None, Some(tokens)) => {
-                                        let current = state
-                                            .collateral_balances
-                                            .get(&asset_id)
-                                            .copied()
-                                            .unwrap_or(0);
-                                        state
-                                            .collateral_balances
-                                            .insert(asset_id.clone(), current + tokens);
+                                        let current = state.get_balance(domain, &asset_id);
+                                        state.set_balance(
+                                            domain,
+                                            asset_id.clone(),
+                                            current + tokens,
+                                        );
                                     }
 
                                     (Some(usd), Some(tokens)) => {
-                                        state.cash_balance_usd += usd;
-                                        let current = state
-                                            .collateral_balances
-                                            .get(&asset_id)
-                                            .copied()
-                                            .unwrap_or(0);
-                                        state
-                                            .collateral_balances
-                                            .insert(asset_id.clone(), current + tokens);
+                                        let current_cash = state.get_cash_balance_usd(domain);
+                                        state.set_cash_balance_usd(domain, current_cash + usd);
+                                        let current_tokens = state.get_balance(domain, &asset_id);
+                                        state.set_balance(
+                                            domain,
+                                            asset_id.clone(),
+                                            current_tokens + tokens,
+                                        );
                                     }
 
                                     (None, None) => {}

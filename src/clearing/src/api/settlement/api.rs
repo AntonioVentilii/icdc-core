@@ -6,7 +6,7 @@ use ic_cdk_macros::{query, update};
 use ic_cdk_timers::{self, set_timer};
 use shared::{
     constants::VUSD_ASSET_ID,
-    types::{Series, SeriesId, SettlementInput},
+    types::{BalanceDomain, Series, SeriesId, SettlementInput},
 };
 
 use super::{errors::SettlementError, params::SettleSeriesParams, results::SettleSeriesResult};
@@ -311,7 +311,7 @@ pub(crate) fn prepare_settlement_impl(
     // (TREASURY + INSURANCE_FUND) so they don't reduce system equity.
     // We pass the settlement positions so that the check can compute
     // expected post-settlement equity (accounting for max(0,...) clamping).
-    check_settlement_solvency(total_net_payoff, &positions_to_settle)?;
+    check_settlement_solvency(ser.balance_domain, total_net_payoff, &positions_to_settle)?;
 
     // Now that solvency is verified, atomically remove positions and build the plan.
     POSITIONS.with(
@@ -330,6 +330,7 @@ pub(crate) fn prepare_settlement_impl(
         fee: total_protocol_fee,
         insurance_fee: total_insurance_fee,
         positions: positions_to_settle,
+        balance_domain: ser.balance_domain,
     }))
 }
 
@@ -345,6 +346,7 @@ pub(crate) fn prepare_settlement_impl(
 /// Fees are credited to the TREASURY and INSURANCE_FUND and therefore remain
 /// inside the system.  Individual user insolvency is handled by the liquidator.
 fn check_settlement_solvency(
+    domain: BalanceDomain,
     total_net_payoff: u128,
     positions: &[SettlementPosition],
 ) -> Result<(), SettlementError> {
@@ -363,7 +365,7 @@ fn check_settlement_solvency(
         accounts
             .values()
             .map(|acc| {
-                let current_equity = acc.calculate_raw_equity_i128(&configs, &metrics);
+                let current_equity = acc.calculate_raw_equity_i128(domain, &configs, &metrics);
                 let cashflow = cashflow_by_user.get(&acc.user).copied().unwrap_or(0);
                 let post_equity = current_equity + cashflow;
                 if post_equity < 0 {
@@ -394,13 +396,17 @@ pub(crate) fn apply_settlement_accounting_logic(plan: &mut SettlementPlan) -> bo
             let pos = &plan.positions[idx];
 
             if let Some(account) = accounts.get_mut(&pos.user) {
+                let domain = plan.balance_domain;
                 // 1. Update cash balance (PnL)
-                account.cash_balance_usd += pos.cashflow_usd;
+                let current_cash = account.get_cash_balance_usd(domain);
+                account.set_cash_balance_usd(domain, current_cash + pos.cashflow_usd);
 
                 // 2. Release margin
-                account.reserved_margin_usd = account
-                    .reserved_margin_usd
-                    .saturating_sub(pos.reserved_margin_usd);
+                let current_reserved = account.get_reserved_margin_usd(domain);
+                account.set_reserved_margin_usd(
+                    domain,
+                    current_reserved.saturating_sub(pos.reserved_margin_usd),
+                );
             }
 
             plan.accounting_cursor += 1;
@@ -425,7 +431,10 @@ pub(crate) fn apply_settlement_accounting_logic(plan: &mut SettlementPlan) -> bo
 #[cfg(test)]
 mod tests {
     use candid::Principal;
-    use shared::types::{Description, PayoffType, PayoutUnit, Price, SeriesId, SettlementInput};
+    use shared::types::{
+        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId,
+        SettlementInput,
+    };
 
     use super::*;
     use crate::{
@@ -449,6 +458,7 @@ mod tests {
             price_precision: 0,
             payout_unit: PayoutUnit::usd(),
             outcomes: None,
+            balance_domain: BalanceDomain::Settlement,
             oracle_source: "oracle".to_string(),
             creator: Principal::anonymous(),
             created_at_ns: 1000000000,
@@ -485,7 +495,7 @@ mod tests {
             let mut acc = acc.borrow_mut();
             acc.clear();
             let mut a = AccountState::new(user);
-            a.cash_balance_usd = -10_000_000; // -10 USD
+            a.set_cash_balance_usd(BalanceDomain::Settlement, -10_000_000); // -10 USD
             acc.insert(user, a);
         });
 
@@ -534,6 +544,7 @@ mod tests {
             price_precision: 0,
             payout_unit: PayoutUnit::usd(),
             outcomes: None,
+            balance_domain: BalanceDomain::Settlement,
             oracle_source: "oracle".to_string(),
             creator: Principal::anonymous(),
             created_at_ns: 1000000000,
@@ -565,7 +576,7 @@ mod tests {
             let mut acc = acc.borrow_mut();
             acc.clear();
             let mut a = AccountState::new(user);
-            a.cash_balance_usd = 1_000_000_000;
+            a.set_cash_balance_usd(BalanceDomain::Settlement, 1_000_000_000);
             acc.insert(user, a);
         });
 
@@ -608,6 +619,7 @@ mod tests {
             fee: 1000,
             insurance_fee: 500,
             positions: vec![],
+            balance_domain: BalanceDomain::Settlement,
         });
 
         // Query it back
@@ -647,8 +659,8 @@ mod tests {
             let mut acc = acc.borrow_mut();
             for user in &users {
                 let mut a = AccountState::new(*user);
-                a.cash_balance_usd = 1_000_000; // 1 USD
-                a.reserved_margin_usd = 500_000; // 0.5 USD
+                a.set_cash_balance_usd(BalanceDomain::Settlement, 1_000_000); // 1 USD
+                a.set_reserved_margin_usd(BalanceDomain::Settlement, 500_000); // 0.5 USD
                 acc.insert(*user, a);
             }
         });
@@ -673,6 +685,7 @@ mod tests {
             fee: 0,
             insurance_fee: 0,
             positions,
+            balance_domain: BalanceDomain::Settlement,
         });
 
         assert_eq!(plan.accounting_cursor, 0);
@@ -686,10 +699,15 @@ mod tests {
                 let idx = plan.accounting_cursor;
                 let pos = &plan.positions[idx];
                 if let Some(account) = accounts.get_mut(&pos.user) {
-                    account.cash_balance_usd += pos.cashflow_usd;
-                    account.reserved_margin_usd = account
-                        .reserved_margin_usd
-                        .saturating_sub(pos.reserved_margin_usd);
+                    let domain = plan.balance_domain;
+                    let curr_cash = account.get_cash_balance_usd(domain);
+                    account.set_cash_balance_usd(domain, curr_cash + pos.cashflow_usd);
+
+                    let curr_margin = account.get_reserved_margin_usd(domain);
+                    account.set_reserved_margin_usd(
+                        domain,
+                        curr_margin.saturating_sub(pos.reserved_margin_usd),
+                    );
                 }
                 plan.accounting_cursor += 1;
                 if plan.accounting_cursor.is_multiple_of(100) {
@@ -710,14 +728,15 @@ mod tests {
             let acc = acc.borrow();
             let first_user = &users[0];
             let state = acc.get(first_user).unwrap();
-            assert_eq!(state.cash_balance_usd, 1_100_000); // 1.0 + 0.1
-            assert_eq!(state.reserved_margin_usd, 0); // released
+            let domain = BalanceDomain::Settlement;
+            assert_eq!(state.get_cash_balance_usd(domain), 1_100_000); // 1.0 + 0.1
+            assert_eq!(state.get_reserved_margin_usd(domain), 0); // released
 
             // User 100 should NOT be updated yet
             let user_100 = &users[100];
             let state_100 = acc.get(user_100).unwrap();
-            assert_eq!(state_100.cash_balance_usd, 1_000_000); // unchanged
-            assert_eq!(state_100.reserved_margin_usd, 500_000); // unchanged
+            assert_eq!(state_100.get_cash_balance_usd(domain), 1_000_000); // unchanged
+            assert_eq!(state_100.get_reserved_margin_usd(domain), 500_000); // unchanged
         });
 
         // --- Simulate Phase B: second chunk (should process remaining 50) ---
@@ -727,10 +746,15 @@ mod tests {
                 let idx = plan.accounting_cursor;
                 let pos = &plan.positions[idx];
                 if let Some(account) = accounts.get_mut(&pos.user) {
-                    account.cash_balance_usd += pos.cashflow_usd;
-                    account.reserved_margin_usd = account
-                        .reserved_margin_usd
-                        .saturating_sub(pos.reserved_margin_usd);
+                    let domain = plan.balance_domain;
+                    let curr_cash = account.get_cash_balance_usd(domain);
+                    account.set_cash_balance_usd(domain, curr_cash + pos.cashflow_usd);
+
+                    let curr_margin = account.get_reserved_margin_usd(domain);
+                    account.set_reserved_margin_usd(
+                        domain,
+                        curr_margin.saturating_sub(pos.reserved_margin_usd),
+                    );
                 }
                 plan.accounting_cursor += 1;
                 if plan.accounting_cursor.is_multiple_of(100) {
@@ -751,8 +775,9 @@ mod tests {
             let acc = acc.borrow();
             let user_100 = &users[100];
             let state = acc.get(user_100).unwrap();
-            assert_eq!(state.cash_balance_usd, 1_100_000); // now updated
-            assert_eq!(state.reserved_margin_usd, 0); // released
+            let domain = BalanceDomain::Settlement;
+            assert_eq!(state.get_cash_balance_usd(domain), 1_100_000); // now updated
+            assert_eq!(state.get_reserved_margin_usd(domain), 0); // released
         });
 
         // Cleanup
@@ -772,6 +797,7 @@ mod tests {
             fee: 0,
             insurance_fee: 0,
             positions: vec![],
+            balance_domain: BalanceDomain::Settlement,
         });
 
         // The plan is locked with price 100
@@ -790,6 +816,7 @@ mod tests {
             fee: 999,
             insurance_fee: 999,
             positions: vec![],
+            balance_domain: BalanceDomain::Settlement,
         });
 
         // Plan is returned unchanged — the original price (100) is preserved
@@ -831,6 +858,7 @@ mod tests {
             outcomes: None,
             icon_url: None,
             banner_url: None,
+            balance_domain: BalanceDomain::Settlement,
         };
 
         // Settlement price 200 → gross payoff = 200 - 100 = 100 USD = 100_000_000
@@ -856,7 +884,7 @@ mod tests {
             let mut acc = acc.borrow_mut();
             acc.clear();
             let mut a = AccountState::new(user);
-            a.cash_balance_usd = 99_900_000;
+            a.set_cash_balance_usd(BalanceDomain::Settlement, 99_900_000);
             acc.insert(user, a);
         });
 
@@ -916,10 +944,10 @@ mod tests {
             let mut acc = acc.borrow_mut();
             acc.clear();
             let mut w = AccountState::new(winner);
-            w.cash_balance_usd = 10_000_000; // 10 USD
+            w.set_cash_balance_usd(BalanceDomain::Settlement, 10_000_000); // 10 USD
             acc.insert(winner, w);
             let mut l = AccountState::new(loser);
-            l.cash_balance_usd = 100_000_000; // 100 USD
+            l.set_cash_balance_usd(BalanceDomain::Settlement, 100_000_000); // 100 USD
             acc.insert(loser, l);
         });
 
@@ -948,7 +976,7 @@ mod tests {
         // Net payoff = 106 USD (only positive cashflows count, but we test the
         // solvency threshold directly).
         // 106 > 105 (post-settlement) but 106 < 110 (pre-settlement).
-        let result = check_settlement_solvency(106_000_000, &positions);
+        let result = check_settlement_solvency(BalanceDomain::Settlement, 106_000_000, &positions);
 
         assert!(
             result.is_err(),
@@ -966,7 +994,8 @@ mod tests {
         }
 
         // Also verify that a payoff within post-settlement equity passes.
-        let result_ok = check_settlement_solvency(105_000_000, &positions);
+        let result_ok =
+            check_settlement_solvency(BalanceDomain::Settlement, 105_000_000, &positions);
         assert!(
             result_ok.is_ok(),
             "Expected success when net payoff equals post-settlement equity"

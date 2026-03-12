@@ -285,7 +285,9 @@ pub fn get_required_margin(
 #[cfg(test)]
 mod tests {
     use candid::Principal;
-    use shared::types::{Description, PayoffType, PayoutUnit, SeriesId, SettlementInput};
+    use shared::types::{
+        BalanceDomain, Description, PayoffType, PayoutUnit, SeriesId, SettlementInput,
+    };
 
     use super::*;
 
@@ -311,6 +313,7 @@ mod tests {
             outcomes: None,
             icon_url: None,
             banner_url: None,
+            balance_domain: BalanceDomain::Settlement,
         }
     }
 

@@ -48,6 +48,7 @@ fn test_categorical_mint_redeem_complete_set() {
         description: Description::plain("Categorical test"),
         icon_url: None,
         banner_url: None,
+        balance_domain: ::shared::types::BalanceDomain::Settlement,
     };
 
     setup_test_state(vec![(user, 10_000_000)]);
@@ -107,6 +108,7 @@ fn test_categorical_lifecycle_scenario() {
         description: Description::plain("Full scenario test"),
         icon_url: None,
         banner_url: None,
+        balance_domain: ::shared::types::BalanceDomain::Settlement,
     };
 
     setup_test_state(vec![(seller, 20_000_000), (buyer, 10_000_000)]);
@@ -184,6 +186,7 @@ fn test_categorical_short_settlement() {
         description: Description::plain("Short test"),
         icon_url: None,
         banner_url: None,
+        balance_domain: ::shared::types::BalanceDomain::Settlement,
     };
 
     setup_test_state(vec![(seller, 10_000_000), (buyer, 10_000_000)]);
@@ -256,6 +259,7 @@ fn test_categorical_short_loss() {
         description: Description::plain("Short loss test"),
         icon_url: None,
         banner_url: None,
+        balance_domain: ::shared::types::BalanceDomain::Settlement,
     };
 
     setup_test_state(vec![(seller, 10_000_000), (buyer, 10_000_000)]);

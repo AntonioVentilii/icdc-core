@@ -40,6 +40,7 @@ pub fn get_account_state_query() -> GetAccountStateResult {
                 ASSET_METRICS.with(|metrics| {
                     AccountService::build_account_state_response(
                         state,
+                        shared::types::BalanceDomain::Settlement,
                         &configs.borrow(),
                         &metrics.borrow(),
                     )
@@ -55,22 +56,24 @@ pub fn get_account_state_query() -> GetAccountStateResult {
 /// * `params` - Includes an optional `refresh` flag to trigger external ledger checks.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn get_account_state(params: GetAccountStateParams) -> GetAccountStateResult {
-    let result: Result<AccountState, AccountStateError> = (async {
+    let result: Result<(AccountState, shared::types::BalanceDomain), AccountStateError> = (async {
         let user: User = ic_cdk::caller().into();
 
-        let GetAccountStateParams { refresh } = params;
+        let GetAccountStateParams { refresh, domain } = params;
 
         let refresh = refresh.unwrap_or(false);
+        let domain = domain.unwrap_or(shared::types::BalanceDomain::Settlement);
 
         // If not refreshing, just return cached state
         if !refresh {
-            return ACCOUNT_STATES.with(|accounts| {
+            let state = ACCOUNT_STATES.with(|accounts| {
                 accounts
                     .borrow()
                     .get(&user)
                     .cloned()
                     .ok_or(AccountStateError::NoAccountStateFound)
-            });
+            })?;
+            return Ok((state, domain));
         }
 
         // Refresh balances from ledgers
@@ -103,28 +106,24 @@ pub async fn get_account_state(params: GetAccountStateParams) -> GetAccountState
                 .entry(user)
                 .or_insert_with(|| AccountState::new(user));
 
-            // Merge refreshed balances for enabled assets into existing balances
-            // instead of overwriting the entire map, so that balances for assets
-            // that are no longer enabled are not silently discarded.
             for (asset_id, balance) in fresh_collateral_balances {
-                state.collateral_balances.insert(asset_id, balance);
+                state.set_balance(domain, asset_id, balance);
             }
 
-            // Note: cash_balance_usd and reserved_margin_usd are updated by other processes
-            // (trades, settlement)
             state.clone()
         });
 
-        Ok(final_state)
+        Ok((final_state, domain))
     })
     .await;
 
     match result {
-        Ok(state) => {
+        Ok((state, domain)) => {
             let response = COLLATERAL_ASSETS.with(|configs| {
                 ASSET_METRICS.with(|metrics| {
                     AccountService::build_account_state_response(
                         state,
+                        domain,
                         &configs.borrow(),
                         &metrics.borrow(),
                     )

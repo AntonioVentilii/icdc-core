@@ -38,8 +38,10 @@ pub fn stats() -> Stats {
             let m = m.borrow();
             let mut balances: BTreeMap<AssetId, u128> = BTreeMap::new();
             for account in m.values() {
-                for (asset_id, amount) in &account.collateral_balances {
-                    *balances.entry(asset_id.clone()).or_insert(0u128) += amount;
+                for domain_balances in account.balances.values() {
+                    for (asset_id, amount) in domain_balances {
+                        *balances.entry(asset_id.clone()).or_insert(0u128) += amount;
+                    }
                 }
             }
             (m.len() as u64, balances)

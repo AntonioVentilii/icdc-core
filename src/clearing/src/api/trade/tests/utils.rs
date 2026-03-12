@@ -14,7 +14,7 @@ pub(crate) fn setup_test_state(users_with_balances: Vec<(User, u128)>) {
         acc.clear();
         for (user, balance) in users_with_balances {
             let mut a = AccountState::new(user);
-            a.cash_balance_usd = balance as i128;
+            a.set_cash_balance_usd(::shared::types::BalanceDomain::Settlement, balance as i128);
             acc.insert(user, a);
         }
     });
@@ -38,7 +38,7 @@ pub(crate) fn verify_cash_balance(user: User, expected_usd: u128) {
         let actual = acc
             .get(&user)
             .expect("User account not found")
-            .cash_balance_usd;
+            .get_cash_balance_usd(::shared::types::BalanceDomain::Settlement);
         assert_eq!(
             actual, expected_usd as i128,
             "Cash balance mismatch for user {:?}. Expected {}, got {}",

@@ -1,7 +1,8 @@
 use candid::{CandidType, Deserialize, Principal};
 use serde::Serialize;
 use shared::types::{
-    Description, OracleMetadata, Outcome, PayoffType, PayoutUnit, Price, Series, SeriesId,
+    BalanceDomain, Description, OracleMetadata, Outcome, PayoffType, PayoutUnit, Price, Series,
+    SeriesId,
 };
 
 /// Input parameters for registering a new derivative series.
@@ -9,6 +10,8 @@ use shared::types::{
 pub struct AddSeriesParams {
     /// The underlying asset ticker (case-insensitive, e.g., "ICP").
     pub underlying: String,
+    /// The balance domain this series belongs to.
+    pub balance_domain: BalanceDomain,
     /// Expiry timestamp in nanoseconds since UNIX epoch.
     pub expiry_ns: u64,
     /// The payoff model for the series.
@@ -88,6 +91,8 @@ impl PaginationParams {
 pub struct ListSeriesParams {
     /// Filter by the underlying asset ticker (case-insensitive).
     pub underlying: Option<String>,
+    /// Filter by balance domain.
+    pub balance_domain: Option<BalanceDomain>,
     /// Filter by the payoff model.
     pub payoff_type: Option<PayoffType>,
     /// Filter by the strike price.
@@ -108,6 +113,12 @@ impl ListSeriesParams {
     pub fn matches(&self, series: &Series) -> bool {
         if let Some(underlying) = &self.underlying {
             if series.underlying.to_lowercase() != underlying.to_lowercase() {
+                return false;
+            }
+        }
+
+        if let Some(domain) = self.balance_domain {
+            if series.balance_domain != domain {
                 return false;
             }
         }
@@ -210,6 +221,7 @@ mod tests {
     fn create_test_series() -> Series {
         Series {
             series_id: SeriesId::from("test-id".to_string()),
+            balance_domain: BalanceDomain::Settlement,
             underlying: "ICP".to_string(),
             expiry_ns: 1000,
             payoff_type: PayoffType::Call,

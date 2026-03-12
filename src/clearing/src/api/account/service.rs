@@ -16,63 +16,67 @@ pub struct AccountService;
 impl AccountService {
     pub fn build_account_state_response(
         state: AccountState,
+        domain: shared::types::BalanceDomain,
         configs: &BTreeMap<AssetId, CollateralAssetConfig>,
         metrics: &BTreeMap<AssetId, AssetMetrics>,
     ) -> AccountStateResponse {
         let mut asset_worths = Vec::new();
         let target_decimals = USD_DECIMALS as u32;
 
-        for (asset_id, balance) in &state.collateral_balances {
-            let mut value_usd = 0u128;
-            let mut pre_haircut_value_usd = 0u128;
-            let mut haircut_bps = 0u16;
+        if let Some(domain_balances) = state.balances.get(&domain) {
+            for (asset_id, balance) in domain_balances {
+                let mut value_usd = 0u128;
+                let mut pre_haircut_value_usd = 0u128;
+                let mut haircut_bps = 0u16;
 
-            if let (Some(config), Some(metric)) = (configs.get(asset_id), metrics.get(asset_id)) {
-                if config.is_enabled {
-                    let price_value = metric.price_usd.value;
-                    let price_decimals = metric.price_usd.decimals as u32;
-                    let asset_decimals = config.decimals as u32;
-                    haircut_bps = metric.haircut_bps;
+                if let (Some(config), Some(metric)) = (configs.get(asset_id), metrics.get(asset_id))
+                {
+                    if config.is_enabled {
+                        let price_value = metric.price_usd.value;
+                        let price_decimals = metric.price_usd.decimals as u32;
+                        let asset_decimals = config.decimals as u32;
+                        haircut_bps = metric.haircut_bps;
 
-                    let haircut_multiplier =
-                        (BPS_BASE as u128).saturating_sub(metric.haircut_bps as u128);
+                        let haircut_multiplier =
+                            (BPS_BASE as u128).saturating_sub(metric.haircut_bps as u128);
 
-                    let numerator_pre = Nat::from(*balance) * Nat::from(price_value);
-                    let numerator_post = numerator_pre.clone() * Nat::from(haircut_multiplier);
+                        let numerator_pre = Nat::from(*balance) * Nat::from(price_value);
+                        let numerator_post = numerator_pre.clone() * Nat::from(haircut_multiplier);
 
-                    let total_source_decimals = asset_decimals + price_decimals;
+                        let total_source_decimals = asset_decimals + price_decimals;
 
-                    let (v_post_nat, v_pre_nat) = if total_source_decimals >= target_decimals {
-                        let diff = total_source_decimals - target_decimals;
-                        let divisor_raw = Nat::from(10u128.pow(diff));
-                        let divisor_post = Nat::from(BPS_BASE) * divisor_raw.clone();
+                        let (v_post_nat, v_pre_nat) = if total_source_decimals >= target_decimals {
+                            let diff = total_source_decimals - target_decimals;
+                            let divisor_raw = Nat::from(10u128.pow(diff));
+                            let divisor_post = Nat::from(BPS_BASE) * divisor_raw.clone();
 
-                        (numerator_post / divisor_post, numerator_pre / divisor_raw)
-                    } else {
-                        let diff = target_decimals - total_source_decimals;
-                        let multiplier_raw = Nat::from(10u128.pow(diff));
-                        (
-                            (numerator_post * multiplier_raw.clone()) / Nat::from(BPS_BASE),
-                            numerator_pre * multiplier_raw,
-                        )
-                    };
+                            (numerator_post / divisor_post, numerator_pre / divisor_raw)
+                        } else {
+                            let diff = target_decimals - total_source_decimals;
+                            let multiplier_raw = Nat::from(10u128.pow(diff));
+                            (
+                                (numerator_post * multiplier_raw.clone()) / Nat::from(BPS_BASE),
+                                numerator_pre * multiplier_raw,
+                            )
+                        };
 
-                    value_usd = v_post_nat.0.try_into().unwrap_or(u128::MAX);
-                    pre_haircut_value_usd = v_pre_nat.0.try_into().unwrap_or(u128::MAX);
+                        value_usd = v_post_nat.0.try_into().unwrap_or(u128::MAX);
+                        pre_haircut_value_usd = v_pre_nat.0.try_into().unwrap_or(u128::MAX);
+                    }
                 }
-            }
 
-            asset_worths.push(AssetWorth {
-                asset_id: asset_id.clone(),
-                balance: *balance,
-                value_usd,
-                pre_haircut_value_usd,
-                haircut_bps,
-            });
+                asset_worths.push(AssetWorth {
+                    asset_id: asset_id.clone(),
+                    balance: *balance,
+                    value_usd,
+                    pre_haircut_value_usd,
+                    haircut_bps,
+                });
+            }
         }
 
-        let total_equity_usd = state.calculate_equity_usd(configs, metrics);
-        let available_equity_usd = state.get_available_equity_usd(configs, metrics);
+        let total_equity_usd = state.calculate_equity_usd(domain, configs, metrics);
+        let available_equity_usd = state.get_available_equity_usd(domain, configs, metrics);
 
         AccountStateResponse {
             state,
@@ -95,9 +99,11 @@ mod tests {
     fn test_build_account_state_response_basic() {
         let mut state = AccountState::new(User::from(Principal::anonymous()));
         let asset_id = AssetId::from("ICP");
-        state
-            .collateral_balances
-            .insert(asset_id.clone(), 100_000_000); // 1 ICP (8 decimals)
+        state.set_balance(
+            shared::types::BalanceDomain::Settlement,
+            asset_id.clone(),
+            100_000_000,
+        ); // 1 ICP (8 decimals)
 
         let mut configs = BTreeMap::new();
         configs.insert(
@@ -128,7 +134,12 @@ mod tests {
             },
         );
 
-        let response = AccountService::build_account_state_response(state, &configs, &metrics);
+        let response = AccountService::build_account_state_response(
+            state,
+            shared::types::BalanceDomain::Settlement,
+            &configs,
+            &metrics,
+        );
 
         assert_eq!(response.assets.len(), 1);
         let worth = &response.assets[0];
@@ -144,9 +155,11 @@ mod tests {
     fn test_build_account_state_response_high_decimals() {
         let mut state = AccountState::new(User::from(Principal::anonymous()));
         let asset_id = AssetId::from("ETH");
-        state
-            .collateral_balances
-            .insert(asset_id.clone(), 1_000_000_000_000_000_000); // 1 ETH (18 decimals)
+        state.set_balance(
+            shared::types::BalanceDomain::Settlement,
+            asset_id.clone(),
+            1_000_000_000_000_000_000,
+        ); // 1 ETH (18 decimals)
 
         let mut configs = BTreeMap::new();
         configs.insert(
@@ -177,7 +190,12 @@ mod tests {
             },
         );
 
-        let response = AccountService::build_account_state_response(state, &configs, &metrics);
+        let response = AccountService::build_account_state_response(
+            state,
+            shared::types::BalanceDomain::Settlement,
+            &configs,
+            &metrics,
+        );
 
         let worth = &response.assets[0];
         assert_eq!(worth.pre_haircut_value_usd, 3_000_000_000); // $3000
@@ -188,9 +206,11 @@ mod tests {
     fn test_build_account_state_response_low_decimals() {
         let mut state = AccountState::new(User::from(Principal::anonymous()));
         let asset_id = AssetId::from("USDC");
-        state
-            .collateral_balances
-            .insert(asset_id.clone(), 1_000_000); // 1 USDC (6 decimals)
+        state.set_balance(
+            shared::types::BalanceDomain::Settlement,
+            asset_id.clone(),
+            1_000_000,
+        ); // 1 USDC (6 decimals)
 
         let mut configs = BTreeMap::new();
         configs.insert(
@@ -221,7 +241,12 @@ mod tests {
             },
         );
 
-        let response = AccountService::build_account_state_response(state, &configs, &metrics);
+        let response = AccountService::build_account_state_response(
+            state,
+            shared::types::BalanceDomain::Settlement,
+            &configs,
+            &metrics,
+        );
 
         let worth = &response.assets[0];
         assert_eq!(worth.pre_haircut_value_usd, 1_000_000); // $1
@@ -233,9 +258,11 @@ mod tests {
         let mut state = AccountState::new(User::from(Principal::anonymous()));
         let asset_id = AssetId::from("icp");
         // 1 ICP (8 decimals)
-        state
-            .collateral_balances
-            .insert(asset_id.clone(), 100_000_000);
+        state.set_balance(
+            shared::types::BalanceDomain::Settlement,
+            asset_id.clone(),
+            100_000_000,
+        );
 
         let mut configs = BTreeMap::new();
         configs.insert(
@@ -266,7 +293,12 @@ mod tests {
             },
         );
 
-        let response = AccountService::build_account_state_response(state, &configs, &metrics);
+        let response = AccountService::build_account_state_response(
+            state,
+            shared::types::BalanceDomain::Settlement,
+            &configs,
+            &metrics,
+        );
 
         let worth = &response.assets[0];
         // 1 ICP * $3.00 = $3.00 = 3_000_000 (scaled to 6 USD decimals)

@@ -99,7 +99,14 @@ pub fn save_state() {
 }
 
 pub fn restore_state() {
-    let (state,): (StableState,) = storage::stable_restore().expect("Restore failed");
+    let result: Result<(StableState,), String> = storage::stable_restore();
+
+    let state = match result {
+        Ok((s,)) => s,
+        Err(e) => {
+            ic_cdk::trap(&format!("Failed to restore stable state: {:?}", e));
+        }
+    };
 
     let StableState {
         config,

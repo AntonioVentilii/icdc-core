@@ -15,6 +15,7 @@ type AddSeriesParams = record {
 	outcomes : opt vec Outcome;
 	icon_url : opt text;
 	price_precision : nat8;
+	balance_domain : BalanceDomain;
 	oracle_source : text
 };
 type AddSeriesResult = variant { Ok : text; Err : SeriesError };
@@ -23,6 +24,7 @@ type Asset = variant {
 	Icrc : principal;
 	NativeEvm : NativeEvmAsset
 };
+type BalanceDomain = variant { Playground; Settlement };
 type DecimalValue = record { decimals : nat8; value : nat };
 type Description = record {
 	html : opt text;
@@ -43,6 +45,7 @@ type ListSeriesParams = record {
 	pagination : opt PaginationParams;
 	underlying : opt text;
 	search_term : opt text;
+	balance_domain : opt BalanceDomain;
 	oracle_source : opt text
 };
 type ManageOraclePrincipalsParams = record {
@@ -103,6 +106,7 @@ type Series = record {
 	created_at_ns : nat64;
 	icon_url : opt text;
 	price_precision : nat8;
+	balance_domain : BalanceDomain;
 	oracle_source : text
 };
 type SeriesError = variant {

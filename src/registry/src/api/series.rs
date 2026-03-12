@@ -31,6 +31,7 @@ use crate::{
 pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
     let AddSeriesParams {
         underlying,
+        balance_domain,
         expiry_ns,
         payoff_type,
         strike,
@@ -57,6 +58,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
 
     let series_id = Series::generate_id(SeriesIdParams {
         underlying: &underlying,
+        balance_domain,
         expiry_ns,
         payoff_type: &payoff_type,
         strike: strike.as_ref(),
@@ -68,6 +70,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
 
     let series = Series {
         series_id: series_id.clone(),
+        balance_domain,
         underlying,
         expiry_ns,
         payoff_type,
