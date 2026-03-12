@@ -309,6 +309,8 @@ mod tests {
             title: "Test".to_string(),
             description: Description::plain("Test Description"),
             outcomes: None,
+            icon_url: None,
+            banner_url: None,
         }
     }
 

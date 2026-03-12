@@ -25,6 +25,8 @@ fn test_binary_lifecycle_scenario() {
         created_at_ns: 1000000000,
         title: "Binary Test".to_string(),
         description: Description::plain("Yes/No Market"),
+        icon_url: None,
+        banner_url: None,
     };
 
     setup_test_state(vec![
@@ -89,6 +91,8 @@ fn test_binary_settle_no() {
         created_at_ns: 1000000000,
         title: "Binary Test NO".to_string(),
         description: Description::plain("Yes/No Market - Result No"),
+        icon_url: None,
+        banner_url: None,
     };
 
     setup_test_state(vec![(seller, 20_000_000), (buyer, 10_000_000)]);

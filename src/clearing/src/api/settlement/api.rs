@@ -454,6 +454,8 @@ mod tests {
             created_at_ns: 1000000000,
             title: "Test".to_string(),
             description: Description::plain("Test Description"),
+            icon_url: None,
+            banner_url: None,
         };
 
         // Settlement price 200 → Call payoff = 200 - 100 = 100 USD per unit.
@@ -537,6 +539,8 @@ mod tests {
             created_at_ns: 1000000000,
             title: "Test".to_string(),
             description: Description::plain("Test Description"),
+            icon_url: None,
+            banner_url: None,
         };
 
         let settlement_price = Price::new(150, 0); // payoff 50 per unit
@@ -825,6 +829,8 @@ mod tests {
             title: "Test".to_string(),
             description: Description::plain("Net payoff solvency test"),
             outcomes: None,
+            icon_url: None,
+            banner_url: None,
         };
 
         // Settlement price 200 → gross payoff = 200 - 100 = 100 USD = 100_000_000

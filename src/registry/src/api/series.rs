@@ -40,6 +40,8 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
         title,
         description,
         outcomes,
+        icon_url,
+        banner_url,
     } = params;
 
     if title.chars().count() > MAX_SERIES_TITLE_LEN {
@@ -78,6 +80,8 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
         created_at_ns: ic_cdk::api::time(),
         title,
         description,
+        icon_url,
+        banner_url,
     };
 
     let res = SERIES_STORE.with(|store| {

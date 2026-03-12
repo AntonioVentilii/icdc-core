@@ -9,9 +9,11 @@ type AddSeriesParams = record {
 	payoff_type : PayoffType;
 	payout_unit : PayoutUnit;
 	expiry_ns : nat64;
+	banner_url : opt text;
 	underlying : text;
 	description : Description;
-	outcomes : opt vec text;
+	outcomes : opt vec Outcome;
+	icon_url : opt text;
 	price_precision : nat8;
 	oracle_source : text
 };
@@ -68,6 +70,12 @@ type OracleMetadata = record {
 	website : opt text
 };
 type OracleResult = variant { Ok; Err : OracleError };
+type Outcome = record {
+	id : text;
+	title : text;
+	description : opt Description;
+	icon_url : opt text
+};
 type PaginationParams = record { cursor : opt text; limit : opt nat64 };
 type PayoffType = variant { Put; Binary; Call; Categorical };
 type PayoutUnit = variant {
@@ -87,11 +95,13 @@ type Series = record {
 	payoff_type : PayoffType;
 	payout_unit : PayoutUnit;
 	expiry_ns : nat64;
+	banner_url : opt text;
 	series_id : text;
 	underlying : text;
 	description : Description;
-	outcomes : opt vec text;
+	outcomes : opt vec Outcome;
 	created_at_ns : nat64;
+	icon_url : opt text;
 	price_precision : nat8;
 	oracle_source : text
 };

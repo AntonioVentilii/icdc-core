@@ -38,6 +38,19 @@ impl OutcomeId {
     }
 }
 
+/// Metadata for a specific outcome in a categorical market.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct Outcome {
+    /// The unique identifier of the outcome.
+    pub id: OutcomeId,
+    /// A short title for the outcome (e.g., "Yes", "No", "Team A").
+    pub title: String,
+    /// An optional detailed description of the outcome.
+    pub description: Option<Description>,
+    /// An optional icon URL for the outcome.
+    pub icon_url: Option<String>,
+}
+
 /// Defines the payoff structure for a derivative contract.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum PayoffType {
@@ -89,7 +102,7 @@ pub struct Series {
     /// The unit in which the contract payoff is expressed.
     pub payout_unit: PayoutUnit,
     /// The defined outcomes for categorical markets (ordered).
-    pub outcomes: Option<Vec<OutcomeId>>,
+    pub outcomes: Option<Vec<Outcome>>,
     /// The identifier of the oracle providing the settlement data.
     pub oracle_source: String,
     /// The principal identifier of the series creator.
@@ -100,6 +113,10 @@ pub struct Series {
     pub title: String,
     /// A detailed description of the series.
     pub description: Description,
+    /// An optional icon URL for the market.
+    pub icon_url: Option<String>,
+    /// An optional banner URL for the market.
+    pub banner_url: Option<String>,
 }
 impl Series {
     /// Generates a unique [`SeriesId`] based on the contract parameters.
@@ -151,7 +168,7 @@ impl Series {
         match outcomes {
             Some(list) => {
                 for outcome in list {
-                    hasher.update(outcome.as_str().as_bytes());
+                    hasher.update(outcome.id.as_str().as_bytes());
                     hasher.update(b",");
                 }
             }
@@ -175,7 +192,7 @@ pub struct SeriesIdParams<'a> {
     pub strike: Option<&'a Price>,
     pub price_precision: u8,
     pub payout_unit: &'a PayoutUnit,
-    pub outcomes: Option<&'a [OutcomeId]>,
+    pub outcomes: Option<&'a [Outcome]>,
     pub oracle_source: &'a str,
 }
 
@@ -302,6 +319,8 @@ mod tests {
             created_at_ns: 1700000000,
             title: "Long ICP Call".to_string(),
             description: Description::plain("A vanilla call option on ICP"),
+            icon_url: None,
+            banner_url: None,
         };
 
         assert_eq!(series.title, "Long ICP Call");

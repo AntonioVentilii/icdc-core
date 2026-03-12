@@ -538,7 +538,8 @@ pub(crate) fn mint_complete_set_logic(
         let mut positions = positions.borrow_mut();
         let share_of_margin = total_cost_usd.unsigned_abs() / outcomes.len() as u128;
 
-        for outcome_id in outcomes {
+        for outcome in outcomes {
+            let outcome_id = &outcome.id;
             let pos = positions
                 .entry((caller, series_id.clone(), Some(outcome_id.clone())))
                 .or_insert(Position {
@@ -601,7 +602,8 @@ pub(crate) fn redeem_complete_set_logic(
     // Verify user has enough of ALL outcomes
     POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| {
         let positions = positions.borrow();
-        for outcome_id in outcomes {
+        for outcome in outcomes {
+            let outcome_id = &outcome.id;
             let pos_qty = positions
                 .get(&(caller, series_id.clone(), Some(outcome_id.clone())))
                 .map(|p| p.net_qty)
@@ -619,7 +621,8 @@ pub(crate) fn redeem_complete_set_logic(
     // Deduct positions
     POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| {
         let mut positions = positions.borrow_mut();
-        for outcome_id in outcomes {
+        for outcome in outcomes {
+            let outcome_id = &outcome.id;
             if let Some(pos) =
                 positions.get_mut(&(caller, series_id.clone(), Some(outcome_id.clone())))
             {
@@ -683,14 +686,26 @@ mod tests {
             price_precision: 6,
             payout_unit: PayoutUnit::usd(),
             outcomes: Some(vec![
-                "outcome1".to_string().into(),
-                "outcome2".to_string().into(),
+                shared::types::Outcome {
+                    id: "outcome1".to_string().into(),
+                    title: "Outcome 1".to_string(),
+                    description: None,
+                    icon_url: None,
+                },
+                shared::types::Outcome {
+                    id: "outcome2".to_string().into(),
+                    title: "Outcome 2".to_string(),
+                    description: None,
+                    icon_url: None,
+                },
             ]),
             oracle_source: "oracle".to_string(),
             creator: Principal::anonymous(),
             created_at_ns: 1000000000,
             title: "Test".to_string(),
             description: Description::plain("Test Description"),
+            icon_url: None,
+            banner_url: None,
         }
     }
 

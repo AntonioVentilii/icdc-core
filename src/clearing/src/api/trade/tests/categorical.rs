@@ -27,12 +27,27 @@ fn test_categorical_mint_redeem_complete_set() {
         strike: None,
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
-        outcomes: Some(vec![outcome_a.clone(), outcome_b.clone()]),
+        outcomes: Some(vec![
+            shared::types::Outcome {
+                id: outcome_a.clone(),
+                title: "A".to_string(),
+                description: None,
+                icon_url: None,
+            },
+            shared::types::Outcome {
+                id: outcome_b.clone(),
+                title: "B".to_string(),
+                description: None,
+                icon_url: None,
+            },
+        ]),
         oracle_source: "oracle".to_string(),
         creator: Principal::anonymous(),
         created_at_ns: 1000000000,
         title: "Cat Test".to_string(),
         description: Description::plain("Categorical test"),
+        icon_url: None,
+        banner_url: None,
     };
 
     setup_test_state(vec![(user, 10_000_000)]);
@@ -66,15 +81,32 @@ fn test_categorical_lifecycle_scenario() {
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
         outcomes: Some(vec![
-            outcome_a.clone(),
-            outcome_b.clone(),
-            outcome_c.clone(),
+            shared::types::Outcome {
+                id: outcome_a.clone(),
+                title: "A".to_string(),
+                description: None,
+                icon_url: None,
+            },
+            shared::types::Outcome {
+                id: outcome_b.clone(),
+                title: "B".to_string(),
+                description: None,
+                icon_url: None,
+            },
+            shared::types::Outcome {
+                id: outcome_c.clone(),
+                title: "C".to_string(),
+                description: None,
+                icon_url: None,
+            },
         ]),
         oracle_source: "oracle".to_string(),
         creator: Principal::anonymous(),
         created_at_ns: 1000000000,
         title: "Lifecycle Test".to_string(),
         description: Description::plain("Full scenario test"),
+        icon_url: None,
+        banner_url: None,
     };
 
     setup_test_state(vec![(seller, 20_000_000), (buyer, 10_000_000)]);
@@ -131,12 +163,27 @@ fn test_categorical_short_settlement() {
         strike: None,
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
-        outcomes: Some(vec![outcome_a.clone(), outcome_b.clone()]),
+        outcomes: Some(vec![
+            shared::types::Outcome {
+                id: outcome_a.clone(),
+                title: "A".to_string(),
+                description: None,
+                icon_url: None,
+            },
+            shared::types::Outcome {
+                id: outcome_b.clone(),
+                title: "B".to_string(),
+                description: None,
+                icon_url: None,
+            },
+        ]),
         oracle_source: "oracle".to_string(),
         creator: Principal::anonymous(),
         created_at_ns: 1000000000,
         title: "Short Test".to_string(),
         description: Description::plain("Short test"),
+        icon_url: None,
+        banner_url: None,
     };
 
     setup_test_state(vec![(seller, 10_000_000), (buyer, 10_000_000)]);
@@ -188,12 +235,27 @@ fn test_categorical_short_loss() {
         strike: None,
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
-        outcomes: Some(vec![outcome_a.clone(), outcome_b.clone()]),
+        outcomes: Some(vec![
+            shared::types::Outcome {
+                id: outcome_a.clone(),
+                title: "A".to_string(),
+                description: None,
+                icon_url: None,
+            },
+            shared::types::Outcome {
+                id: outcome_b.clone(),
+                title: "B".to_string(),
+                description: None,
+                icon_url: None,
+            },
+        ]),
         oracle_source: "oracle".to_string(),
         creator: Principal::anonymous(),
         created_at_ns: 1000000000,
         title: "Short Loss Test".to_string(),
         description: Description::plain("Short loss test"),
+        icon_url: None,
+        banner_url: None,
     };
 
     setup_test_state(vec![(seller, 10_000_000), (buyer, 10_000_000)]);
