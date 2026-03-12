@@ -12,8 +12,11 @@
 		"quality": "npm run format && npm run lint",
 		"quality:rust": "npm run format:rust && npm run lint:rust",
 		"did": "./scripts/did.sh && npm run format && npm run lint",
+		"deploy": "dfx deploy --network local --upgrade-unchanged",
+		"deploy:staging": "dfx deploy --network staging --upgrade-unchanged",
 		"deploy:prod": "dfx deploy --ic --upgrade-unchanged",
-		"deploy:staging": "dfx deploy --network staging --upgrade-unchanged"
+		"reinstall": "./scripts/reinstall.sh",
+		"reinstall:staging": "./scripts/reinstall.sh --staging"
 	},
 	"devDependencies": {
 		"@icp-sdk/bindgen": "^0.2.1",

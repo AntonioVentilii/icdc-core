@@ -54,13 +54,13 @@
 	"output_env_file": ".env",
 	"version": 1,
 	"networks": {
-		"staging": {
-			"providers": ["https://icp0.io"],
-			"type": "persistent"
-		},
 		"local": {
 			"bind": "127.0.0.1:4943",
 			"type": "ephemeral"
+		},
+		"staging": {
+			"providers": ["https://icp0.io"],
+			"type": "persistent"
 		}
 	}
 }
