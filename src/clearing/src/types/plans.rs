@@ -1,6 +1,6 @@
 use candid::{CandidType, Nat, Principal};
 use serde::{Deserialize, Serialize};
-use shared::types::{AssetId, Price, SeriesId};
+use shared::types::{AssetId, OutcomeId, SeriesId, SettlementInput};
 
 use crate::{
     api::admin::params::FundType,
@@ -56,8 +56,8 @@ pub struct WithdrawalPlanParams {
 pub struct SettlementPlanParams {
     /// The unique identifier of the derivative series being settled.
     pub series_id: SeriesId,
-    /// The final settlement price from the oracle.
-    pub settlement_price: Price,
+    /// The final settlement data from the oracle.
+    pub settlement: SettlementInput,
     /// The oracle source identifier for authorization.
     pub oracle_source: String,
     /// The protocol fee applied to the settlement (in USD units).
@@ -72,6 +72,7 @@ pub struct SettlementPlanParams {
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct SettlementPosition {
     pub user: User,
+    pub outcome_id: Option<OutcomeId>,
     pub net_qty: i128,
     pub reserved_margin_usd: u128,
     pub cashflow_usd: i128,
@@ -202,8 +203,8 @@ impl WithdrawalPlan {
 pub struct SettlementPlan {
     /// The unique identifier of the derivative series.
     pub series_id: SeriesId,
-    /// The final settlement price.
-    pub settlement_price: Price,
+    /// The final settlement data.
+    pub settlement: SettlementInput,
     /// The oracle source identifier for authorization.
     pub oracle_source: String,
     /// The protocol fee (in USD units).
@@ -230,7 +231,7 @@ impl SettlementPlan {
 
             let SettlementPlanParams {
                 series_id,
-                settlement_price,
+                settlement,
                 oracle_source,
                 fee: fee_usd,
                 insurance_fee: insurance_fee_usd,
@@ -247,7 +248,7 @@ impl SettlementPlan {
 
             let plan = SettlementPlan {
                 series_id,
-                settlement_price,
+                settlement,
                 oracle_source,
                 fee_usd,
                 insurance_fee_usd,
@@ -325,7 +326,7 @@ impl FundWithdrawalPlan {
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct SettlementStatusView {
     pub series_id: SeriesId,
-    pub settlement_price: Price,
+    pub settlement: SettlementInput,
     pub oracle_source: String,
     pub fee_usd: u128,
     pub insurance_fee_usd: u128,
@@ -339,7 +340,7 @@ impl From<&SettlementPlan> for SettlementStatusView {
     fn from(plan: &SettlementPlan) -> Self {
         Self {
             series_id: plan.series_id.clone(),
-            settlement_price: plan.settlement_price.clone(),
+            settlement: plan.settlement.clone(),
             oracle_source: plan.oracle_source.clone(),
             fee_usd: plan.fee_usd,
             insurance_fee_usd: plan.insurance_fee_usd,

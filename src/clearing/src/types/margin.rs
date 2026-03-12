@@ -4,10 +4,16 @@ use candid::{CandidType, Nat};
 use serde::{Deserialize, Serialize};
 use shared::{
     constants::{BPS_BASE, USD_DECIMALS},
-    types::{AssetId, AssetMetrics, CollateralAssetConfig, SeriesId},
+    types::{AssetId, AssetMetrics, CollateralAssetConfig, OutcomeId, SeriesId},
 };
 
 use crate::types::user::User;
+
+/// A composite key used to look up a position in a map.
+pub type PositionKey = (User, SeriesId, Option<OutcomeId>);
+
+/// A type alias for the map containing all user positions.
+pub type PositionsMap = BTreeMap<PositionKey, Position>;
 
 /// Represents an open position in a derivative series for a specific user.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -16,6 +22,8 @@ pub struct Position {
     pub user: User,
     /// The unique identifier of the derivative series.
     pub series_id: SeriesId,
+    /// The specific outcome for categorical markets.
+    pub outcome_id: Option<OutcomeId>,
     /// The net quantity of the position (positive for Long, negative for Short).
     pub net_qty: i128,
     /// The amount of margin reserved for this specific position in USD.

@@ -1,6 +1,6 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
-use shared::types::SeriesId;
+use shared::types::{OutcomeId, SeriesId};
 
 /// Input parameters for retrieving an account state.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -14,4 +14,6 @@ pub struct GetAccountStateParams {
 pub struct GetPositionParams {
     /// The derivative series identifier.
     pub series_id: SeriesId,
+    /// Optional outcome identifier for categorical markets.
+    pub outcome_id: Option<OutcomeId>,
 }

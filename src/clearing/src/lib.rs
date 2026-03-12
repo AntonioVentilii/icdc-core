@@ -25,6 +25,7 @@ use crate::{
         },
         settlement::{params::SettleSeriesParams, results::SettleSeriesResult},
         trade::{
+            errors::TradeError,
             params::{
                 CancelLimitOrderParams, FreezePositionForTransferParams, ListOrdersParams,
                 SubmitLimitOrderParams, SubmitMarketOrderParams, SubmitMatchedTradeParams,

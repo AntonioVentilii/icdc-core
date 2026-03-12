@@ -1,6 +1,6 @@
 use candid::{CandidType, Deserialize, Nat};
 use serde::Serialize;
-use shared::types::{Price, SeriesId};
+use shared::types::{OutcomeId, Price, SeriesId};
 
 use crate::types::{
     trade::{OrderId, Side, TradeId, TransferId},
@@ -14,6 +14,8 @@ pub struct SubmitLimitOrderParams {
     pub order_id: OrderId,
     /// The derivative series identifier.
     pub series_id: SeriesId,
+    /// The specific outcome for categorical markets.
+    pub outcome_id: Option<OutcomeId>,
     /// The side of the order (Buy or Sell).
     pub side: Side,
     /// The quantity of the order. Must be positive.
@@ -38,6 +40,8 @@ pub struct SubmitMatchedTradeParams {
     pub trade_id: TradeId,
     /// The derivative series identifier.
     pub series_id: SeriesId,
+    /// The specific outcome for categorical markets.
+    pub outcome_id: Option<OutcomeId>,
     /// The user opening or increasing a Long position (buyer).
     pub buyer: User,
     /// The user opening or increasing a Short position (seller).
@@ -62,6 +66,8 @@ pub struct FreezePositionForTransferParams {
     pub user: User,
     /// The derivative series identifier.
     pub series_id: SeriesId,
+    /// The specific outcome for categorical markets.
+    pub outcome_id: Option<OutcomeId>,
     /// Optional valuation price to include in the proof.
     pub valuation_price: Option<Price>,
 }

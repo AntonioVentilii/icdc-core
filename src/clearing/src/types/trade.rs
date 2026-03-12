@@ -1,6 +1,6 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
-use shared::types::{Price, SeriesId};
+use shared::types::{OutcomeId, Price, SeriesId};
 
 use crate::types::user::User;
 
@@ -50,6 +50,7 @@ pub struct LimitOrder {
     pub order_id: OrderId,
     pub creator: User,
     pub series_id: SeriesId,
+    pub outcome_id: Option<OutcomeId>,
     pub side: Side,
     /// Number of Series Units (contracts), where 1 unit represents exposure to 1.0 of the
     /// underlying asset. This value must always be positive; the direction (buy/long vs

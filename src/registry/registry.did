@@ -11,6 +11,7 @@ type AddSeriesParams = record {
 	expiry_ns : nat64;
 	underlying : text;
 	description : Description;
+	outcomes : opt vec text;
 	price_precision : nat8;
 	oracle_source : text
 };
@@ -68,7 +69,7 @@ type OracleMetadata = record {
 };
 type OracleResult = variant { Ok; Err : OracleError };
 type PaginationParams = record { cursor : opt text; limit : opt nat64 };
-type PayoffType = variant { Put; Binary; Call };
+type PayoffType = variant { Put; Binary; Call; Categorical };
 type PayoutUnit = variant {
 	Fiat : FiatUnit;
 	Asset : Asset;
@@ -89,6 +90,7 @@ type Series = record {
 	series_id : text;
 	underlying : text;
 	description : Description;
+	outcomes : opt vec text;
 	created_at_ns : nat64;
 	price_precision : nat8;
 	oracle_source : text

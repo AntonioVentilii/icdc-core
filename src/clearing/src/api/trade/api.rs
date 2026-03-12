@@ -1,5 +1,8 @@
 use ic_cdk_macros::{query, update};
-use shared::types::Series;
+use shared::{
+    constants::USD_DECIMALS,
+    types::{PayoffType, Series, SeriesId},
+};
 
 use super::{
     errors::TradeError,
@@ -23,9 +26,9 @@ use crate::{
     types::{
         errors::CommonError,
         event::{Event, EventType},
-        margin::{AccountState, Position},
+        margin::{AccountState, Position, PositionsMap},
         state::PositionProof,
-        trade::{LimitOrder, Side, TradeId},
+        trade::{LimitOrder, OrderId, Side, TradeId, TransferId},
         user::User,
     },
     utils::series::ensure_series_registered,
@@ -42,6 +45,7 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
         let SubmitLimitOrderParams {
             order_id,
             series_id,
+            outcome_id,
             side,
             qty,
             price,
@@ -64,7 +68,7 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
         // Calculate required margin for this order in USD.
         // For Sell orders, we pass -qty to get_required_margin to calculate Short margin.
         let margin_qty = if side == Side::Sell { -qty } else { qty };
-        let required_margin_usd = get_required_margin(&series, &price, margin_qty);
+        let required_margin_usd = get_required_margin(&series, &price, margin_qty, &outcome_id);
 
         ACCOUNT_STATES.with(|accounts| {
             let mut accounts = accounts.borrow_mut();
@@ -92,6 +96,7 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
                         order_id,
                         creator: caller,
                         series_id,
+                        outcome_id,
                         side,
                         qty,
                         price,
@@ -161,6 +166,7 @@ pub(crate) fn submit_market_order_impl(
         ExecuteTradeParams {
             trade_id: trade_id.clone(),
             series_id: order.series_id,
+            outcome_id: order.outcome_id,
             buyer,
             seller,
             qty: order.qty,
@@ -231,6 +237,7 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
     let result = internal_execute_trade(ExecuteTradeParams {
         trade_id: params.trade_id,
         series_id: params.series_id,
+        outcome_id: params.outcome_id,
         buyer: params.buyer,
         seller: params.seller,
         qty: params.qty,
@@ -259,24 +266,30 @@ pub fn freeze_position_for_transfer(
         transfer_id,
         user,
         series_id,
+        outcome_id,
         valuation_price,
     } = params;
 
     // If already frozen, return the same proof.
-    if let Some(existing) = FROZEN_TRANSFERS.with(|m| m.borrow().get(&transfer_id).cloned()) {
+    if let Some(existing) = FROZEN_TRANSFERS.with(
+        |m: &std::cell::RefCell<std::collections::BTreeMap<TransferId, PositionProof>>| {
+            m.borrow().get(&transfer_id).cloned()
+        },
+    ) {
         return Some(existing);
     }
 
     // Otherwise, freeze now.
-    let proof_opt = POSITIONS.with(|positions| {
+    let proof_opt = POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| {
         let mut positions = positions.borrow_mut();
 
         positions
-            .remove(&(user, series_id.clone()))
+            .remove(&(user, series_id.clone(), outcome_id.clone()))
             .map(|pos| PositionProof {
                 transfer_id: transfer_id.clone(),
                 user,
                 series_id,
+                outcome_id,
                 qty: pos.net_qty,
                 clearing_id: ic_cdk::id(),
                 // Proofs are unsigned in the current cross-clearing protocol version.
@@ -287,9 +300,11 @@ pub fn freeze_position_for_transfer(
 
     // Persist proof so retries are stable.
     if let Some(ref proof) = proof_opt {
-        FROZEN_TRANSFERS.with(|m| {
-            m.borrow_mut().insert(transfer_id, proof.clone());
-        });
+        FROZEN_TRANSFERS.with(
+            |m: &std::cell::RefCell<std::collections::BTreeMap<TransferId, PositionProof>>| {
+                m.borrow_mut().insert(transfer_id, proof.clone());
+            },
+        );
     }
 
     proof_opt
@@ -302,7 +317,11 @@ pub fn freeze_position_for_transfer(
 #[update(guard = "caller_is_controller")]
 pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTransferResult {
     let result: Result<bool, TradeError> = (async {
-        if ACCEPTED_TRANSFERS.with(|m| m.borrow().contains_key(&proof.transfer_id)) {
+        if ACCEPTED_TRANSFERS.with(
+            |m: &std::cell::RefCell<std::collections::BTreeMap<TransferId, bool>>| {
+                m.borrow().contains_key(&proof.transfer_id)
+            },
+        ) {
             return Ok(true);
         }
 
@@ -317,13 +336,18 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
                 ))
             })?;
 
-        POSITIONS.with(|positions| {
+        POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| {
             let mut positions = positions.borrow_mut();
             let pos = positions
-                .entry((proof.user, proof.series_id.clone()))
+                .entry((
+                    proof.user,
+                    proof.series_id.clone(),
+                    proof.outcome_id.clone(),
+                ))
                 .or_insert(Position {
                     user: proof.user,
                     series_id: proof.series_id.clone(),
+                    outcome_id: proof.outcome_id.clone(),
                     net_qty: 0,
                     reserved_margin_usd: 0,
                 });
@@ -332,7 +356,8 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
             pos.net_qty += proof.qty;
 
             // Recalculate margin for the updated position state
-            pos.reserved_margin_usd = get_required_margin(&series, &valuation_price, pos.net_qty);
+            pos.reserved_margin_usd =
+                get_required_margin(&series, &valuation_price, pos.net_qty, &proof.outcome_id);
             let margin_delta = (pos.reserved_margin_usd as i128) - (old_margin_usd as i128);
 
             // Update the user's aggregate margin reservation in their AccountState
@@ -352,9 +377,11 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
             });
         });
 
-        ACCEPTED_TRANSFERS.with(|m| {
-            m.borrow_mut().insert(proof.transfer_id.clone(), true);
-        });
+        ACCEPTED_TRANSFERS.with(
+            |m: &std::cell::RefCell<std::collections::BTreeMap<TransferId, bool>>| {
+                m.borrow_mut().insert(proof.transfer_id.clone(), true);
+            },
+        );
 
         Ok(true)
     })
@@ -368,14 +395,16 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
 pub fn get_orders() -> Vec<LimitOrder> {
     let caller: User = ic_cdk::caller().into();
 
-    LIMIT_ORDERS.with(|orders| {
-        orders
-            .borrow()
-            .values()
-            .filter(|o| o.creator == caller)
-            .cloned()
-            .collect()
-    })
+    LIMIT_ORDERS.with(
+        |orders: &std::cell::RefCell<std::collections::BTreeMap<OrderId, LimitOrder>>| {
+            orders
+                .borrow()
+                .values()
+                .filter(|o| o.creator == caller)
+                .cloned()
+                .collect()
+        },
+    )
 }
 
 /// Retrieves the trade history (executed trades) for the caller.
@@ -383,7 +412,7 @@ pub fn get_orders() -> Vec<LimitOrder> {
 pub fn get_trade_history() -> Vec<Event> {
     let caller: User = ic_cdk::caller().into();
 
-    EVENTS.with(|events| {
+    EVENTS.with(|events: &std::cell::RefCell<Vec<Event>>| {
         events
             .borrow()
             .iter()
@@ -396,29 +425,185 @@ pub fn get_trade_history() -> Vec<Event> {
 /// Returns a list of all active limit orders, potentially filtered by series.
 #[query]
 pub fn list_orders(params: ListOrdersParams) -> Vec<LimitOrder> {
-    LIMIT_ORDERS.with(|orders| {
-        let orders = orders.borrow();
+    LIMIT_ORDERS.with(
+        |orders: &std::cell::RefCell<std::collections::BTreeMap<OrderId, LimitOrder>>| {
+            let orders = orders.borrow();
 
-        match params.series_id {
-            Some(series_id) => orders
-                .values()
-                .filter(|o| o.series_id == series_id)
-                .cloned()
-                .collect(),
-            None => orders.values().cloned().collect(),
+            match params.series_id {
+                Some(series_id) => orders
+                    .values()
+                    .filter(|o| o.series_id == series_id)
+                    .cloned()
+                    .collect(),
+                None => orders.values().cloned().collect(),
+            }
+        },
+    )
+}
+
+#[update(guard = "caller_is_not_anonymous")]
+pub async fn mint_complete_set(series_id: SeriesId, qty: i128) -> Result<bool, TradeError> {
+    let caller: User = ic_cdk::caller().into();
+    let series = ensure_series_registered(&series_id).await?;
+    mint_complete_set_logic(caller, series_id, series, qty)
+}
+
+pub(crate) fn mint_complete_set_logic(
+    caller: User,
+    series_id: SeriesId,
+    series: Series,
+    qty: i128,
+) -> Result<bool, TradeError> {
+    if qty <= 0 {
+        return Err(TradeError::Common(CommonError::InvalidInput(
+            "Quantity must be positive".to_string(),
+        )));
+    }
+
+    if series.payoff_type != PayoffType::Categorical {
+        return Err(TradeError::Common(CommonError::InvalidInput(
+            "Only categorical series support complete set minting".to_string(),
+        )));
+    }
+
+    let outcomes = series.outcomes.as_ref().ok_or_else(|| {
+        TradeError::Common(CommonError::Internal(
+            "Categorical series has no outcomes defined".to_string(),
+        ))
+    })?;
+
+    let asset_decimals = USD_DECIMALS as u32;
+    let unit_cost_usd = 10u128.pow(asset_decimals);
+    let total_cost_usd = (qty.unsigned_abs() * unit_cost_usd) as i128;
+
+    ACCOUNT_STATES.with(|accounts| {
+        let mut accounts = accounts.borrow_mut();
+        let acc = accounts
+            .entry(caller)
+            .or_insert_with(|| AccountState::new(caller));
+
+        let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
+        let metrics = ASSET_METRICS.with(|m| m.borrow().clone());
+
+        let equity = acc.calculate_raw_equity_i128(&configs, &metrics);
+        if equity - total_cost_usd < (acc.reserved_margin_usd as i128) {
+            return Err(TradeError::InsufficientMargin {
+                user: caller,
+                balance: acc.calculate_equity_usd(&configs, &metrics),
+                required: acc.reserved_margin_usd + total_cost_usd.unsigned_abs(),
+            });
         }
-    })
+
+        acc.cash_balance_usd -= total_cost_usd;
+        Ok(())
+    })?;
+
+    POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| {
+        let mut positions = positions.borrow_mut();
+        for outcome_id in outcomes {
+            let pos = positions
+                .entry((caller, series_id.clone(), Some(outcome_id.clone())))
+                .or_insert(Position {
+                    user: caller,
+                    series_id: series_id.clone(),
+                    outcome_id: Some(outcome_id.clone()),
+                    net_qty: 0,
+                    reserved_margin_usd: 0,
+                });
+            pos.net_qty += qty;
+            // Complete sets are fully collateralised by the cash prepayment,
+            // so they require no additional reserved margin.
+        }
+    });
+
+    Ok(true)
+}
+
+#[update(guard = "caller_is_not_anonymous")]
+pub async fn redeem_complete_set(series_id: SeriesId, qty: i128) -> Result<bool, TradeError> {
+    let caller: User = ic_cdk::caller().into();
+    let series = ensure_series_registered(&series_id).await?;
+    redeem_complete_set_logic(caller, series_id, series, qty)
+}
+
+pub(crate) fn redeem_complete_set_logic(
+    caller: User,
+    series_id: SeriesId,
+    series: Series,
+    qty: i128,
+) -> Result<bool, TradeError> {
+    if qty <= 0 {
+        return Err(TradeError::Common(CommonError::InvalidInput(
+            "Quantity must be positive".to_string(),
+        )));
+    }
+
+    if series.payoff_type != PayoffType::Categorical {
+        return Err(TradeError::Common(CommonError::InvalidInput(
+            "Only categorical series support complete set redemption".to_string(),
+        )));
+    }
+
+    let outcomes = series.outcomes.as_ref().ok_or_else(|| {
+        TradeError::Common(CommonError::Internal(
+            "Categorical series has no outcomes defined".to_string(),
+        ))
+    })?;
+
+    // Verify user has enough of ALL outcomes
+    POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| {
+        let positions = positions.borrow();
+        for outcome_id in outcomes {
+            let pos_qty = positions
+                .get(&(caller, series_id.clone(), Some(outcome_id.clone())))
+                .map(|p| p.net_qty)
+                .unwrap_or(0);
+            if pos_qty < qty {
+                return Err(TradeError::Common(CommonError::InvalidInput(format!(
+                    "Insufficient quantity for outcome {}",
+                    outcome_id.as_str()
+                ))));
+            }
+        }
+        Ok(())
+    })?;
+
+    // Deduct positions
+    POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| {
+        let mut positions = positions.borrow_mut();
+        for outcome_id in outcomes {
+            if let Some(pos) =
+                positions.get_mut(&(caller, series_id.clone(), Some(outcome_id.clone())))
+            {
+                pos.net_qty -= qty;
+            }
+        }
+    });
+
+    // Credit cash
+    let asset_decimals = USD_DECIMALS as u32;
+    let unit_cost_usd = 10u128.pow(asset_decimals);
+    let total_credit_usd = (qty.unsigned_abs() * unit_cost_usd) as i128;
+
+    ACCOUNT_STATES.with(|accounts| {
+        let mut accounts = accounts.borrow_mut();
+        if let Some(acc) = accounts.get_mut(&caller) {
+            acc.cash_balance_usd += total_credit_usd;
+        }
+    });
+
+    Ok(true)
 }
 
 #[cfg(test)]
 mod tests {
     use candid::Principal;
-    use shared::types::{Description, PayoffType, PayoutUnit, Price, Series, SeriesId};
+    use shared::types::{Description, OutcomeId, PayoffType, PayoutUnit, Price, Series, SeriesId};
 
     use super::*;
     use crate::{
         memory::{ACCOUNT_STATES, LIMIT_ORDERS},
-        types::{margin::AccountState, trade::OrderId},
+        types::{margin::AccountState, user::User, trade::{OrderId, TradeId}},
     };
 
     fn test_series(series_id: &SeriesId) -> Series {
@@ -430,6 +615,10 @@ mod tests {
             strike: Some(Price::new(50_000_000, 6)),
             price_precision: 6,
             payout_unit: PayoutUnit::usd(),
+            outcomes: Some(vec![
+                "outcome1".to_string().into(),
+                "outcome2".to_string().into(),
+            ]),
             oracle_source: "oracle".to_string(),
             creator: Principal::anonymous(),
             created_at_ns: 1000000000,
@@ -448,6 +637,7 @@ mod tests {
             order_id: order_id.clone(),
             creator,
             series_id: series_id.clone(),
+            outcome_id: None,
             side,
             qty: 1,
             price: Price::new(60_000_000, 6),
@@ -587,8 +777,8 @@ mod tests {
         let price = Price::new(30_000_000, 8);
         let qty = 10;
 
-        let buy_margin = crate::payoffs::get_required_margin(&binary_series, &price, qty);
-        let sell_margin = crate::payoffs::get_required_margin(&binary_series, &price, -qty);
+        let buy_margin = crate::payoffs::get_required_margin(&binary_series, &price, qty, &None);
+        let sell_margin = crate::payoffs::get_required_margin(&binary_series, &price, -qty, &None);
 
         assert_eq!(buy_margin, 3_000_000);
         assert_eq!(sell_margin, 7_000_000);
