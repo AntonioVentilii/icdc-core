@@ -9,8 +9,9 @@ use crate::{
     payoffs::get_required_margin,
     trade::types::ExecuteTradeParams,
     types::{
+        errors::CommonError,
         event::{Event, EventType},
-        margin::{AccountState, Position},
+        margin::{AccountState, Position, PositionsMap},
     },
     utils::{
         series::ensure_series_registered,
@@ -27,6 +28,12 @@ pub(crate) async fn internal_execute_trade(params: ExecuteTradeParams) -> Result
     execute_trade_impl(series, params)
 }
 
+/// Internal implementation of trade execution.
+///
+/// 1. Calculates margin requirements and cash flows.
+/// 2. Validates solvency for both parties.
+/// 3. Atomically updates account balances and positions.
+/// 4. Emits execution events.
 pub(crate) fn execute_trade_impl(
     series: Series,
     params: ExecuteTradeParams,
@@ -44,87 +51,145 @@ pub(crate) fn execute_trade_impl(
         price,
         buyer_unblock_amount,
         seller_unblock_amount,
+        outcome_id,
     } = params;
 
     let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
     let metrics = ASSET_METRICS.with(|m| m.borrow().clone());
 
-    // Calculate upfront collateral (cost) for both sides
-    let buyer_cost = get_required_margin(&series, &price, qty) as i128;
-    let seller_cost = get_required_margin(&series, &price, -qty) as i128;
-
     let (
-        buyer_margin_delta,
-        seller_margin_delta,
+        buyer_cash_delta,
+        seller_cash_delta,
+        buyer_reserved_delta,
+        seller_reserved_delta,
         new_buyer_qty,
         new_buyer_margin_usd,
         new_seller_qty,
         new_seller_margin_usd,
-    ) = POSITIONS.with(|positions| {
-        let positions = positions.borrow();
+    ): (i128, i128, i128, i128, i128, u128, i128, u128) =
+        POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| {
+            let positions = positions.borrow();
 
-        let old_buyer_margin = positions
-            .get(&(buyer, series_id.clone()))
-            .map(|p| p.reserved_margin_usd)
-            .unwrap_or(0);
-        let old_seller_margin = positions
-            .get(&(seller, series_id.clone()))
-            .map(|p| p.reserved_margin_usd)
-            .unwrap_or(0);
+            let old_buyer_margin = positions
+                .get(&(buyer, series_id.clone(), outcome_id.clone()))
+                .map(|p| p.reserved_margin_usd)
+                .unwrap_or(0);
+            let old_seller_margin = positions
+                .get(&(seller, series_id.clone(), outcome_id.clone()))
+                .map(|p| p.reserved_margin_usd)
+                .unwrap_or(0);
 
-        let new_buyer_qty = positions
-            .get(&(buyer, series_id.clone()))
-            .map(|p| p.net_qty)
-            .unwrap_or(0)
-            + qty;
-        let new_seller_qty = positions
-            .get(&(seller, series_id.clone()))
-            .map(|p| p.net_qty)
-            .unwrap_or(0)
-            - qty;
+            let old_buyer_qty = positions
+                .get(&(buyer, series_id.clone(), outcome_id.clone()))
+                .map(|p| p.net_qty)
+                .unwrap_or(0);
+            let old_seller_qty = positions
+                .get(&(seller, series_id.clone(), outcome_id.clone()))
+                .map(|p| p.net_qty)
+                .unwrap_or(0);
 
-        let new_buyer_margin_usd = get_required_margin(&series, &price, new_buyer_qty);
-        let new_seller_margin_usd = get_required_margin(&series, &price, new_seller_qty);
+            let new_buyer_qty = old_buyer_qty + qty;
+            let new_seller_qty = old_seller_qty - qty;
 
-        (
-            (new_buyer_margin_usd as i128) - (old_buyer_margin as i128),
-            (new_seller_margin_usd as i128) - (old_seller_margin as i128),
-            new_buyer_qty,
-            new_buyer_margin_usd,
-            new_seller_qty,
-            new_seller_margin_usd,
-        )
-    });
+            let new_buyer_margin_usd =
+                get_required_margin(&series, &price, new_buyer_qty, &outcome_id).map_err(|e| {
+                    TradeError::Common(CommonError::Internal(format!(
+                        "Payoff calculation failed: {:?}",
+                        e
+                    )))
+                })?;
+            let new_seller_margin_usd =
+                get_required_margin(&series, &price, new_seller_qty, &outcome_id).map_err(|e| {
+                    TradeError::Common(CommonError::Internal(format!(
+                        "Payoff calculation failed: {:?}",
+                        e
+                    )))
+                })?;
 
-    // Validation and Calculation Phase
+            let old_buyer_margin_at_price =
+                get_required_margin(&series, &price, old_buyer_qty, &outcome_id).map_err(|e| {
+                    TradeError::Common(CommonError::Internal(format!(
+                        "Payoff calculation failed: {:?}",
+                        e
+                    )))
+                })?;
+            let old_seller_margin_at_price =
+                get_required_margin(&series, &price, old_seller_qty, &outcome_id).map_err(|e| {
+                    TradeError::Common(CommonError::Internal(format!(
+                        "Payoff calculation failed: {:?}",
+                        e
+                    )))
+                })?;
+
+            // Mark-to-Market Cashflow Model:
+            // We calculate the cash delta as the difference in required margin
+            // Evaluated at the CURRENT trade price.
+            // This ensures that any PnL from the previous price to 'price'
+            // is realized immediately into the cash balance.
+            let buyer_cash_delta =
+                (new_buyer_margin_usd as i128) - (old_buyer_margin_at_price as i128);
+            let seller_cash_delta =
+                (new_seller_margin_usd as i128) - (old_seller_margin_at_price as i128);
+
+            // Margin Delta:
+            // We calculate how much the TOTAL reserved margin in the account should change.
+            // This must account for:
+            // 1. The change in the position's margin requirement (new_margin - old_pos_margin)
+            // 2. The release of the specific order's collateral (unblock_amount)
+            let b_reserved_delta = (new_buyer_margin_usd as i128)
+                - (old_buyer_margin as i128)
+                - (buyer_unblock_amount.unwrap_or(0) as i128);
+            let s_reserved_delta = (new_seller_margin_usd as i128)
+                - (old_seller_margin as i128)
+                - (seller_unblock_amount.unwrap_or(0) as i128);
+
+            Ok((
+                buyer_cash_delta,
+                seller_cash_delta,
+                b_reserved_delta,
+                s_reserved_delta,
+                new_buyer_qty,
+                new_buyer_margin_usd,
+                new_seller_qty,
+                new_seller_margin_usd,
+            ))
+        })?;
+
+    // Atomicity: Validation and Calculation Phase
+    // No state and no memory is mutated during this phase.
+    // If ANY check fails (InsufficientMargin, etc.), we return early with an Err,
+    // leaving the system state exactly as it was.
     let (target_buyer_reserved, target_seller_reserved) = ACCOUNT_STATES.with(|accounts| {
         let accounts = accounts.borrow();
 
         // 1. Validate Buyer
+        // We check if the post-trade equity covers the target reserved margin.
+        // Post-trade equity = Pre-trade Equity + PnL - Fees.
+        // In the Full Collateral model, PnL is realised at trade time via cash deltas.
         let buyer_acc = accounts
             .get(&buyer)
             .cloned()
             .unwrap_or_else(|| AccountState::new(buyer));
-        let mut temp_buyer = buyer_acc.clone();
 
-        temp_buyer.cash_balance_usd -= buyer_cost;
-        if let Some(amt) = buyer_unblock_amount {
-            temp_buyer.reserved_margin_usd = temp_buyer.reserved_margin_usd.saturating_sub(amt);
-        }
-
-        let target_buyer_reserved = if buyer_margin_delta > 0 {
-            temp_buyer.reserved_margin_usd + (buyer_margin_delta as u128)
+        // Calculate target reserved margin based on the delta.
+        let target_buyer_reserved = if buyer_reserved_delta > 0 {
+            buyer_acc.reserved_margin_usd + (buyer_reserved_delta as u128)
         } else {
-            temp_buyer
+            buyer_acc
                 .reserved_margin_usd
-                .saturating_sub(buyer_margin_delta.unsigned_abs())
+                .saturating_sub(buyer_reserved_delta.unsigned_abs())
         };
 
-        let buyer_equity = temp_buyer.calculate_raw_equity_i128(&configs, &metrics);
+        // Check equity against target margin.
+        // We use the account's CURRENT equity because in our model,
+        // trades are always solvent if Equity >= Target Margin (collateral is already in equity).
+        let buyer_equity = buyer_acc.calculate_raw_equity_i128(&configs, &metrics);
+
+        // If unblocking, the equity remains the same but the requirement drops.
         if buyer_equity < (target_buyer_reserved as i128) {
             return Err(TradeError::InsufficientMargin {
                 user: buyer,
-                balance: temp_buyer.calculate_equity_usd(&configs, &metrics),
+                balance: buyer_acc.calculate_equity_usd(&configs, &metrics),
                 required: target_buyer_reserved,
             });
         }
@@ -134,26 +199,20 @@ pub(crate) fn execute_trade_impl(
             .get(&seller)
             .cloned()
             .unwrap_or_else(|| AccountState::new(seller));
-        let mut temp_seller = seller_acc.clone();
 
-        temp_seller.cash_balance_usd -= seller_cost;
-        if let Some(amt) = seller_unblock_amount {
-            temp_seller.reserved_margin_usd = temp_seller.reserved_margin_usd.saturating_sub(amt);
-        }
-
-        let target_seller_reserved = if seller_margin_delta > 0 {
-            temp_seller.reserved_margin_usd + (seller_margin_delta as u128)
+        let target_seller_reserved = if seller_reserved_delta > 0 {
+            seller_acc.reserved_margin_usd + (seller_reserved_delta as u128)
         } else {
-            temp_seller
+            seller_acc
                 .reserved_margin_usd
-                .saturating_sub(seller_margin_delta.unsigned_abs())
+                .saturating_sub(seller_reserved_delta.unsigned_abs())
         };
 
-        let seller_equity = temp_seller.calculate_raw_equity_i128(&configs, &metrics);
+        let seller_equity = seller_acc.calculate_raw_equity_i128(&configs, &metrics);
         if seller_equity < (target_seller_reserved as i128) {
             return Err(TradeError::InsufficientMargin {
                 user: seller,
-                balance: temp_seller.calculate_equity_usd(&configs, &metrics),
+                balance: seller_acc.calculate_equity_usd(&configs, &metrics),
                 required: target_seller_reserved,
             });
         }
@@ -169,25 +228,26 @@ pub(crate) fn execute_trade_impl(
         let buyer_acc = accounts
             .entry(buyer)
             .or_insert_with(|| AccountState::new(buyer));
-        buyer_acc.cash_balance_usd -= buyer_cost;
+        buyer_acc.cash_balance_usd -= buyer_cash_delta;
         buyer_acc.reserved_margin_usd = target_buyer_reserved;
 
         // Update Seller
         let seller_acc = accounts
             .entry(seller)
             .or_insert_with(|| AccountState::new(seller));
-        seller_acc.cash_balance_usd -= seller_cost;
+        seller_acc.cash_balance_usd -= seller_cash_delta;
         seller_acc.reserved_margin_usd = target_seller_reserved;
     });
 
-    POSITIONS.with(|positions| {
+    POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| {
         let mut positions = positions.borrow_mut();
 
         let b_pos = positions
-            .entry((buyer, series_id.clone()))
+            .entry((buyer, series_id.clone(), outcome_id.clone()))
             .or_insert(Position {
                 user: buyer,
                 series_id: series_id.clone(),
+                outcome_id: outcome_id.clone(),
                 net_qty: 0,
                 reserved_margin_usd: 0,
             });
@@ -195,10 +255,11 @@ pub(crate) fn execute_trade_impl(
         b_pos.reserved_margin_usd = new_buyer_margin_usd;
 
         let s_pos = positions
-            .entry((seller, series_id.clone()))
+            .entry((seller, series_id.clone(), outcome_id.clone()))
             .or_insert(Position {
                 user: seller,
                 series_id: series_id.clone(),
+                outcome_id,
                 net_qty: 0,
                 reserved_margin_usd: 0,
             });
@@ -253,9 +314,7 @@ pub(crate) fn execute_trade_impl(
 #[cfg(test)]
 mod tests {
     use candid::Principal;
-    use shared::types::{
-        description::Description, PayoffType, PayoutUnit, Price, Series, SeriesId,
-    };
+    use shared::types::{Description, PayoffType, PayoutUnit, Price, Series, SeriesId};
 
     use super::*;
     use crate::{
@@ -284,6 +343,7 @@ mod tests {
             created_at_ns: 1000000000,
             title: "Test".to_string(),
             description: Description::plain("Test Description"),
+            outcomes: None,
         };
 
         // Initialize state
@@ -313,6 +373,7 @@ mod tests {
             price: Price::new(60_000_000_000, 8), // $600
             buyer_unblock_amount: None,
             seller_unblock_amount: None,
+            outcome_id: None,
         };
 
         // Trade should fail for seller due to insufficient margin

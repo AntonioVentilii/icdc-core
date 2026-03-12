@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use ic_cdk_macros::{query, update};
-use shared::types::{AssetId, SeriesId};
+use shared::types::AssetId;
 
 use super::{
     errors::AccountStateError,
@@ -14,7 +14,7 @@ use crate::{
     memory::{ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, POSITIONS},
     types::{
         account::AssetAccount,
-        margin::{AccountState, Position},
+        margin::{AccountState, Position, PositionsMap},
         user::User,
     },
     GetAccountStateResult,
@@ -141,20 +141,24 @@ pub async fn get_account_state(params: GetAccountStateParams) -> GetAccountState
 pub fn get_position(params: GetPositionParams) -> Option<Position> {
     let caller: User = ic_cdk::caller().into();
 
-    POSITIONS.with(|positions| positions.borrow().get(&(caller, params.series_id)).cloned())
+    POSITIONS.with(|positions| {
+        positions
+            .borrow()
+            .get(&(caller, params.series_id, params.outcome_id))
+            .cloned()
+    })
 }
 
 /// Retrieves all open positions for the caller.
 #[query(guard = "caller_is_not_anonymous")]
-pub fn get_positions() -> Vec<(SeriesId, Position)> {
+pub fn get_positions() -> Vec<Position> {
     let caller: User = ic_cdk::caller().into();
-
-    POSITIONS.with(|positions| {
+    POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| {
         positions
             .borrow()
             .iter()
-            .filter(|((u, _), _)| *u == caller)
-            .map(|((_, series_id), position)| (series_id.clone(), position.clone()))
+            .filter(|((u, _, _), _)| *u == caller)
+            .map(|(_, position)| position.clone())
             .collect()
     })
 }

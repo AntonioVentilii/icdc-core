@@ -1,6 +1,8 @@
 use candid::{CandidType, Deserialize, Principal};
 use serde::Serialize;
-use shared::types::{Description, OracleMetadata, PayoffType, PayoutUnit, Price, Series, SeriesId};
+use shared::types::{
+    Description, OracleMetadata, OutcomeId, PayoffType, PayoutUnit, Price, Series, SeriesId,
+};
 
 /// Input parameters for registering a new derivative series.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -23,6 +25,8 @@ pub struct AddSeriesParams {
     pub title: String,
     /// A detailed description of the series.
     pub description: Description,
+    /// The defined outcomes for categorical markets (ordered).
+    pub outcomes: Option<Vec<OutcomeId>>,
 }
 
 /// Parameters for paginating results.
@@ -213,6 +217,7 @@ mod tests {
             created_at_ns: 0,
             title: "ICP Call".to_string(),
             description: Description::plain("Test description"),
+            outcomes: None,
         }
     }
 

@@ -1,6 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+FIX_ARGS=()
+
+CLIPPY_RUSTFLAGS=(-W deprecated)
+
+[[ "${1:-}" != "--help" ]] || {
+  cat <<-EOF
+
+  Runs Clippy lint checks for the Rust canister crates.
+
+	Usage: $0 [--fix]
+
+	Options:
+	  --fix     Apply automatic fixes with cargo clippy (allow dirty and staged).
+	  --help    Show this help message and exit.
+
+	EOF
+  exit 0
+}
+
+if [[ "${1:-}" == "--fix" ]]; then
+  FIX_ARGS+=(--fix --allow-dirty --allow-staged)
+fi
+
 CANISTERS=()
 while IFS= read -r canister; do
   [[ -n "$canister" ]] && CANISTERS+=("$canister")
@@ -17,19 +40,19 @@ for canister in "${CANISTERS[@]}"; do
   # Skip non-Rust canisters (or different layouts)
   [[ -f "$manifest_path" ]] || continue
 
-  cargo clippy \
+  RUSTFLAGS="${CLIPPY_RUSTFLAGS[*]}" cargo clippy "${FIX_ARGS[@]}" \
     --manifest-path "$manifest_path" \
     --locked \
     --target wasm32-unknown-unknown \
     --all-features
 
-  cargo clippy \
+  RUSTFLAGS="${CLIPPY_RUSTFLAGS[*]}" cargo clippy "${FIX_ARGS[@]}" \
     --manifest-path "$manifest_path" \
     --locked \
     --all-features \
     --tests
 
-  cargo clippy \
+  RUSTFLAGS="${CLIPPY_RUSTFLAGS[*]}" cargo clippy "${FIX_ARGS[@]}" \
     --manifest-path "$manifest_path" \
     --locked \
     --all-features \

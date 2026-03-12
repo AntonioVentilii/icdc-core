@@ -3,7 +3,7 @@ use std::ops::Bound;
 use ic_cdk_macros::{query, update};
 use shared::{
     constants::{MAX_SERIES_DESCRIPTION_LEN, MAX_SERIES_TITLE_LEN},
-    types::{Series, SeriesId},
+    types::{Series, SeriesId, SeriesIdParams},
 };
 
 use crate::{
@@ -39,6 +39,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
         oracle_source,
         title,
         description,
+        outcomes,
     } = params;
 
     if title.chars().count() > MAX_SERIES_TITLE_LEN {
@@ -52,15 +53,16 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
     let underlying = canonical_id_part(&underlying);
     let oracle_source = canonical_id_part(&oracle_source);
 
-    let series_id = Series::generate_id(
-        &underlying,
+    let series_id = Series::generate_id(SeriesIdParams {
+        underlying: &underlying,
         expiry_ns,
-        &payoff_type,
-        strike.as_ref(),
+        payoff_type: &payoff_type,
+        strike: strike.as_ref(),
         price_precision,
-        &payout_unit,
-        &oracle_source,
-    );
+        payout_unit: &payout_unit,
+        outcomes: outcomes.as_deref(),
+        oracle_source: &oracle_source,
+    });
 
     let series = Series {
         series_id: series_id.clone(),
@@ -70,6 +72,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
         strike,
         price_precision,
         payout_unit,
+        outcomes,
         oracle_source,
         creator: ic_cdk::caller(),
         created_at_ns: ic_cdk::api::time(),

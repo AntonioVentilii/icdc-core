@@ -4,7 +4,7 @@ use candid::{CandidType, Principal};
 use serde::Deserialize;
 use shared::{
     constants::{DEFAULT_INSURANCE_FEE_RATIO, DEFAULT_PROTOCOL_FEE_RATIO},
-    types::{AssetId, AssetMetrics, CollateralAssetConfig, Price, Series, SeriesId},
+    types::{AssetId, AssetMetrics, CollateralAssetConfig, OutcomeId, Price, Series, SeriesId},
 };
 
 use crate::types::{
@@ -24,6 +24,8 @@ pub struct PositionProof {
     pub user: User,
     /// The unique identifier of the derivative series.
     pub series_id: SeriesId,
+    /// The specific outcome for categorical markets.
+    pub outcome_id: Option<OutcomeId>,
     /// The quantity of the position.
     pub qty: i128,
     /// The principal of the clearing canister that issued the proof.

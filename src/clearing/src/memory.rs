@@ -10,7 +10,7 @@ use shared::{
 use crate::{
     types::{
         event::Event,
-        margin::{AccountState, Position},
+        margin::{AccountState, Position, PositionsMap},
         plans::{DepositPlan, FundWithdrawalPlan, SettlementPlan, WithdrawalPlan},
         state::{Config, StableState},
         trade::{LimitOrder, OrderId, TradeId, TransferId},
@@ -21,7 +21,7 @@ use crate::{
 
 thread_local! {
     pub static CONFIG: RefCell<Config> = const { RefCell::new(Config { insurance_fund_fee_ratio: 10, protocol_fee_ratio: 5, evm_rpc: Principal::anonymous(), signer_canister: Principal::anonymous() }) };
-    pub static POSITIONS: RefCell<BTreeMap<(User, SeriesId), Position>> = const { RefCell::new(BTreeMap::new()) };
+    pub static POSITIONS: RefCell<PositionsMap> = const { RefCell::new(BTreeMap::new()) };
     pub static ACCOUNT_STATES: RefCell<BTreeMap<User, AccountState>> = const { RefCell::new(BTreeMap::new()) };
     pub static SERIES: RefCell<BTreeMap<SeriesId, Series>> = const { RefCell::new(BTreeMap::new()) };
     pub static EVENTS: RefCell<Vec<Event>> = const { RefCell::new(Vec::new()) };
@@ -44,7 +44,8 @@ thread_local! {
 
 pub fn save_state() {
     let config: Config = CONFIG.with(|c: &RefCell<Config>| c.borrow().clone());
-    let positions: Vec<Position> = POSITIONS.with(|p| p.borrow().values().cloned().collect());
+    let positions: Vec<Position> =
+        POSITIONS.with(|p: &RefCell<PositionsMap>| p.borrow().values().cloned().collect());
     let accounts: BTreeMap<User, AccountState> = ACCOUNT_STATES.with(|a| a.borrow().clone());
     let series: BTreeMap<SeriesId, Series> = SERIES.with(|s| s.borrow().clone());
     let events: Vec<Event> = EVENTS.with(|e| e.borrow().clone());
@@ -123,10 +124,13 @@ pub fn restore_state() {
         asset_metrics,
     } = state;
 
-    POSITIONS.with(|p| {
+    POSITIONS.with(|p: &RefCell<PositionsMap>| {
         let mut p = p.borrow_mut();
         for pos in positions {
-            p.insert((pos.user, pos.series_id.clone()), pos);
+            p.insert(
+                (pos.user, pos.series_id.clone(), pos.outcome_id.clone()),
+                pos,
+            );
         }
     });
 
