@@ -50,7 +50,7 @@ pub(crate) fn execute_trade_impl(
         qty,
         price,
         buyer_unblock_amount,
-        seller_unblock_amount: _,
+        seller_unblock_amount,
         outcome_id,
     } = params;
 
@@ -131,11 +131,23 @@ pub(crate) fn execute_trade_impl(
             let seller_cash_delta =
                 (new_seller_margin_usd as i128) - (old_seller_margin_at_price as i128);
 
+            // Margin Delta:
+            // We calculate how much the TOTAL reserved margin in the account should change.
+            // This must account for:
+            // 1. The change in the position's margin requirement (new_margin - old_pos_margin)
+            // 2. The release of the specific order's collateral (unblock_amount)
+            let b_reserved_delta = (new_buyer_margin_usd as i128)
+                - (old_buyer_margin as i128)
+                - (buyer_unblock_amount.unwrap_or(0) as i128);
+            let s_reserved_delta = (new_seller_margin_usd as i128)
+                - (old_seller_margin as i128)
+                - (seller_unblock_amount.unwrap_or(0) as i128);
+
             Ok((
                 buyer_cash_delta,
                 seller_cash_delta,
-                (new_buyer_margin_usd as i128) - (old_buyer_margin as i128),
-                (new_seller_margin_usd as i128) - (old_seller_margin as i128),
+                b_reserved_delta,
+                s_reserved_delta,
                 new_buyer_qty,
                 new_buyer_margin_usd,
                 new_seller_qty,
@@ -172,7 +184,6 @@ pub(crate) fn execute_trade_impl(
         // We use the account's CURRENT equity because in our model,
         // trades are always solvent if Equity >= Target Margin (collateral is already in equity).
         let buyer_equity = buyer_acc.calculate_raw_equity_i128(&configs, &metrics);
-        let _buyer_unblock = buyer_unblock_amount.unwrap_or(0);
 
         // If unblocking, the equity remains the same but the requirement drops.
         if buyer_equity < (target_buyer_reserved as i128) {
