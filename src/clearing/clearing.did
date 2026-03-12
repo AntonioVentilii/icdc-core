@@ -399,7 +399,14 @@ service : {
 	//
 	// This method is gated to canister controllers.
 	metrics : () -> (text) query;
+	// Mints a complete set of categorical outcome positions.
+	//
+	// Returns 1 unit of every outcome position in the series in exchange for the
+	// full collateral requirement (1.0 USD vUSD).
 	mint_complete_set : (text, int) -> (SubmitMatchedTradeResult);
+	// Redeems a complete set of categorical outcome positions for collateral.
+	//
+	// Returns 1.0 USD (vUSD) for every full set of N outcome positions provided.
 	redeem_complete_set : (text, int) -> (SubmitMatchedTradeResult);
 	// Admin function to manually resume a stuck settlement plan, e.g., if the timer was dropped during
 	// upgrade.

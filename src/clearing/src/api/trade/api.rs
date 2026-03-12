@@ -456,6 +456,10 @@ pub fn list_orders(params: ListOrdersParams) -> Vec<LimitOrder> {
     )
 }
 
+/// Mints a complete set of categorical outcome positions.
+///
+/// Returns 1 unit of every outcome position in the series in exchange for the
+/// full collateral requirement (1.0 USD vUSD).
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn mint_complete_set(series_id: SeriesId, qty: i128) -> Result<bool, TradeError> {
     let caller: User = ic_cdk::caller().into();
@@ -463,6 +467,17 @@ pub async fn mint_complete_set(series_id: SeriesId, qty: i128) -> Result<bool, T
     mint_complete_set_logic(caller, series_id, series, qty)
 }
 
+/// Internal logic for minting a complete set.
+///
+/// In a categorical market with N outcomes, exactly one outcome will eventually pay out 1.0 unit
+/// of collateral, while all others pay out 0.0. Therefore, the "no-arbitrage" cost of owning
+/// one unit of every outcome is exactly 1.0 unit of collateral.
+///
+/// This function:
+/// 1. Deducts 1.0 unit of collateral (per set) from the user's cash balance.
+/// 2. Increases the user's reserved margin by the same amount (since the set is now
+///    full-collateralized).
+/// 3. Grants the user 'qty' of every outcome position.
 pub(crate) fn mint_complete_set_logic(
     caller: User,
     series_id: SeriesId,
@@ -516,7 +531,9 @@ pub(crate) fn mint_complete_set_logic(
     // 2. Grant Positions
     // We assign the full collateral value proportionately to the positions.
     // In our model, a Long Categorical requires 'price' as margin.
-    // Since sum(price) = 1, holding the full set requires sum(1/N) = 1.
+    // Since the sum of prices in a categorical market is 1, holding the full set
+    // requires a total margin of exactly 1.0 unit. We distribute this 1.0 unit
+    // across the N outcome positions (1/N each) to maintain consistent account equity.
     POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| {
         let mut positions = positions.borrow_mut();
         let share_of_margin = total_cost_usd.unsigned_abs() / outcomes.len() as u128;
@@ -539,6 +556,9 @@ pub(crate) fn mint_complete_set_logic(
     Ok(true)
 }
 
+/// Redeems a complete set of categorical outcome positions for collateral.
+///
+/// Returns 1.0 USD (vUSD) for every full set of N outcome positions provided.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn redeem_complete_set(series_id: SeriesId, qty: i128) -> Result<bool, TradeError> {
     let caller: User = ic_cdk::caller().into();
@@ -546,9 +566,14 @@ pub async fn redeem_complete_set(series_id: SeriesId, qty: i128) -> Result<bool,
     redeem_complete_set_logic(caller, series_id, series, qty)
 }
 
-/// Redeems a complete set of categorical outcome tokens for collateral.
+/// Internal logic for redeeming a complete set.
 ///
-/// Returns 1 unit of collateral for every full set of N outcomes provided.
+/// This is the inverse of [`mint_complete_set_logic`]. If a user holds 1 unit of every
+/// outcome in a categorical series, they are guaranteed to receive exactly 1.0 unit of
+/// collateral at settlement.
+///
+/// This function allows the user to "close" the risk-free set early and reclaim the
+/// collateral to their cash balance.
 pub(crate) fn redeem_complete_set_logic(
     caller: User,
     series_id: SeriesId,
