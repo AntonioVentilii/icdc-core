@@ -210,7 +210,7 @@ pub(crate) fn execute_trade_impl(
             .or_insert(Position {
                 user: seller,
                 series_id: series_id.clone(),
-                outcome_id: outcome_id,
+                outcome_id,
                 net_qty: 0,
                 reserved_margin_usd: 0,
             });

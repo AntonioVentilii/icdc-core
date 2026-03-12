@@ -598,12 +598,16 @@ pub(crate) fn redeem_complete_set_logic(
 #[cfg(test)]
 mod tests {
     use candid::Principal;
-    use shared::types::{Description, OutcomeId, PayoffType, PayoutUnit, Price, Series, SeriesId};
+    use shared::types::{Description, PayoffType, PayoutUnit, Price, Series, SeriesId};
 
     use super::*;
     use crate::{
         memory::{ACCOUNT_STATES, LIMIT_ORDERS},
-        types::{margin::AccountState, user::User, trade::{OrderId, TradeId}},
+        types::{
+            margin::AccountState,
+            trade::{OrderId, Side, TradeId},
+            user::User,
+        },
     };
 
     fn test_series(series_id: &SeriesId) -> Series {

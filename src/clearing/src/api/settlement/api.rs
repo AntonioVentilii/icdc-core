@@ -407,7 +407,8 @@ pub(crate) fn apply_settlement_accounting_logic(plan: &mut SettlementPlan) -> bo
             // Batched execution: yield to avoid instruction limits.
             // In synchronous logic (tests), we can ignore the limit,
             // but we'll stick to 100 to keep it consistent with the production behavior.
-            if plan.accounting_cursor % 100 == 0 && ic_cdk::api::instruction_counter() > 0 {
+            if plan.accounting_cursor.is_multiple_of(100) && ic_cdk::api::instruction_counter() > 0
+            {
                 break;
             }
         }
