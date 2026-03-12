@@ -11,30 +11,26 @@ pub(crate) use utils::scale_price;
 
 use crate::types::margin::Position;
 
-/// Calculates the actual payout at settlement based on the series type and position.
+/// Calculates the absolute payoff of the underlying per unit of quantity.
 ///
-/// Returns the amount (in the settlement asset's base units) that the position
-/// receives.
+/// Returns the value (in USD base units) for a LONG position of 1 unit.
 ///
 /// # Arguments
 /// * `series` - The derivative series details.
-/// * `position` - The specific position being settled.
+/// * `outcome_id` - The specific outcome (for categorical markets).
 /// * `settlement` - The settlement data (Price or OutcomeId).
-pub fn get_settlement_value(
+pub fn get_unit_payoff(
     series: &Series,
-    position: &Position,
+    outcome_id: &Option<OutcomeId>,
     settlement: &SettlementInput,
 ) -> u128 {
-    let qty = position.net_qty;
-    let abs_qty = qty.unsigned_abs();
-
     let asset_decimals = USD_DECIMALS as u32;
 
     match series.payoff_type {
         PayoffType::Binary | PayoffType::Call | PayoffType::Put => {
             let settlement_price = match settlement {
                 SettlementInput::Price(p) => p,
-                _ => return 0, // Invalid input for these types
+                _ => return 0,
             };
 
             let source_precision = settlement_price.decimals() as u32;
@@ -42,23 +38,12 @@ pub fn get_settlement_value(
 
             match series.payoff_type {
                 PayoffType::Binary => {
-                    let max_payoff = 10u128.pow(asset_decimals);
-
-                    // We use Floor for payouts to be conservative.
-                    let scaled_price = scale_price(
+                    scale_price(
                         price_value,
                         asset_decimals,
                         source_precision,
                         RoundingMode::Floor,
-                    );
-
-                    // If qty > 0 (Long), they get: settlement_price
-                    // If qty < 0 (Short), they get: (max_payoff - settlement_price)
-                    if qty >= 0 {
-                        abs_qty * scaled_price
-                    } else {
-                        abs_qty * max_payoff.saturating_sub(scaled_price)
-                    }
+                    )
                 }
 
                 PayoffType::Call => {
@@ -78,14 +63,12 @@ pub fn get_settlement_value(
 
                     let raw_payoff = settlement_price.value().saturating_sub(strike_price_value);
 
-                    let scaled_payoff = scale_price(
+                    scale_price(
                         raw_payoff,
                         asset_decimals,
                         source_precision,
                         RoundingMode::Floor,
-                    );
-
-                    abs_qty * scaled_payoff
+                    )
                 }
 
                 PayoffType::Put => {
@@ -105,14 +88,12 @@ pub fn get_settlement_value(
 
                     let raw_payoff = strike_price_value.saturating_sub(settlement_price.value());
 
-                    let scaled_payoff = scale_price(
+                    scale_price(
                         raw_payoff,
                         asset_decimals,
                         source_precision,
                         RoundingMode::Floor,
-                    );
-
-                    abs_qty * scaled_payoff
+                    )
                 }
 
                 PayoffType::Categorical => unreachable!(),
@@ -125,50 +106,63 @@ pub fn get_settlement_value(
                 _ => return 0,
             };
 
-            // Categorical Claim: pays 1 unit if matched, 0 otherwise.
             let unit_payoff = 10u128.pow(asset_decimals);
 
-            match &position.outcome_id {
-                Some(id) if id == resolved_id => {
-                    // Position matches the winner
-                    if qty > 0 {
-                        abs_qty * unit_payoff
-                    } else {
-                        0
-                    }
-                }
-                _ => {
-                    // Position lost or is short (shorts in categorical are handled differently if
-                    // they exist) But in this spec, we model them as digital
-                    // state claims.
-                    if qty < 0 {
-                        // Short seller of a losing outcome gets the collateral back (1 - 0 = 1
-                        // unit) However, we track positions per outcome, so
-                        // one is long the outcome. If one is short an
-                        // outcome, they pay out 1 if it wins.
-                        0
-                    } else {
-                        0
-                    }
-                }
+            match outcome_id {
+                Some(id) if id == resolved_id => unit_payoff,
+                _ => 0,
             }
+        }
+    }
+}
+
+/// Calculates the actual payout at settlement for a given position.
+///
+/// This function returns the total amount of collateral (in USD base units)
+/// to be credited to the user's account at the end of the series.
+///
+/// For Binary/Categorical products (Full Collateral model):
+/// - Long: Payout = Qty * UnitPayoff (where UnitPayoff is 0 or 1)
+/// - Short: Payout = Qty * (1.0 - UnitPayoff)
+/// Total System Payout (Long + Short) always equals 1 unit of collateral.
+pub fn get_settlement_value(
+    series: &Series,
+    position: &Position,
+    settlement: &SettlementInput,
+) -> u128 {
+    let qty = position.net_qty;
+    let abs_qty = qty.unsigned_abs();
+    let asset_decimals = USD_DECIMALS as u32;
+    let max_payoff = 10u128.pow(asset_decimals);
+
+    let unit_payoff = get_unit_payoff(series, &position.outcome_id, settlement);
+
+    match series.payoff_type {
+        PayoffType::Binary | PayoffType::Categorical => {
+            if qty >= 0 {
+                abs_qty * unit_payoff
+            } else {
+                // Short on losing outcome: receives their 1 unit collateral back (1 - 0 = 1).
+                // Short on winning outcome: pays out their 1 unit (1 - 1 = 0).
+                abs_qty * max_payoff.saturating_sub(unit_payoff)
+            }
+        }
+        _ => {
+            // Scalar products (Call/Put) usually only have positive unit payoffs for Longs
+            // and 0 for Shorts in this model.
+            abs_qty * unit_payoff
         }
     }
 }
 
 /// Calculates the required collateral (margin) to hold a position.
 ///
-/// This determines how much of the settlement asset must be locked in the user's
-/// margin account to maintain the position.
+/// This represents the maximum potential loss for a position given the trade price.
 ///
-/// NOTE: Margin requirements are rounded UP (Ceiling) when scaling from system
-/// precision to asset decimals to be conservative.
-///
-/// # Arguments
-/// * `series` - The derivative series details.
-/// * `price` - The current market price or entry price (for scalar products).
-/// * `qty` - The net quantity of the position.
-/// * `outcome_id` - The specific outcome ID (for categorical products).
+/// For Binary/Categorical products (Full Collateral model):
+/// - Long: Margin = Qty * Price
+/// - Short: Margin = Qty * (1.0 - Price)
+/// Total System Margin (Long + Short) always equals 1 unit per contract.
 pub fn get_required_margin(
     series: &Series,
     price: &Price,
@@ -176,7 +170,6 @@ pub fn get_required_margin(
     _outcome_id: &Option<OutcomeId>,
 ) -> u128 {
     let abs_qty = qty.unsigned_abs();
-
     let asset_decimals = USD_DECIMALS as u32;
 
     match series.payoff_type {
@@ -192,10 +185,8 @@ pub fn get_required_margin(
             let max_payoff = 10u128.pow(asset_decimals);
 
             if qty > 0 {
-                // Long Binary: Must pay the current price.
                 abs_qty * scaled_price
             } else if qty < 0 {
-                // Short Binary: Must collateralise the remaining payout.
                 abs_qty * (max_payoff.saturating_sub(scaled_price))
             } else {
                 0
@@ -211,6 +202,7 @@ pub fn get_required_margin(
                 source_precision,
                 RoundingMode::Ceil,
             );
+            // Long Call has 0 maintenance if paid upfront, but here we track entry price as requirement.
             abs_qty * scaled_price
         }
 
@@ -242,14 +234,7 @@ pub fn get_required_margin(
         }
 
         PayoffType::Categorical => {
-            // Categorical Claim: Fully collateralised.
-            // Long requires paying the price.
-            // Short requires 1 unit (the payoff) minus the price gathered from sale.
-            // But since trades are handled separately, we just need the margin required to hold.
-            // For a single claim (e.g. Yes on A), the max loss is 1 unit.
-            // In a fully collateralised system, long pays price, short pays (1-price).
             let unit_payoff = 10u128.pow(asset_decimals);
-
             let source_precision = price.decimals() as u32;
             let price_value = price.value();
             let scaled_price = scale_price(
@@ -470,13 +455,25 @@ mod tests {
             reserved_margin_usd: 0,
         };
 
-        let settle_a = SettlementInput::Outcome(outcome_a);
+        let settle_a = SettlementInput::Outcome(outcome_a.clone());
         let settle_b = SettlementInput::Outcome(outcome_b);
 
         // 10 units of A pays 10.0 USD if A wins
         assert_eq!(get_settlement_value(&series, &pos_a, &settle_a), 10_000_000);
         // 10 units of A pays 0 if B wins
         assert_eq!(get_settlement_value(&series, &pos_a, &settle_b), 0);
+        
+        let pos_short_a = Position {
+            user: Principal::anonymous().into(),
+            series_id: series.series_id.clone(),
+            outcome_id: Some(outcome_a),
+            net_qty: -10,
+            reserved_margin_usd: 0,
+        };
+        // Short A pays 0 if A wins
+        assert_eq!(get_settlement_value(&series, &pos_short_a, &settle_a), 0);
+        // Short A pays 10.0 if B wins (collateral return)
+        assert_eq!(get_settlement_value(&series, &pos_short_a, &settle_b), 10_000_000);
     }
 
     #[test]

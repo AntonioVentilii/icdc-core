@@ -493,13 +493,19 @@ pub(crate) fn mint_complete_set_logic(
                 required: acc.reserved_margin_usd + total_cost_usd.unsigned_abs(),
             });
         }
-
         acc.cash_balance_usd -= total_cost_usd;
+        acc.reserved_margin_usd += total_cost_usd.unsigned_abs();
         Ok(())
     })?;
 
+    // 2. Grant Positions
+    // We assign the full collateral value proportionately to the positions.
+    // In our model, a Long Categorical requires 'price' as margin.
+    // Since sum(price) = 1, holding the full set requires sum(1/N) = 1.
     POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| {
         let mut positions = positions.borrow_mut();
+        let share_of_margin = total_cost_usd.unsigned_abs() / outcomes.len() as u128;
+        
         for outcome_id in outcomes {
             let pos = positions
                 .entry((caller, series_id.clone(), Some(outcome_id.clone())))
@@ -511,8 +517,7 @@ pub(crate) fn mint_complete_set_logic(
                     reserved_margin_usd: 0,
                 });
             pos.net_qty += qty;
-            // Complete sets are fully collateralised by the cash prepayment,
-            // so they require no additional reserved margin.
+            pos.reserved_margin_usd += share_of_margin;
         }
     });
 
@@ -526,6 +531,9 @@ pub async fn redeem_complete_set(series_id: SeriesId, qty: i128) -> Result<bool,
     redeem_complete_set_logic(caller, series_id, series, qty)
 }
 
+/// Redeems a complete set of categorical outcome tokens for collateral.
+///
+/// Returns 1 unit of collateral for every full set of N outcomes provided.
 pub(crate) fn redeem_complete_set_logic(
     caller: User,
     series_id: SeriesId,
@@ -575,7 +583,21 @@ pub(crate) fn redeem_complete_set_logic(
             if let Some(pos) =
                 positions.get_mut(&(caller, series_id.clone(), Some(outcome_id.clone())))
             {
+                // Calculate the share of margin to release.
+                // Note: We use the stored reserved_margin_usd / net_qty to get the unit margin.
+                let unit_margin = pos.reserved_margin_usd / (pos.net_qty as u128);
+                let to_release = unit_margin * (qty as u128);
+                
                 pos.net_qty -= qty;
+                pos.reserved_margin_usd = pos.reserved_margin_usd.saturating_sub(to_release);
+                
+                // Also update account total
+                ACCOUNT_STATES.with(|accounts| {
+                    let mut accounts = accounts.borrow_mut();
+                    if let Some(acc) = accounts.get_mut(&caller) {
+                        acc.reserved_margin_usd = acc.reserved_margin_usd.saturating_sub(to_release);
+                    }
+                });
             }
         }
     });

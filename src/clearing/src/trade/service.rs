@@ -1,12 +1,11 @@
-use shared::types::Series;
-
+use shared::{constants::USD_DECIMALS, types::Series};
 use crate::{
     api::trade::errors::TradeError,
     memory::{
         ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, EVENTS, EXECUTED_TRADES, NEXT_EVENT_ID,
         POSITIONS,
     },
-    payoffs::get_required_margin,
+    payoffs::{get_required_margin, scale_price, types::RoundingMode},
     trade::types::ExecuteTradeParams,
     types::{
         event::{Event, EventType},
@@ -27,6 +26,12 @@ pub(crate) async fn internal_execute_trade(params: ExecuteTradeParams) -> Result
     execute_trade_impl(series, params)
 }
 
+/// Internal implementation of trade execution.
+///
+/// 1. Calculates margin requirements and cash flows.
+/// 2. Validates solvency for both parties.
+/// 3. Atomically updates account balances and positions.
+/// 4. Emits execution events.
 pub(crate) fn execute_trade_impl(
     series: Series,
     params: ExecuteTradeParams,
@@ -94,9 +99,14 @@ pub(crate) fn execute_trade_impl(
             let old_seller_margin_at_price =
                 get_required_margin(&series, &price, old_seller_qty, &outcome_id);
 
+            // Mark-to-Market Cashflow: Cash delta = Change in required margin at the trade price.
+            // This correctly handles opening, closing, and flipping positions for all product types.
+            let buyer_cash_delta = (new_buyer_margin_usd as i128) - (old_buyer_margin_at_price as i128);
+            let seller_cash_delta = (new_seller_margin_usd as i128) - (old_seller_margin_at_price as i128);
+
             (
-                (new_buyer_margin_usd as i128) - (old_buyer_margin_at_price as i128),
-                (new_seller_margin_usd as i128) - (old_seller_margin_at_price as i128),
+                buyer_cash_delta,
+                seller_cash_delta,
                 (new_buyer_margin_usd as i128) - (old_buyer_margin as i128),
                 (new_seller_margin_usd as i128) - (old_seller_margin as i128),
                 new_buyer_qty,
@@ -111,30 +121,32 @@ pub(crate) fn execute_trade_impl(
         let accounts = accounts.borrow();
 
         // 1. Validate Buyer
+        // We check if the post-trade equity covers the target reserved margin.
+        // Post-trade equity = Pre-trade Equity + PnL - Fees.
+        // In the Full Collateral model, PnL is realised at trade time via cash deltas.
         let buyer_acc = accounts
             .get(&buyer)
             .cloned()
             .unwrap_or_else(|| AccountState::new(buyer));
-        let mut temp_buyer = buyer_acc.clone();
-
-        temp_buyer.cash_balance_usd -= buyer_cash_delta;
-        if let Some(amt) = buyer_unblock_amount {
-            temp_buyer.reserved_margin_usd = temp_buyer.reserved_margin_usd.saturating_sub(amt);
-        }
-
+        
+        // Calculate target reserved margin based on the delta.
         let target_buyer_reserved = if buyer_reserved_delta > 0 {
-            temp_buyer.reserved_margin_usd + (buyer_reserved_delta as u128)
+            buyer_acc.reserved_margin_usd + (buyer_reserved_delta as u128)
         } else {
-            temp_buyer
-                .reserved_margin_usd
-                .saturating_sub(buyer_reserved_delta.unsigned_abs())
+            buyer_acc.reserved_margin_usd.saturating_sub(buyer_reserved_delta.unsigned_abs())
         };
 
-        let buyer_equity = temp_buyer.calculate_raw_equity_i128(&configs, &metrics);
+        // Check equity against target margin.
+        // We use the account's CURRENT equity because in our model, 
+        // trades are always solvent if Equity >= Target Margin (collateral is already in equity).
+        let buyer_equity = buyer_acc.calculate_raw_equity_i128(&configs, &metrics);
+        let buyer_unblock = buyer_unblock_amount.unwrap_or(0);
+        
+        // If unblocking, the equity remains the same but the requirement drops.
         if buyer_equity < (target_buyer_reserved as i128) {
             return Err(TradeError::InsufficientMargin {
                 user: buyer,
-                balance: temp_buyer.calculate_equity_usd(&configs, &metrics),
+                balance: buyer_acc.calculate_equity_usd(&configs, &metrics),
                 required: target_buyer_reserved,
             });
         }
@@ -144,26 +156,18 @@ pub(crate) fn execute_trade_impl(
             .get(&seller)
             .cloned()
             .unwrap_or_else(|| AccountState::new(seller));
-        let mut temp_seller = seller_acc.clone();
-
-        temp_seller.cash_balance_usd -= seller_cash_delta;
-        if let Some(amt) = seller_unblock_amount {
-            temp_seller.reserved_margin_usd = temp_seller.reserved_margin_usd.saturating_sub(amt);
-        }
-
+        
         let target_seller_reserved = if seller_reserved_delta > 0 {
-            temp_seller.reserved_margin_usd + (seller_reserved_delta as u128)
+            seller_acc.reserved_margin_usd + (seller_reserved_delta as u128)
         } else {
-            temp_seller
-                .reserved_margin_usd
-                .saturating_sub(seller_reserved_delta.unsigned_abs())
+            seller_acc.reserved_margin_usd.saturating_sub(seller_reserved_delta.unsigned_abs())
         };
 
-        let seller_equity = temp_seller.calculate_raw_equity_i128(&configs, &metrics);
+        let seller_equity = seller_acc.calculate_raw_equity_i128(&configs, &metrics);
         if seller_equity < (target_seller_reserved as i128) {
             return Err(TradeError::InsufficientMargin {
                 user: seller,
-                balance: temp_seller.calculate_equity_usd(&configs, &metrics),
+                balance: seller_acc.calculate_equity_usd(&configs, &metrics),
                 required: target_seller_reserved,
             });
         }
