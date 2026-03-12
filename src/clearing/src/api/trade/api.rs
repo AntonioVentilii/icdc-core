@@ -68,7 +68,8 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
         // Calculate required margin for this order in USD.
         // For Sell orders, we pass -qty to get_required_margin to calculate Short margin.
         let margin_qty = if side == Side::Sell { -qty } else { qty };
-        let required_margin_usd = get_required_margin(&series, &price, margin_qty, &outcome_id);
+        let required_margin_usd = get_required_margin(&series, &price, margin_qty, &outcome_id)
+            .map_err(|e| TradeError::Common(CommonError::Internal(format!("Payoff calculation failed: {:?}", e))))?;
 
         ACCOUNT_STATES.with(|accounts| {
             let mut accounts = accounts.borrow_mut();
@@ -336,7 +337,7 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
                 ))
             })?;
 
-        POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| {
+        POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| -> Result<(), TradeError> {
             let mut positions = positions.borrow_mut();
             let pos = positions
                 .entry((
@@ -357,7 +358,8 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
 
             // Recalculate margin for the updated position state
             pos.reserved_margin_usd =
-                get_required_margin(&series, &valuation_price, pos.net_qty, &proof.outcome_id);
+                get_required_margin(&series, &valuation_price, pos.net_qty, &proof.outcome_id)
+                    .map_err(|e| TradeError::Common(CommonError::Internal(format!("Payoff calculation failed: {:?}", e))))?;
             let margin_delta = (pos.reserved_margin_usd as i128) - (old_margin_usd as i128);
 
             // Update the user's aggregate margin reservation in their AccountState
@@ -375,7 +377,8 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
                         .saturating_sub(margin_delta.unsigned_abs());
                 }
             });
-        });
+            Ok(())
+        })?;
 
         ACCEPTED_TRANSFERS.with(
             |m: &std::cell::RefCell<std::collections::BTreeMap<TransferId, bool>>| {
@@ -806,7 +809,7 @@ mod tests {
         let buy_margin = crate::payoffs::get_required_margin(&binary_series, &price, qty, &None);
         let sell_margin = crate::payoffs::get_required_margin(&binary_series, &price, -qty, &None);
 
-        assert_eq!(buy_margin, 3_000_000);
-        assert_eq!(sell_margin, 7_000_000);
+        assert_eq!(buy_margin, Ok(3_000_000));
+        assert_eq!(sell_margin, Ok(7_000_000));
     }
 }

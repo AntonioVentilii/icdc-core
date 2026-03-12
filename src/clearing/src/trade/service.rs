@@ -1,4 +1,4 @@
-use shared::{constants::USD_DECIMALS, types::Series};
+use shared::types::Series;
 use crate::{
     api::trade::errors::TradeError,
     memory::{
@@ -8,6 +8,7 @@ use crate::{
     payoffs::{get_required_margin, scale_price, types::RoundingMode},
     trade::types::ExecuteTradeParams,
     types::{
+        errors::CommonError,
         event::{Event, EventType},
         margin::{AccountState, Position, PositionsMap},
     },
@@ -90,21 +91,28 @@ pub(crate) fn execute_trade_impl(
             let new_seller_qty = old_seller_qty - qty;
 
             let new_buyer_margin_usd =
-                get_required_margin(&series, &price, new_buyer_qty, &outcome_id);
+                get_required_margin(&series, &price, new_buyer_qty, &outcome_id)
+                    .map_err(|e| TradeError::Common(CommonError::Internal(format!("Payoff calculation failed: {:?}", e))))?;
             let new_seller_margin_usd =
-                get_required_margin(&series, &price, new_seller_qty, &outcome_id);
+                get_required_margin(&series, &price, new_seller_qty, &outcome_id)
+                    .map_err(|e| TradeError::Common(CommonError::Internal(format!("Payoff calculation failed: {:?}", e))))?;
 
             let old_buyer_margin_at_price =
-                get_required_margin(&series, &price, old_buyer_qty, &outcome_id);
+                get_required_margin(&series, &price, old_buyer_qty, &outcome_id)
+                    .map_err(|e| TradeError::Common(CommonError::Internal(format!("Payoff calculation failed: {:?}", e))))?;
             let old_seller_margin_at_price =
-                get_required_margin(&series, &price, old_seller_qty, &outcome_id);
+                get_required_margin(&series, &price, old_seller_qty, &outcome_id)
+                    .map_err(|e| TradeError::Common(CommonError::Internal(format!("Payoff calculation failed: {:?}", e))))?;
 
-            // Mark-to-Market Cashflow: Cash delta = Change in required margin at the trade price.
-            // This correctly handles opening, closing, and flipping positions for all product types.
+            // Mark-to-Market Cashflow Model:
+            // We calculate the cash delta as the difference in required margin 
+            // Evaluated at the CURRENT trade price.
+            // This ensures that any PnL from the previous price to 'price' 
+            // is realized immediately into the cash balance.
             let buyer_cash_delta = (new_buyer_margin_usd as i128) - (old_buyer_margin_at_price as i128);
             let seller_cash_delta = (new_seller_margin_usd as i128) - (old_seller_margin_at_price as i128);
 
-            (
+            Ok((
                 buyer_cash_delta,
                 seller_cash_delta,
                 (new_buyer_margin_usd as i128) - (old_buyer_margin as i128),
@@ -113,10 +121,13 @@ pub(crate) fn execute_trade_impl(
                 new_buyer_margin_usd,
                 new_seller_qty,
                 new_seller_margin_usd,
-            )
-        });
+            ))
+        })?;
 
-    // Validation and Calculation Phase
+    // Atomicity: Validation and Calculation Phase
+    // No state and no memory is mutated during this phase.
+    // If ANY check fails (InsufficientMargin, etc.), we return early with an Err,
+    // leaving the system state exactly as it was.
     let (target_buyer_reserved, target_seller_reserved) = ACCOUNT_STATES.with(|accounts| {
         let accounts = accounts.borrow();
 

@@ -267,7 +267,7 @@ pub(crate) fn prepare_settlement_impl(
 
     // Gather positions for settlement and compute payoffs/fees.
     let positions_to_settle = POSITIONS.with(
-        |positions: &std::cell::RefCell<crate::types::margin::PositionsMap>| {
+        |positions: &std::cell::RefCell<crate::types::margin::PositionsMap>| -> Result<Vec<SettlementPosition>, SettlementError> {
             let positions = positions.borrow();
 
             let mut results = Vec::new();
@@ -277,7 +277,8 @@ pub(crate) fn prepare_settlement_impl(
                     continue;
                 }
 
-                let payoff_u128 = get_settlement_value(ser, pos, settlement);
+                let payoff_u128 = get_settlement_value(ser, pos, settlement)
+                    .map_err(|e| SettlementError::Common(CommonError::Internal(format!("Payoff calculation failed: {:?}", e))))?;
 
                 let i_fee = calculate_settlement_fee(payoff_u128, insurance_fund_fee_ratio);
 
@@ -301,9 +302,9 @@ pub(crate) fn prepare_settlement_impl(
                     cashflow_usd: cashflow,
                 });
             }
-            results
+            Ok(results)
         },
-    );
+    )?;
 
     // Perform solvency check before any state modifications.
     // Uses the aggregate net payoff (post-fee) — fees stay in the system

@@ -10,6 +10,20 @@ pub(crate) use types::RoundingMode;
 pub(crate) use utils::scale_price;
 
 use crate::types::margin::Position;
+use candid::CandidType;
+use serde::{Deserialize, Serialize};
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub enum PayoffError {
+    /// Provided settlement input does not match the series payoff type (e.g., Price for Categorical).
+    InvalidSettlementType,
+    /// Required strike price is missing for the series type.
+    MissingStrike,
+    /// Outcome ID not provided for a categorical market.
+    MissingOutcomeId,
+    /// Internal math error (overflow/underflow).
+    MathError(String),
+}
 
 /// Calculates the absolute payoff of the underlying per unit of quantity.
 ///
@@ -23,14 +37,14 @@ pub fn get_unit_payoff(
     series: &Series,
     outcome_id: &Option<OutcomeId>,
     settlement: &SettlementInput,
-) -> u128 {
+) -> Result<u128, PayoffError> {
     let asset_decimals = USD_DECIMALS as u32;
 
     match series.payoff_type {
         PayoffType::Binary | PayoffType::Call | PayoffType::Put => {
             let settlement_price = match settlement {
                 SettlementInput::Price(p) => p,
-                _ => return 0,
+                _ => return Err(PayoffError::InvalidSettlementType),
             };
 
             let source_precision = settlement_price.decimals() as u32;
@@ -38,12 +52,14 @@ pub fn get_unit_payoff(
 
             match series.payoff_type {
                 PayoffType::Binary => {
-                    scale_price(
+                    // Binary Payoff: Pays 1 unit if resolved price > 0, else 0.
+                    // We use Floor for system safety (never payout more than 1 unit due to rounding).
+                    Ok(scale_price(
                         price_value,
                         asset_decimals,
                         source_precision,
                         RoundingMode::Floor,
-                    )
+                    ))
                 }
 
                 PayoffType::Call => {
@@ -59,16 +75,16 @@ pub fn get_unit_payoff(
                                 RoundingMode::Floor,
                             )
                         })
-                        .unwrap_or(0);
+                        .ok_or(PayoffError::MissingStrike)?;
 
                     let raw_payoff = settlement_price.value().saturating_sub(strike_price_value);
 
-                    scale_price(
+                    Ok(scale_price(
                         raw_payoff,
                         asset_decimals,
                         source_precision,
                         RoundingMode::Floor,
-                    )
+                    ))
                 }
 
                 PayoffType::Put => {
@@ -84,16 +100,16 @@ pub fn get_unit_payoff(
                                 RoundingMode::Floor,
                             )
                         })
-                        .unwrap_or(0);
+                        .ok_or(PayoffError::MissingStrike)?;
 
                     let raw_payoff = strike_price_value.saturating_sub(settlement_price.value());
 
-                    scale_price(
+                    Ok(scale_price(
                         raw_payoff,
                         asset_decimals,
                         source_precision,
                         RoundingMode::Floor,
-                    )
+                    ))
                 }
 
                 PayoffType::Categorical => unreachable!(),
@@ -103,14 +119,14 @@ pub fn get_unit_payoff(
         PayoffType::Categorical => {
             let resolved_id = match settlement {
                 SettlementInput::Outcome(id) => id,
-                _ => return 0,
+                _ => return Err(PayoffError::InvalidSettlementType),
             };
 
             let unit_payoff = 10u128.pow(asset_decimals);
 
             match outcome_id {
-                Some(id) if id == resolved_id => unit_payoff,
-                _ => 0,
+                Some(id) if id == resolved_id => Ok(unit_payoff),
+                _ => Ok(0),
             }
         }
     }
@@ -129,28 +145,31 @@ pub fn get_settlement_value(
     series: &Series,
     position: &Position,
     settlement: &SettlementInput,
-) -> u128 {
+) -> Result<u128, PayoffError> {
     let qty = position.net_qty;
     let abs_qty = qty.unsigned_abs();
     let asset_decimals = USD_DECIMALS as u32;
     let max_payoff = 10u128.pow(asset_decimals);
 
-    let unit_payoff = get_unit_payoff(series, &position.outcome_id, settlement);
+    let unit_payoff = get_unit_payoff(series, &position.outcome_id, settlement)?;
 
     match series.payoff_type {
         PayoffType::Binary | PayoffType::Categorical => {
+            // Full Collateral Payoff Relationship:
+            // Long + Short = 1.0 unit.
+            // This zero-sum relationship is the bedrock of system solvency.
             if qty >= 0 {
-                abs_qty * unit_payoff
+                Ok(abs_qty * unit_payoff)
             } else {
                 // Short on losing outcome: receives their 1 unit collateral back (1 - 0 = 1).
                 // Short on winning outcome: pays out their 1 unit (1 - 1 = 0).
-                abs_qty * max_payoff.saturating_sub(unit_payoff)
+                Ok(abs_qty * max_payoff.saturating_sub(unit_payoff))
             }
         }
         _ => {
             // Scalar products (Call/Put) usually only have positive unit payoffs for Longs
             // and 0 for Shorts in this model.
-            abs_qty * unit_payoff
+            Ok(abs_qty * unit_payoff)
         }
     }
 }
@@ -168,7 +187,7 @@ pub fn get_required_margin(
     price: &Price,
     qty: i128,
     _outcome_id: &Option<OutcomeId>,
-) -> u128 {
+) -> Result<u128, PayoffError> {
     let abs_qty = qty.unsigned_abs();
     let asset_decimals = USD_DECIMALS as u32;
 
@@ -176,6 +195,9 @@ pub fn get_required_margin(
         PayoffType::Binary => {
             let source_precision = price.decimals() as u32;
             let price_value = price.value();
+            // We use Ceil for margin to ensure the user always has SLIGHTLY MORE 
+            // than required, protecting the system against micro-insolvencies 
+            // from precision loss.
             let scaled_price = scale_price(
                 price_value,
                 asset_decimals,
@@ -185,11 +207,11 @@ pub fn get_required_margin(
             let max_payoff = 10u128.pow(asset_decimals);
 
             if qty > 0 {
-                abs_qty * scaled_price
+                Ok(abs_qty * scaled_price)
             } else if qty < 0 {
-                abs_qty * (max_payoff.saturating_sub(scaled_price))
+                Ok(abs_qty * (max_payoff.saturating_sub(scaled_price)))
             } else {
-                0
+                Ok(0)
             }
         }
 
@@ -203,7 +225,7 @@ pub fn get_required_margin(
                 RoundingMode::Ceil,
             );
             // Long Call has 0 maintenance if paid upfront, but here we track entry price as requirement.
-            abs_qty * scaled_price
+            Ok(abs_qty * scaled_price)
         }
 
         PayoffType::Put => {
@@ -224,12 +246,12 @@ pub fn get_required_margin(
                         strike.decimals() as u32,
                         RoundingMode::Ceil,
                     );
-                    abs_qty * scaled_strike
+                    Ok(abs_qty * scaled_strike)
                 } else {
-                    0
+                    Err(PayoffError::MissingStrike)
                 }
             } else {
-                abs_qty * scaled_price
+                Ok(abs_qty * scaled_price)
             }
         }
 
@@ -245,11 +267,11 @@ pub fn get_required_margin(
             );
 
             if qty > 0 {
-                abs_qty * scaled_price
+                Ok(abs_qty * scaled_price)
             } else if qty < 0 {
-                abs_qty * unit_payoff.saturating_sub(scaled_price)
+                Ok(abs_qty * unit_payoff.saturating_sub(scaled_price))
             } else {
-                0
+                Ok(0)
             }
         }
     }
@@ -308,11 +330,11 @@ mod tests {
 
         // Price 0.60 (60M). Max 1.0 (1M because USD_DECIMALS=6).
         assert_eq!(
-            get_settlement_value(&series, &pos_long, &settlement),
+            get_settlement_value(&series, &pos_long, &settlement).unwrap(),
             6_000_000
         );
         assert_eq!(
-            get_settlement_value(&series, &pos_short, &settlement),
+            get_settlement_value(&series, &pos_short, &settlement).unwrap(),
             4_000_000
         );
     }
@@ -338,7 +360,7 @@ mod tests {
         };
         // USD: (150 - 100) = 50.00 -> 50_000_000
         assert_eq!(
-            get_settlement_value(&series_usd, &pos, &settlement),
+            get_settlement_value(&series_usd, &pos, &settlement).unwrap(),
             50_000_000
         );
     }
@@ -364,7 +386,7 @@ mod tests {
         };
         // USD: (100 - 80) = 20.00 -> 20_000_000
         assert_eq!(
-            get_settlement_value(&series_usd, &pos, &settlement),
+            get_settlement_value(&series_usd, &pos, &settlement).unwrap(),
             20_000_000
         );
     }
@@ -374,9 +396,9 @@ mod tests {
         let price = Price::new(60_000_000, 8); // 0.60 (8 decimals)
         let series_usd = mock_series(PayoffType::Binary, None, 8, PayoutUnit::usd());
         // Long Binary (6 decimals): 0.60 -> 600,000
-        assert_eq!(get_required_margin(&series_usd, &price, 1, &None), 600_000);
+        assert_eq!(get_required_margin(&series_usd, &price, 1, &None).unwrap(), 600_000);
         // Short Binary (6 decimals): (1.0 - 0.6) = 0.40 -> 400,000
-        assert_eq!(get_required_margin(&series_usd, &price, -1, &None), 400_000);
+        assert_eq!(get_required_margin(&series_usd, &price, -1, &None).unwrap(), 400_000);
 
         // Call Margin
         let call_series = mock_series(
@@ -387,12 +409,12 @@ mod tests {
         );
         // Long Call: premium (0.60)
         assert_eq!(
-            get_required_margin(&call_series, &price, 10, &None),
+            get_required_margin(&call_series, &price, 10, &None).unwrap(),
             6_000_000
         );
         // Short Call: premium (0.60)
         assert_eq!(
-            get_required_margin(&call_series, &price, -10, &None),
+            get_required_margin(&call_series, &price, -10, &None).unwrap(),
             6_000_000
         );
 
@@ -401,12 +423,12 @@ mod tests {
         let put_series = mock_series(PayoffType::Put, Some(strike), 8, PayoutUnit::usd());
         // Long Put: premium (0.60)
         assert_eq!(
-            get_required_margin(&put_series, &price, 10, &None),
+            get_required_margin(&put_series, &price, 10, &None).unwrap(),
             6_000_000
         );
         // Short Put: strike price ($1.00)
         assert_eq!(
-            get_required_margin(&put_series, &price, -10, &None),
+            get_required_margin(&put_series, &price, -10, &None).unwrap(),
             10_000_000
         );
     }
@@ -422,7 +444,7 @@ mod tests {
 
         // Margin (Ceil): (35,555,555 + 99) / 100 = 355,556
         assert_eq!(
-            get_required_margin(&series_usd, &unaligned_price, 1, &None),
+            get_required_margin(&series_usd, &unaligned_price, 1, &None).unwrap(),
             355_556
         );
 
@@ -436,7 +458,7 @@ mod tests {
         };
         // Settlement (Floor): 35,555,555 / 100 = 355,555
         assert_eq!(
-            get_settlement_value(&series_usd, &pos, &settlement),
+            get_settlement_value(&series_usd, &pos, &settlement).unwrap(),
             355_555
         );
     }
@@ -459,9 +481,9 @@ mod tests {
         let settle_b = SettlementInput::Outcome(outcome_b);
 
         // 10 units of A pays 10.0 USD if A wins
-        assert_eq!(get_settlement_value(&series, &pos_a, &settle_a), 10_000_000);
+        assert_eq!(get_settlement_value(&series, &pos_a, &settle_a).unwrap(), 10_000_000);
         // 10 units of A pays 0 if B wins
-        assert_eq!(get_settlement_value(&series, &pos_a, &settle_b), 0);
+        assert_eq!(get_settlement_value(&series, &pos_a, &settle_b).unwrap(), 0);
         
         let pos_short_a = Position {
             user: Principal::anonymous().into(),
@@ -471,9 +493,9 @@ mod tests {
             reserved_margin_usd: 0,
         };
         // Short A pays 0 if A wins
-        assert_eq!(get_settlement_value(&series, &pos_short_a, &settle_a), 0);
+        assert_eq!(get_settlement_value(&series, &pos_short_a, &settle_a).unwrap(), 0);
         // Short A pays 10.0 if B wins (collateral return)
-        assert_eq!(get_settlement_value(&series, &pos_short_a, &settle_b), 10_000_000);
+        assert_eq!(get_settlement_value(&series, &pos_short_a, &settle_b).unwrap(), 10_000_000);
     }
 
     #[test]
@@ -484,13 +506,45 @@ mod tests {
 
         // Long requires paying the price: 10 * 0.40 = 4.0 USD
         assert_eq!(
-            get_required_margin(&series, &price, 10, &Some(outcome_a.clone())),
+            get_required_margin(&series, &price, 10, &Some(outcome_a.clone())).unwrap(),
             4_000_000
         );
         // Short requires 1 - price: 10 * (1.0 - 0.40) = 6.0 USD
         assert_eq!(
-            get_required_margin(&series, &price, -10, &Some(outcome_a)),
+            get_required_margin(&series, &price, -10, &Some(outcome_a)).unwrap(),
             6_000_000
         );
+    }
+
+    #[test]
+    fn test_missing_strike() {
+        let series = mock_series(PayoffType::Call, None, 8, PayoutUnit::usd());
+        let settlement = SettlementInput::Price(Price::new(100, 8));
+        let pos = Position {
+            user: Principal::anonymous().into(),
+            series_id: series.series_id.clone(),
+            outcome_id: None,
+            net_qty: 1,
+            reserved_margin_usd: 0,
+        };
+
+        let result = get_settlement_value(&series, &pos, &settlement);
+        assert_eq!(result.unwrap_err(), PayoffError::MissingStrike);
+    }
+
+    #[test]
+    fn test_invalid_settlement_type() {
+        let series = mock_series(PayoffType::Binary, None, 8, PayoutUnit::usd());
+        let settlement = SettlementInput::Outcome(OutcomeId::from("A".to_string()));
+        let pos = Position {
+            user: Principal::anonymous().into(),
+            series_id: series.series_id.clone(),
+            outcome_id: None,
+            net_qty: 1,
+            reserved_margin_usd: 0,
+        };
+
+        let result = get_settlement_value(&series, &pos, &settlement);
+        assert_eq!(result.unwrap_err(), PayoffError::InvalidSettlementType);
     }
 }
