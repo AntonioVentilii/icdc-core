@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 source "$(dirname "$0")/utils.sh" "$@"
+source "$(dirname "$0")/init.common.sh"
 
 # --- CONFIGURATION ---
 NUM_ORDERS_PER_SIDE=${NUM_ORDERS_PER_SIDE:-3}
@@ -10,21 +11,6 @@ MID_MAX=${MID_MAX:-90}
 SPREAD_MIN=${SPREAD_MIN:-2}
 SPREAD_MAX=${SPREAD_MAX:-8}
 WIGGLE_ROOM=${WIGGLE_ROOM:-1.3}
-
-# Canister IDs
-CLEARING_CANISTER=$(dfx canister id clearing --network "$NETWORK" 2>/dev/null)
-REGISTRY_CANISTER=$(dfx canister id registry --network "$NETWORK" 2>/dev/null)
-TEST_ICP_LEDGER="xafvr-biaaa-aaaai-aql5q-cai"
-FAUCET_CANISTER="nqoci-rqaaa-aaaap-qp53q-cai"
-
-if [[ -z "$CLEARING_CANISTER" ]]; then
-  echo "Error: Could not find clearing canister ID."
-  exit 1
-fi
-if [[ -z "$REGISTRY_CANISTER" ]]; then
-  echo "Error: Could not find registry canister ID."
-  exit 1
-fi
 
 MY_IDENTITY=$(dfx identity whoami)
 MY_PRINCIPAL=$(dfx identity get-principal)
@@ -210,7 +196,7 @@ DID=$(openssl rand -hex 8)
 
 # Deduct ledger fees: one for icrc2_approve and one for icrc2_transfer_from
 # Assume 10,000 e8s fee per call (standard for ICRC-1 ledgers)
-LEDGER_FEE=10000
+LEDGER_FEE=$DEFAULT_LEDGER_FEE
 APPROVE_AMOUNT=$((CUR_BAL_E8S - LEDGER_FEE))
 DEPOSIT_AMOUNT=$((CUR_BAL_E8S - 2 * LEDGER_FEE))
 
@@ -226,7 +212,7 @@ dfx canister call "$TEST_ICP_LEDGER" icrc2_approve "(record {
 echo "  Executing deposit_collateral on Clearing..."
 dfx canister call clearing deposit_collateral "(record { 
     amount = $DEPOSIT_AMOUNT : nat; 
-    asset_id = \"TESTICP\"; 
+    asset_id = \"$TESTICP_SYMBOL\"; 
     deposit_id = \"$DID\"; 
     domain = opt variant { Settlement };
 })" --network "$NETWORK"
@@ -260,19 +246,20 @@ for SID in $CAT_SERIES_IDS; do
     TOTAL_WEIGHT=$((TOTAL_WEIGHT + W))
   done
 
-  # Normalize so they sum to 1,000,000 (1.0 USD)
+  # Normalize so they sum to 1.0 USD
   MID_VALS=()
   CURRENT_SUM=0
+  DECIMAL_FACTOR=$((10 ** USD_DECIMALS))
   for ((i = 0; i < NUM_OUTCOMES; i++)); do
-    M=$((WEIGHTS[i] * 1000000 / TOTAL_WEIGHT))
+    M=$((WEIGHTS[i] * DECIMAL_FACTOR / TOTAL_WEIGHT))
     # Ensure at least 0.05 per outcome
-    [[ "$M" -lt 50000 ]] && M=50000
+    [[ "$M" -lt $((5 * DECIMAL_FACTOR / 100)) ]] && M=$((5 * DECIMAL_FACTOR / 100))
     MID_VALS+=("$M")
     CURRENT_SUM=$((CURRENT_SUM + M))
   done
 
   # Adjust the last one to perfectly sum to 1.0
-  ADJUSTMENT=$((1000000 - CURRENT_SUM))
+  ADJUSTMENT=$((DECIMAL_FACTOR - CURRENT_SUM))
   MID_VALS[NUM_OUTCOMES - 1]=$((MID_VALS[NUM_OUTCOMES - 1] + ADJUSTMENT))
 
   # Pick a common spread range for all outcomes in this series

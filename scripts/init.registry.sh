@@ -1,18 +1,6 @@
 #!/usr/bin/env bash
 
-source "$(dirname "$0")/utils.sh" "$@"
-
-# Canister ID
-REGISTRY_CANISTER=$(dfx canister id registry --network "$NETWORK" 2>/dev/null)
-
-if [[ -z "$REGISTRY_CANISTER" ]]; then
-  if [[ "$NETWORK" == "staging" ]]; then
-    REGISTRY_CANISTER="g5pxl-pyaaa-aaaaj-qqhoq-cai"
-  else
-    echo "Error: Could not find registry canister ID for network $NETWORK. Is it deployed?"
-    exit 1
-  fi
-fi
+source "$(dirname "$0")/init.common.sh"
 
 PRINCIPAL=$(dfx identity get-principal)
 

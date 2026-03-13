@@ -4,13 +4,15 @@ set -euo pipefail
 # Sourcing centralized utilities
 source ./scripts/test.integration.helper.sh
 
+source ./scripts/init.common.sh
+
 # --- CONFIGURATION ---
 DEPOSIT_AMOUNT=2000000000 # 20 ICP
 TIMESTAMP=$(date +%s)
 
 # Canister IDs
-CLEARING=$(dfx canister id clearing 2>/dev/null) || error "Clearing canister not found. Did you deploy?"
-REGISTRY=$(dfx canister id registry 2>/dev/null) || error "Registry canister not found. Did you deploy?"
+CLEARING=$CLEARING_CANISTER
+REGISTRY=$REGISTRY_CANISTER
 ICP_LEDGER=$(dfx canister id icp_ledger 2>/dev/null) || error "ICP Ledger canister not found. Did you deploy?"
 
 log "Starting Production-Ready Integration Suite..."
@@ -36,11 +38,11 @@ dfx canister call clearing update_config "(record {
 })" || error "Failed to update clearing config"
 
 # --- 2. ASSET SETUP ---
-log "Configuring ICP, vUSD, TEST_ICP & TICRC1 collateral assets..."
-dfx canister call clearing update_collateral_asset "(record { config = record { asset_id = \"ICP\"; asset = variant { Icrc = principal \"$ICP_LEDGER\" }; symbol = \"ICP\"; decimals = 8; price_usd = record { value = 10000000; decimals = 6 }; haircut_bps = 0; is_enabled = true; } })" >/dev/null
-dfx canister call clearing update_collateral_asset "(record { config = record { asset_id = \"vUSD\"; asset = variant { Icrc = principal \"aaaaa-aa\" }; symbol = \"vUSD\"; decimals = 6; price_usd = record { value = 1000000; decimals = 6 }; haircut_bps = 0; is_enabled = true; } })" >/dev/null
-dfx canister call clearing update_collateral_asset "(record { config = record { asset_id = \"TESTICP\"; asset = variant { Icrc = principal \"xafvr-biaaa-aaaai-aql5q-cai\" }; symbol = \"TESTICP\"; decimals = 8; price_usd = record { value = 10000000; decimals = 6 }; haircut_bps = 0; is_enabled = true; } })" >/dev/null
-dfx canister call clearing update_collateral_asset "(record { config = record { asset_id = \"TICRC1\"; asset = variant { Icrc = principal \"3jkp5-oyaaa-aaaaj-azwqa-cai\" }; symbol = \"TICRC1\"; decimals = 8; price_usd = record { value = 1000000; decimals = 6 }; haircut_bps = 0; is_enabled = true; } })" >/dev/null
+log "Configuring ICP, vUSD, $TESTICP_SYMBOL & $TICRC1_SYMBOL collateral assets..."
+dfx canister call clearing update_collateral_asset "(record { config = record { asset_id = \"ICP\"; asset = variant { Icrc = principal \"$ICP_LEDGER\" }; symbol = \"ICP\"; decimals = 8; price_usd = record { value = 10000000; decimals = $USD_DECIMALS }; haircut_bps = 0; is_enabled = true; } })" >/dev/null
+dfx canister call clearing update_collateral_asset "(record { config = record { asset_id = \"vUSD\"; asset = variant { Icrc = principal \"aaaaa-aa\" }; symbol = \"vUSD\"; decimals = $USD_DECIMALS; price_usd = record { value = $((10 ** USD_DECIMALS)); decimals = $USD_DECIMALS }; haircut_bps = 0; is_enabled = true; } })" >/dev/null
+dfx canister call clearing update_collateral_asset "(record { config = record { asset_id = \"$TESTICP_SYMBOL\"; asset = variant { Icrc = principal \"$TEST_ICP_LEDGER\" }; symbol = \"$TESTICP_SYMBOL\"; decimals = $TEST_ICP_DECIMALS; price_usd = record { value = $TEST_ICP_PRICE_E6; decimals = $USD_DECIMALS }; haircut_bps = $TEST_ICP_HAIRCUT_BPS; is_enabled = true; } })" >/dev/null
+dfx canister call clearing update_collateral_asset "(record { config = record { asset_id = \"$TICRC1_SYMBOL\"; asset = variant { Icrc = principal \"$TICRC1_LEDGER\" }; symbol = \"$TICRC1_SYMBOL\"; decimals = $TICRC1_DECIMALS; price_usd = record { value = $TICRC1_PRICE_E6; decimals = $USD_DECIMALS }; haircut_bps = $TICRC1_HAIRCUT_BPS; is_enabled = true; } })" >/dev/null
 
 # --- 3. IDENTITY SEEDING ---
 log "Seeding identities with test tokens..."
