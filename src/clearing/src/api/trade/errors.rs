@@ -26,4 +26,11 @@ pub enum TradeError {
     OrderNotFound(OrderId),
     /// The caller is not the creator of the order.
     NotOrderCreator,
+    /// The trade would violate the no-arbitrage principle (e.g., sum of outcome prices > 1.0).
+    ArbitrageLimitExceeded {
+        /// The current sum of best bids across all outcomes.
+        sum_usd: u128,
+        /// The hard limit (usually 1.0 USD).
+        limit_usd: u128,
+    },
 }

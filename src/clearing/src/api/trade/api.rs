@@ -18,7 +18,7 @@ use crate::{
         ACCEPTED_TRANSFERS, ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, EVENTS,
         FROZEN_TRANSFERS, LIMIT_ORDERS, POSITIONS,
     },
-    payoffs::get_required_margin,
+    payoffs::{get_required_margin, scale_price, RoundingMode},
     trade::{
         service::{execute_trade_impl, internal_execute_trade},
         types::ExecuteTradeParams,
@@ -42,6 +42,20 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
     let result: Result<bool, TradeError> = (async {
         let caller: User = ic_cdk::caller().into();
 
+        if params.qty <= 0 {
+            return Err(TradeError::Common(CommonError::InvalidInput(
+                "Quantity must be positive".to_string(),
+            )));
+        }
+
+        if LIMIT_ORDERS.with(|m| m.borrow().contains_key(&params.order_id)) {
+            return Ok(true);
+        }
+
+        let series = ensure_series_registered(&params.series_id).await?;
+
+        validate_no_arbitrage(&series, &params)?;
+
         let SubmitLimitOrderParams {
             order_id,
             series_id,
@@ -51,17 +65,6 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
             price,
         } = params;
 
-        if qty <= 0 {
-            return Err(TradeError::Common(CommonError::InvalidInput(
-                "Quantity must be positive".to_string(),
-            )));
-        }
-
-        if LIMIT_ORDERS.with(|m| m.borrow().contains_key(&order_id)) {
-            return Ok(true);
-        }
-
-        let series = ensure_series_registered(&series_id).await?;
         let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
         let metrics = ASSET_METRICS.with(|m| m.borrow().clone());
 
@@ -435,6 +438,84 @@ pub fn get_orders() -> Vec<LimitOrder> {
                 .collect()
         },
     )
+}
+
+pub(crate) fn validate_no_arbitrage(
+    series: &Series,
+    new_order: &SubmitLimitOrderParams,
+) -> Result<(), TradeError> {
+    if new_order.side != Side::Buy {
+        return Ok(());
+    }
+
+    let asset_decimals = USD_DECIMALS as u32;
+    let limit_usd = 10u128.pow(asset_decimals);
+
+    let price_usd = scale_price(
+        new_order.price.value(),
+        asset_decimals,
+        new_order.price.decimals() as u32,
+        RoundingMode::Ceil,
+    );
+
+    match series.payoff_type {
+        PayoffType::Binary => {
+            if price_usd > limit_usd {
+                return Err(TradeError::ArbitrageLimitExceeded {
+                    sum_usd: price_usd,
+                    limit_usd,
+                });
+            }
+        }
+        PayoffType::Categorical => {
+            let outcomes = series.outcomes.as_ref().ok_or_else(|| {
+                TradeError::Common(CommonError::Internal(
+                    "Categorical series has no outcomes".to_string(),
+                ))
+            })?;
+
+            let mut best_bids = std::collections::HashMap::new();
+            for outcome in outcomes {
+                best_bids.insert(outcome.id.clone(), 0u128);
+            }
+
+            LIMIT_ORDERS.with(|m| {
+                let m = m.borrow();
+                for order in m.values() {
+                    if order.series_id == series.series_id && order.side == Side::Buy {
+                        if let Some(ref outcome_id) = order.outcome_id {
+                            let p_usd = scale_price(
+                                order.price.value(),
+                                asset_decimals,
+                                order.price.decimals() as u32,
+                                RoundingMode::Ceil,
+                            );
+                            if let Some(val) = best_bids.get_mut(outcome_id) {
+                                if p_usd > *val {
+                                    *val = p_usd;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            if let Some(ref outcome_id) = new_order.outcome_id {
+                if let Some(val) = best_bids.get_mut(outcome_id) {
+                    if price_usd > *val {
+                        *val = price_usd;
+                    }
+                }
+            }
+
+            let sum_usd: u128 = best_bids.values().sum();
+            if sum_usd > limit_usd {
+                return Err(TradeError::ArbitrageLimitExceeded { sum_usd, limit_usd });
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// Retrieves the trade history (executed trades) for the caller.

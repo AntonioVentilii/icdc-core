@@ -4,7 +4,7 @@ source "$(dirname "$0")/utils.sh" "$@"
 
 # --- CONFIGURATION ---
 NUM_ORDERS_PER_SIDE=${NUM_ORDERS_PER_SIDE:-3}
-ORDER_VALUE_USD=${ORDER_VALUE_USD:-10}
+ORDER_VALUE_USD=${ORDER_VALUE_USD:-1}
 MID_MIN=${MID_MIN:-10}
 MID_MAX=${MID_MAX:-90}
 SPREAD_MIN=${SPREAD_MIN:-2}
@@ -13,6 +13,7 @@ WIGGLE_ROOM=${WIGGLE_ROOM:-1.3}
 
 # Canister IDs
 CLEARING_CANISTER=$(dfx canister id clearing --network "$NETWORK" 2>/dev/null)
+REGISTRY_CANISTER=$(dfx canister id registry --network "$NETWORK" 2>/dev/null)
 TEST_ICP_LEDGER="xafvr-biaaa-aaaai-aql5q-cai"
 FAUCET_CANISTER="nqoci-rqaaa-aaaap-qp53q-cai"
 
@@ -20,16 +21,24 @@ if [[ -z "$CLEARING_CANISTER" ]]; then
   echo "Error: Could not find clearing canister ID."
   exit 1
 fi
+if [[ -z "$REGISTRY_CANISTER" ]]; then
+  echo "Error: Could not find registry canister ID."
+  exit 1
+fi
 
+MY_IDENTITY=$(dfx identity whoami)
 MY_PRINCIPAL=$(dfx identity get-principal)
 MY_ACCOUNT_ID=$(dfx ledger account-id --of-principal "$MY_PRINCIPAL" 2>/dev/null || echo "")
+echo "My Identity: $MY_IDENTITY"
 echo "My Principal: $MY_PRINCIPAL"
 echo "My Account ID: $MY_ACCOUNT_ID"
 
-## --- 1. FETCH ACTIVE MARKETS ---
-echo "Fetching active markets..."
-ALL_SERIES=$(dfx canister call clearing list_series --network "$NETWORK") || {
-  echo "Failed to fetch series"
+## --- 1. FETCH ACTIVE MARKETS FROM REGISTRY ---
+echo "Fetching active markets from Registry..."
+NOW_NS=$(date +%s%N)
+# Fetch first 100 series (assuming for demo purposes this is enough, otherwise a loop would be needed)
+ALL_SERIES=$(dfx canister call registry list_series "(record { limit = opt 100 : opt nat64; cursor = null })" --network "$NETWORK") || {
+  echo "Failed to fetch series from Registry"
   exit 1
 }
 
@@ -62,38 +71,102 @@ place_outcome_orders() {
     if [[ "$OID" != "null" ]]; then OARG="opt \"$OID\""; fi
 
     echo "      Level $i: Buy @ $BID_VAL, Sell @ $ASK_VAL"
-    dfx canister call clearing submit_limit_order "(record { qty = $QTY : int; outcome_id = $OARG; series_id = \"$SID\"; side = variant { Buy }; order_id = \"$OBID\"; price = record { decimal = record { value = $BID_VAL : nat; decimals = 6 : nat8 }; oracle_id = null; timestamp = null }; })" --network "$NETWORK" >/dev/null
-    dfx canister call clearing submit_limit_order "(record { qty = $QTY : int; outcome_id = $OARG; series_id = \"$SID\"; side = variant { Sell }; order_id = \"$OASK\"; price = record { decimal = record { value = $ASK_VAL : nat; decimals = 6 : nat8 }; oracle_id = null; timestamp = null }; })" --network "$NETWORK" >/dev/null
+    dfx canister call clearing submit_limit_order "(record { qty = $QTY : int; outcome_id = $OARG; series_id = \"$SID\"; side = variant { Buy }; order_id = \"$OBID\"; price = record { decimal = record { value = $BID_VAL : nat; decimals = 6 : nat8 }; oracle_id = null; timestamp = null }; })" --network "$NETWORK"
+    dfx canister call clearing submit_limit_order "(record { qty = $QTY : int; outcome_id = $OARG; series_id = \"$SID\"; side = variant { Sell }; order_id = \"$OASK\"; price = record { decimal = record { value = $ASK_VAL : nat; decimals = 6 : nat8 }; oracle_id = null; timestamp = null }; })" --network "$NETWORK"
   done
 }
 
-# --- PARSE MARKETS ---
-BINARY_MARKETS=$(echo "$ALL_SERIES" | grep -B 2 'payoff_type = variant { Binary }' | grep 'series_id ="' | sed 's/.*series_id ="\([^"]*\)".*/\1/' || true)
+# --- PARSE AND FILTER ACTIVE MARKETS FROM REGISTRY ---
+# Use "record {" as the separator to ensure title and series_id stay together
+# Use parameter expansion to insert record boundaries for parsing
+PARSABLE_DATA="${ALL_SERIES//record \{/$'\n---RECORD---\n'}"
 
-# Group Categorical Outcomes by Series
+TMP_TITLES=$(mktemp)
+TMP_SCALAR=$(mktemp)
 TMP_CAT_INFO=$(mktemp)
-echo "$ALL_SERIES" | awk '
-/series_id = "/ { series_id = $3; gsub("\"", "", series_id); gsub(";", "", series_id) }
-/payoff_type = variant { Categorical }/ { is_cat = 1 }
-/id = "/ { if (is_cat) { oid = $3; gsub("\"", "", oid); gsub(";", "", oid); print series_id, oid } }
-/};/ { if ($1 == "};") { is_cat = 0 } }
-' >"$TMP_CAT_INFO"
 
-NUM_BINARY=0
-[[ -n "$BINARY_MARKETS" ]] && NUM_BINARY=$(echo "$BINARY_MARKETS" | wc -l | xargs)
-NUM_CATEGORICAL_OUTCOMES=$(wc -l <"$TMP_CAT_INFO" | xargs)
-TOTAL_UNITS=$((NUM_BINARY + NUM_CATEGORICAL_OUTCOMES))
+echo "$PARSABLE_DATA" | awk -v now="$NOW_NS" '
+BEGIN { RS="---RECORD---"; FS="\n"; sid=""; current_payoff=""; }
+{
+    # Update sid ONLY if found in this record
+    if (match($0, /series_id = "[^"]+"/)) {
+        temp = substr($0, RSTART, RLENGTH);
+        sub(/series_id = "/, "", temp);
+        sub(/"/, "", temp);
+        sid = temp;
+        # Reset payoff when we find a new series_id
+        current_payoff = "";
+    }
+
+    # title extraction: find title = "..."
+    if (match($0, /title = "[^"]+"/)) {
+        temp = substr($0, RSTART, RLENGTH);
+        sub(/title = "/, "", temp);
+        sub(/"/, "", temp);
+        title = temp;
+    } else title = "";
+
+    # expiry extraction: find expiry_ns = ...
+    if (match($0, /expiry_ns = [0-9_]+/)) {
+        temp = substr($0, RSTART, RLENGTH);
+        sub(/expiry_ns = /, "", temp);
+        gsub("_", "", temp);
+        expiry = temp;
+    } else expiry = 0;
+
+    # payoff_type extraction: find variant { X }
+    if (match($0, /payoff_type = variant \{ [^}]+ \}/)) {
+        temp = substr($0, RSTART, RLENGTH);
+        sub(/payoff_type = variant \{ /, "", temp);
+        sub(/ \}/, "", temp);
+        gsub(/^[ \t]+|[ \t]+$/, "", temp); # Trim
+        current_payoff = temp;
+    }
+
+    if (sid != "" && (expiry > now || expiry == 0)) {
+        if (title != "") print sid "|" title > "'"$TMP_TITLES"'"
+        
+        if (current_payoff ~ /^(Binary|Call|Put)$/) {
+            print sid > "'"$TMP_SCALAR"'"
+        } else if (current_payoff == "Categorical") {
+            # id extraction (for outcomes) - look for " id =" (with space) to distinguish from series_id
+            outcomes_part = $0;
+            while (match(outcomes_part, / id = "[^"]+"/)) {
+                temp = substr(outcomes_part, RSTART, RLENGTH);
+                sub(/ id = "/, "", temp);
+                sub(/"/, "", temp);
+                oid = temp;
+                print sid, oid > "'"$TMP_CAT_INFO"'"
+                outcomes_part = substr(outcomes_part, RSTART + RLENGTH);
+            }
+        }
+    }
+}
+'
+
+get_title() {
+  local SID=$1
+  grep "^$SID|" "$TMP_TITLES" | head -n1 | cut -d'|' -f2- || echo "Unknown Market"
+}
+
+# --- 1.2. COUNT AND VALIDATE ---
+NUM_SCALAR=$(wc -l <"$TMP_SCALAR" | tr -d '[:space:]')
+NUM_CATEGORICAL_OUTCOMES=$(wc -l <"$TMP_CAT_INFO" | tr -d '[:space:]')
+TOTAL_UNITS=$((NUM_SCALAR + NUM_CATEGORICAL_OUTCOMES))
 
 if [[ "$TOTAL_UNITS" -eq 0 ]]; then
-  echo "No active markets found."
-  rm "$TMP_CAT_INFO"
+  echo "No active markets found in Registry."
+  rm "$TMP_CAT_INFO" "$TMP_TITLES" "$TMP_SCALAR"
   exit 0
 fi
 
-echo "Found $NUM_BINARY binary markets and $NUM_CATEGORICAL_OUTCOMES categorical outcomes."
+echo "Found $NUM_SCALAR scalar markets and $NUM_CATEGORICAL_OUTCOMES categorical outcomes."
+
+SCALAR_MARKETS=$(sort -u "$TMP_SCALAR" 2>/dev/null || true)
 
 # --- 2. THRESHOLD ---
-REQ_ICP=$(echo "$TOTAL_UNITS * $NUM_ORDERS_PER_SIDE * 2 * 1 * $WIGGLE_ROOM" | bc)
+# Formula: NUM_MARKETS * ORDERS_PER_SIDE * 2_SIDES * UNITS_PER_ORDER * WIGGLE_ROOM
+REQ_ICP=$(echo "$TOTAL_UNITS * $NUM_ORDERS_PER_SIDE * 2 * $ORDER_VALUE_USD * $WIGGLE_ROOM" | bc)
 REQ_E8S=$(echo "$REQ_ICP * 100000000 / 1" | bc | cut -d'.' -f1)
 echo "Required TEST_ICP: $REQ_ICP ($REQ_E8S e8s)"
 
@@ -116,7 +189,7 @@ while [[ "$CUR_BAL_E8S" -lt "$REQ_E8S" ]]; do
     echo "Error: Could not determine Account ID for $MY_PRINCIPAL. Falling back to principal..."
     dfx canister call "$FAUCET_CANISTER" transfer_icrc1 "(principal \"$MY_PRINCIPAL\")" --network "$NETWORK"
   fi
-  dfx identity use "$MY_PRINCIPAL"
+  dfx identity use "$MY_IDENTITY"
 
   echo "Waiting 5 seconds for balance to update..."
   sleep 5
@@ -131,12 +204,40 @@ done
 
 echo "Balance sufficient ($CUR_BAL_E8S e8s)."
 
-# --- 4. PLACE ORDERS ---
+# --- 4. DEPOSIT COLLATERAL TO CLEARING ---
+echo "Depositing collateral to Clearing..."
+DID=$(openssl rand -hex 8)
 
-# 4.1. Binary Markets
-for SID in $BINARY_MARKETS; do
-  echo "Processing Binary Market: $SID"
-  # Binary is simpler - just Pick a random mid and spread
+# Deduct ledger fees: one for icrc2_approve and one for icrc2_transfer_from
+# Assume 10,000 e8s fee per call (standard for ICRC-1 ledgers)
+LEDGER_FEE=10000
+APPROVE_AMOUNT=$((CUR_BAL_E8S - LEDGER_FEE))
+DEPOSIT_AMOUNT=$((CUR_BAL_E8S - 2 * LEDGER_FEE))
+
+[[ "$APPROVE_AMOUNT" -lt 0 ]] && APPROVE_AMOUNT=0
+[[ "$DEPOSIT_AMOUNT" -lt 0 ]] && DEPOSIT_AMOUNT=0
+
+echo "  Approving Clearing to spend $APPROVE_AMOUNT e8s of TESTICP..."
+dfx canister call "$TEST_ICP_LEDGER" icrc2_approve "(record { 
+    amount = $APPROVE_AMOUNT : nat; 
+    spender = record { owner = principal \"$CLEARING_CANISTER\" };
+})" --network "$NETWORK"
+
+echo "  Executing deposit_collateral on Clearing..."
+dfx canister call clearing deposit_collateral "(record { 
+    amount = $DEPOSIT_AMOUNT : nat; 
+    asset_id = \"TESTICP\"; 
+    deposit_id = \"$DID\"; 
+    domain = opt variant { Settlement };
+})" --network "$NETWORK"
+
+# --- 5. PLACE ORDERS ---
+
+# 4.1. Scalar Markets (Binary, Call, Put)
+for SID in $SCALAR_MARKETS; do
+  TITLE=$(get_title "$SID")
+  echo "Processing Scalar Market: $TITLE ($SID)"
+  # Pick a random mid and spread
   MID_VAL=$(((RANDOM % (MID_MAX - MID_MIN + 1) + MID_MIN) * 10000))
   SPREAD_VAL=$(((RANDOM % (SPREAD_MAX - SPREAD_MIN + 1) + SPREAD_MIN) * 10000))
   place_outcome_orders "$SID" "null" "$MID_VAL" "$SPREAD_VAL"
@@ -145,7 +246,8 @@ done
 # 4.2. Categorical Markets
 CAT_SERIES_IDS=$(awk '{print $1}' <"$TMP_CAT_INFO" | sort -u)
 for SID in $CAT_SERIES_IDS; do
-  echo "Processing Categorical Market: $SID"
+  TITLE=$(get_title "$SID")
+  echo "Processing Categorical Market: $TITLE ($SID)"
   OUTCOMES=$(grep "^$SID " <"$TMP_CAT_INFO" | awk '{print $2}')
   NUM_OUTCOMES=$(echo "$OUTCOMES" | wc -l | xargs)
 
@@ -184,4 +286,6 @@ for SID in $CAT_SERIES_IDS; do
 done
 
 rm "$TMP_CAT_INFO"
+rm "$TMP_TITLES"
+rm "$TMP_SCALAR"
 echo "Finished."
