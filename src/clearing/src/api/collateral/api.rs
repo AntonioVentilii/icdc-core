@@ -43,6 +43,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
             amount,
             asset_id,
             deposit_id,
+            domain,
         } = params;
 
         // Verify the asset is supported and enabled
@@ -125,9 +126,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
                     .entry(user)
                     .or_insert_with(|| AccountState::new(user));
 
-                // For now, defaults to Settlement domain for collateral deposits.
-                // In the future, this can be passed in params.
-                let domain = BalanceDomain::Settlement;
+                let domain = domain.unwrap_or(BalanceDomain::Settlement);
 
                 if asset_id == VUSD_ASSET_ID {
                     let amount_usd = if config.decimals > USD_DECIMALS {
@@ -169,6 +168,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             amount,
             asset_id,
             withdrawal_id,
+            domain,
         } = params;
 
         let config = COLLATERAL_ASSETS.with(|assets| {
@@ -249,8 +249,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                     let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
                     let metrics = ASSET_METRICS.with(|m| m.borrow().clone());
 
-                    // Default to Settlement domain for collateral withdrawals
-                    let domain = BalanceDomain::Settlement;
+                    let domain = domain.unwrap_or(BalanceDomain::Settlement);
 
                     let pre_equity = state.calculate_equity_usd(domain, &configs, &metrics);
 
@@ -295,7 +294,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             ACCOUNT_STATES.with(|accounts| {
                 let mut accounts = accounts.borrow_mut();
                 if let Some(state) = accounts.get_mut(&user) {
-                    let domain = BalanceDomain::Settlement;
+                    let domain = domain.unwrap_or(BalanceDomain::Settlement);
                     if asset_id == VUSD_ASSET_ID {
                         let amount_usd = if config.decimals > USD_DECIMALS {
                             (amount_u128 / 10u128.pow((config.decimals - USD_DECIMALS) as u32))
@@ -355,7 +354,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                         ACCOUNT_STATES.with(|accounts| {
                             let mut accounts = accounts.borrow_mut();
                             if let Some(state) = accounts.get_mut(&user) {
-                                let domain = BalanceDomain::Settlement;
+                                let domain = domain.unwrap_or(BalanceDomain::Settlement);
                                 match (reserved_cash, reserved_tokens) {
                                     (Some(usd), None) => {
                                         let current = state.get_cash_balance_usd(domain);
@@ -424,7 +423,8 @@ pub fn get_collateral_assets() -> Vec<CollateralAssetInfo> {
 
 #[cfg(test)]
 mod tests {
-    use shared::constants::BPS_BASE;
+    use candid::Principal;
+    use shared::types::BalanceDomain;
 
     use super::*;
 
@@ -468,5 +468,36 @@ mod tests {
 
         let value_usd: u128 = value_usd_nat.0.try_into().unwrap();
         assert_eq!(value_usd, 9_000_000); // $9 USD
+    }
+
+    #[test]
+    fn test_domain_isolation() {
+        let user_p = Principal::from_slice(&[42]);
+        let user = User(user_p);
+        let asset_id = "ICP".to_string();
+
+        let mut state = AccountState::new(user);
+
+        // Deposit to Settlement
+        state.set_balance(BalanceDomain::Settlement, asset_id.clone(), 1000);
+        assert_eq!(
+            state.get_balance(BalanceDomain::Settlement, &asset_id),
+            1000
+        );
+        assert_eq!(state.get_balance(BalanceDomain::Playground, &asset_id), 0);
+
+        // Deposit to Playground
+        state.set_balance(BalanceDomain::Playground, asset_id.clone(), 500);
+        assert_eq!(
+            state.get_balance(BalanceDomain::Settlement, &asset_id),
+            1000
+        );
+        assert_eq!(state.get_balance(BalanceDomain::Playground, &asset_id), 500);
+
+        // Withdraw from Settlement
+        let current = state.get_balance(BalanceDomain::Settlement, &asset_id);
+        state.set_balance(BalanceDomain::Settlement, asset_id.clone(), current - 200);
+        assert_eq!(state.get_balance(BalanceDomain::Settlement, &asset_id), 800);
+        assert_eq!(state.get_balance(BalanceDomain::Playground, &asset_id), 500);
     }
 }

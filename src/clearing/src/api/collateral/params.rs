@@ -1,6 +1,6 @@
 use candid::{CandidType, Deserialize, Nat};
 use serde::Serialize;
-use shared::types::AssetId;
+use shared::types::{AssetId, BalanceDomain};
 
 use crate::types::user::{DepositId, WithdrawalId};
 
@@ -13,6 +13,8 @@ pub struct DepositCollateralParams {
     pub asset_id: AssetId,
     /// Unique identifier for the deposit operation.
     pub deposit_id: DepositId,
+    /// The specific balance domain to deposit into (defaults to Settlement).
+    pub domain: Option<BalanceDomain>,
 }
 
 /// Input parameters for withdrawing collateral.
@@ -24,6 +26,8 @@ pub struct WithdrawCollateralParams {
     pub asset_id: AssetId,
     /// Unique identifier for the withdrawal operation.
     pub withdrawal_id: WithdrawalId,
+    /// The specific balance domain to withdraw from (defaults to Settlement).
+    pub domain: Option<BalanceDomain>,
 }
 
 /// Input parameters for blocking (reserving) collateral.
