@@ -1,7 +1,8 @@
-use ::shared::types::{
-    Description, OutcomeId, PayoffType, PayoutUnit, Price, Series, SeriesId, SettlementInput,
-};
 use candid::Principal;
+use shared::types::{
+    BalanceDomain, Description, Outcome, OutcomeId, PayoffType, PayoutUnit, Price, Series,
+    SeriesId, SettlementInput,
+};
 
 use crate::{
     api::trade::{
@@ -28,13 +29,13 @@ fn test_categorical_mint_redeem_complete_set() {
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
         outcomes: Some(vec![
-            shared::types::Outcome {
+            Outcome {
                 id: outcome_a.clone(),
                 title: "A".to_string(),
                 description: None,
                 icon_url: None,
             },
-            shared::types::Outcome {
+            Outcome {
                 id: outcome_b.clone(),
                 title: "B".to_string(),
                 description: None,
@@ -48,7 +49,7 @@ fn test_categorical_mint_redeem_complete_set() {
         description: Description::plain("Categorical test"),
         icon_url: None,
         banner_url: None,
-        balance_domain: ::shared::types::BalanceDomain::Settlement,
+        balance_domain: BalanceDomain::Settlement,
     };
 
     setup_test_state(vec![(user, 10_000_000)]);
@@ -82,19 +83,19 @@ fn test_categorical_lifecycle_scenario() {
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
         outcomes: Some(vec![
-            shared::types::Outcome {
+            Outcome {
                 id: outcome_a.clone(),
                 title: "A".to_string(),
                 description: None,
                 icon_url: None,
             },
-            shared::types::Outcome {
+            Outcome {
                 id: outcome_b.clone(),
                 title: "B".to_string(),
                 description: None,
                 icon_url: None,
             },
-            shared::types::Outcome {
+            Outcome {
                 id: outcome_c.clone(),
                 title: "C".to_string(),
                 description: None,
@@ -108,7 +109,7 @@ fn test_categorical_lifecycle_scenario() {
         description: Description::plain("Full scenario test"),
         icon_url: None,
         banner_url: None,
-        balance_domain: ::shared::types::BalanceDomain::Settlement,
+        balance_domain: BalanceDomain::Settlement,
     };
 
     setup_test_state(vec![(seller, 20_000_000), (buyer, 10_000_000)]);
@@ -166,13 +167,13 @@ fn test_categorical_short_settlement() {
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
         outcomes: Some(vec![
-            shared::types::Outcome {
+            Outcome {
                 id: outcome_a.clone(),
                 title: "A".to_string(),
                 description: None,
                 icon_url: None,
             },
-            shared::types::Outcome {
+            Outcome {
                 id: outcome_b.clone(),
                 title: "B".to_string(),
                 description: None,
@@ -186,7 +187,7 @@ fn test_categorical_short_settlement() {
         description: Description::plain("Short test"),
         icon_url: None,
         banner_url: None,
-        balance_domain: ::shared::types::BalanceDomain::Settlement,
+        balance_domain: BalanceDomain::Settlement,
     };
 
     setup_test_state(vec![(seller, 10_000_000), (buyer, 10_000_000)]);
@@ -239,13 +240,13 @@ fn test_categorical_short_loss() {
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
         outcomes: Some(vec![
-            shared::types::Outcome {
+            Outcome {
                 id: outcome_a.clone(),
                 title: "A".to_string(),
                 description: None,
                 icon_url: None,
             },
-            shared::types::Outcome {
+            Outcome {
                 id: outcome_b.clone(),
                 title: "B".to_string(),
                 description: None,
@@ -259,7 +260,7 @@ fn test_categorical_short_loss() {
         description: Description::plain("Short loss test"),
         icon_url: None,
         banner_url: None,
-        balance_domain: ::shared::types::BalanceDomain::Settlement,
+        balance_domain: BalanceDomain::Settlement,
     };
 
     setup_test_state(vec![(seller, 10_000_000), (buyer, 10_000_000)]);

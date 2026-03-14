@@ -38,3 +38,12 @@ pub struct UpdateAssetPriceParams {
 pub struct CancelFundWithdrawalParams {
     pub request_id: String,
 }
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct RegisterIcrcAssetParams {
+    pub asset_id: AssetId,
+    pub ledger_id: Principal,
+    pub haircut_bps: u16,
+    pub oracle_id: Option<String>,
+    pub is_enabled: bool,
+}

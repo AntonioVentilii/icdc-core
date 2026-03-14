@@ -20,13 +20,24 @@ export CLEARING_CANISTER
 # USD Configuration
 export USD_DECIMALS=6
 
+#TODO: do i need to register this as collateral for the clearing canister? Is it not used only as ledger?
+# vUSD Configuration
+VUSD_LEDGER_ID=$(dfx canister id ledger --network "$NETWORK" 2>/dev/null)
+if [[ -n "$VUSD_LEDGER_ID" ]]; then
+  export VUSD_SYMBOL="vUSD"
+  export VUSD_LEDGER="$VUSD_LEDGER_ID"
+  export VUSD_DECIMALS=8
+  export VUSD_HAIRCUT_BPS=0    # 0% haircut for USD stable
+  export VUSD_PRICE_E6=1000000 # 1 USD (6 decimals)
+fi
+
 # TESTICP Token Configuration
 export TESTICP_SYMBOL="TESTICP"
-export TEST_ICP_LEDGER="xafvr-biaaa-aaaai-aql5q-cai"
-export TEST_ICP_INDEX="qcuy6-bqaaa-aaaai-aqmqq-cai"
-export TEST_ICP_DECIMALS=8
-export TEST_ICP_HAIRCUT_BPS=1000 # 10%
-export TEST_ICP_PRICE_E6=3000000 # 3 USD (6 decimals)
+export TESTICP_LEDGER="xafvr-biaaa-aaaai-aql5q-cai"
+export TESTICP_INDEX="qcuy6-bqaaa-aaaai-aqmqq-cai"
+export TESTICP_DECIMALS=8
+export TESTICP_HAIRCUT_BPS=1000 # 10%
+export TESTICP_PRICE_E6=3000000 # 3 USD (6 decimals)
 
 # TICRC1 Token Configuration
 export TICRC1_SYMBOL="TICRC1"

@@ -26,58 +26,56 @@ echo "Registry: $REGISTRY_CANISTER"
 echo "Setting registry canister..."
 dfx canister call clearing set_registry_canister "(principal \"$REGISTRY_CANISTER\")" --network "$NETWORK"
 
-# 2. Update Collateral Asset ($TESTICP_SYMBOL)
-echo "Configuring $TESTICP_SYMBOL collateral asset..."
-dfx canister call clearing update_collateral_asset "(record { 
-    config = record { 
-        asset_id = \"$TESTICP_SYMBOL\"; 
-        asset = variant { Icrc = principal \"$TEST_ICP_LEDGER\" }; 
-        symbol = \"$TESTICP_SYMBOL\"; 
-        decimals = $TEST_ICP_DECIMALS : nat8; 
-        is_enabled = true; 
-        oracle_id = null;
-    } 
-})" --network "$NETWORK"
-
-# 3. Update Asset Metrics ($TESTICP_SYMBOL)
-echo "Setting metrics for $TESTICP_SYMBOL ($((TEST_ICP_HAIRCUT_BPS / 100))% haircut, \$$(echo "scale=2; $TEST_ICP_PRICE_E6 / 1000000" | bc) price)..."
-dfx canister call clearing update_asset_metrics "(record { 
+# 2. Register Collateral Asset ($TESTICP_SYMBOL)
+echo "Registering $TESTICP_SYMBOL collateral asset..."
+dfx canister call clearing register_icrc_asset "(record { 
     asset_id = \"$TESTICP_SYMBOL\"; 
-    metrics = record { 
-        haircut_bps = $TEST_ICP_HAIRCUT_BPS : nat16; 
-        price_usd = record { value = $TEST_ICP_PRICE_E6 : nat; decimals = $USD_DECIMALS : nat8 };
-        latest_transfer_fee = null;
-        insurance_fee_ratio = null;
-        last_updated_ns = null;
-        protocol_fee_ratio = null;
-    } 
+    ledger_id = principal \"$TESTICP_LEDGER\";
+    haircut_bps = $TESTICP_HAIRCUT_BPS : nat16;
+    oracle_id = null;
+    is_enabled = true;
 })" --network "$NETWORK"
 
-# 4. Update Collateral Asset ($TICRC1_SYMBOL)
-echo "Configuring $TICRC1_SYMBOL collateral asset..."
-dfx canister call clearing update_collateral_asset "(record { 
-    config = record { 
-        asset_id = \"$TICRC1_SYMBOL\"; 
-        asset = variant { Icrc = principal \"$TICRC1_LEDGER\" }; 
-        symbol = \"$TICRC1_SYMBOL\"; 
-        decimals = $TICRC1_DECIMALS : nat8; 
-        is_enabled = true; 
-        oracle_id = null;
-    } 
+# 3. Update Asset Price ($TESTICP_SYMBOL)
+echo "Setting price for $TESTICP_SYMBOL (\$$(echo "scale=2; $TESTICP_PRICE_E6 / 1000000" | bc))..."
+dfx canister call clearing update_asset_price "(record { 
+    asset_id = \"$TESTICP_SYMBOL\"; 
+    price = record { decimal = record { value = $TESTICP_PRICE_E6 : nat; decimals = $USD_DECIMALS : nat8 }; oracle_id = null; timestamp = null };
 })" --network "$NETWORK"
 
-# 5. Update Asset Metrics ($TICRC1_SYMBOL)
-echo "Setting metrics for $TICRC1_SYMBOL ($((TICRC1_HAIRCUT_BPS / 100))% haircut, \$$(echo "scale=2; $TICRC1_PRICE_E6 / 1000000" | bc) price)..."
-dfx canister call clearing update_asset_metrics "(record { 
+# 4. Register Collateral Asset ($TICRC1_SYMBOL)
+echo "Registering $TICRC1_SYMBOL collateral asset..."
+dfx canister call clearing register_icrc_asset "(record { 
     asset_id = \"$TICRC1_SYMBOL\"; 
-    metrics = record { 
-        haircut_bps = $TICRC1_HAIRCUT_BPS : nat16; 
-        price_usd = record { value = $TICRC1_PRICE_E6 : nat; decimals = $USD_DECIMALS : nat8 };
-        latest_transfer_fee = null;
-        insurance_fee_ratio = null;
-        last_updated_ns = null;
-        protocol_fee_ratio = null;
-    } 
+    ledger_id = principal \"$TICRC1_LEDGER\";
+    haircut_bps = $TICRC1_HAIRCUT_BPS : nat16;
+    oracle_id = null;
+    is_enabled = true;
 })" --network "$NETWORK"
+
+# 5. Update Asset Price ($TICRC1_SYMBOL)
+echo "Setting price for $TICRC1_SYMBOL (\$$(echo "scale=2; $TICRC1_PRICE_E6 / 1000000" | bc))..."
+dfx canister call clearing update_asset_price "(record { 
+    asset_id = \"$TICRC1_SYMBOL\"; 
+    price = record { decimal = record { value = $TICRC1_PRICE_E6 : nat; decimals = $USD_DECIMALS : nat8 }; oracle_id = null; timestamp = null };
+})" --network "$NETWORK"
+
+# 6. Register Collateral Asset ($VUSD_SYMBOL)
+if [[ -n "$VUSD_LEDGER" ]]; then
+  echo "Registering $VUSD_SYMBOL collateral asset..."
+  dfx canister call clearing register_icrc_asset "(record { 
+      asset_id = \"$VUSD_SYMBOL\"; 
+      ledger_id = principal \"$VUSD_LEDGER\";
+      haircut_bps = $VUSD_HAIRCUT_BPS : nat16;
+      oracle_id = null;
+      is_enabled = true;
+  })" --network "$NETWORK"
+
+  echo "Setting price for $VUSD_SYMBOL (\$$(echo "scale=2; $VUSD_PRICE_E6 / 1000000" | bc))..."
+  dfx canister call clearing update_asset_price "(record { 
+      asset_id = \"$VUSD_SYMBOL\"; 
+      price = record { decimal = record { value = $VUSD_PRICE_E6 : nat; decimals = $USD_DECIMALS : nat8 }; oracle_id = null; timestamp = null };
+  })" --network "$NETWORK"
+fi
 
 echo "ICDC Clearing Framework initialized successfully."

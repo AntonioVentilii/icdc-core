@@ -4,19 +4,14 @@ use candid::CandidType;
 use serde::{Deserialize, Serialize};
 use shared::types::AssetId;
 
-use crate::types::errors::CommonError;
+use super::errors::{
+    CancelFundWithdrawalError, RegisterIcrcAssetError, UpdateAssetPriceError, WithdrawFundError,
+};
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct GetFundsResult {
     pub insurance_fund: BTreeMap<AssetId, u128>,
     pub treasury: BTreeMap<AssetId, u128>,
-}
-
-#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
-pub enum WithdrawFundError {
-    Common(CommonError),
-    InsufficientFunds,
-    TransferFailed(String),
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -34,13 +29,6 @@ impl From<Result<candid::Nat, WithdrawFundError>> for WithdrawFundResult {
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
-pub enum CancelFundWithdrawalError {
-    Common(CommonError),
-    PlanNotFound,
-    InvalidPlanStatus,
-}
-
-#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum CancelFundWithdrawalResult {
     Ok,
     Err(CancelFundWithdrawalError),
@@ -55,21 +43,26 @@ impl From<Result<(), CancelFundWithdrawalError>> for CancelFundWithdrawalResult 
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
-pub enum UpdateAssetPriceError {
-    Common(CommonError),
-    AssetNotFound,
-    OracleNotConfigured,
-    AssetMetricsNotInitialized,
-}
-
-#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum UpdateAssetPriceResult {
     Ok,
     Err(UpdateAssetPriceError),
 }
-
 impl From<Result<(), UpdateAssetPriceError>> for UpdateAssetPriceResult {
     fn from(res: Result<(), UpdateAssetPriceError>) -> Self {
+        match res {
+            Ok(_) => Self::Ok,
+            Err(e) => Self::Err(e),
+        }
+    }
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub enum RegisterIcrcAssetResult {
+    Ok,
+    Err(RegisterIcrcAssetError),
+}
+impl From<Result<(), RegisterIcrcAssetError>> for RegisterIcrcAssetResult {
+    fn from(res: Result<(), RegisterIcrcAssetError>) -> Self {
         match res {
             Ok(_) => Self::Ok,
             Err(e) => Self::Err(e),

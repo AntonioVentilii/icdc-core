@@ -1,14 +1,14 @@
 use std::collections::BTreeMap;
 
 use ic_cdk_macros::{query, update};
-use shared::types::AssetId;
+use shared::types::{AssetId, BalanceDomain};
 
 use super::{
     errors::AccountStateError,
     params::{GetAccountStateParams, GetPositionParams},
 };
 use crate::{
-    api::account::service::AccountService,
+    account::service::AccountService,
     assets::asset::{handler::get_handler, params::AssetBalanceOfParams},
     guards::caller_is_not_anonymous,
     memory::{ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, POSITIONS},
@@ -40,7 +40,7 @@ pub fn get_account_state_query() -> GetAccountStateResult {
                 ASSET_METRICS.with(|metrics| {
                     AccountService::build_account_state_response(
                         state,
-                        shared::types::BalanceDomain::Settlement,
+                        BalanceDomain::Settlement,
                         &configs.borrow(),
                         &metrics.borrow(),
                     )
@@ -56,13 +56,13 @@ pub fn get_account_state_query() -> GetAccountStateResult {
 /// * `params` - Includes an optional `refresh` flag to trigger external ledger checks.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn get_account_state(params: GetAccountStateParams) -> GetAccountStateResult {
-    let result: Result<(AccountState, shared::types::BalanceDomain), AccountStateError> = (async {
+    let result: Result<(AccountState, BalanceDomain), AccountStateError> = (async {
         let user: User = ic_cdk::caller().into();
 
         let GetAccountStateParams { refresh, domain } = params;
 
         let refresh = refresh.unwrap_or(false);
-        let domain = domain.unwrap_or(shared::types::BalanceDomain::Settlement);
+        let domain = domain.unwrap_or(BalanceDomain::Settlement);
 
         // If not refreshing, just return cached state
         if !refresh {

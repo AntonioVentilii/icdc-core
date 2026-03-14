@@ -3,7 +3,7 @@ use serde::Serialize;
 
 /// A generic representation of a decimal value with fixed precision.
 /// This decouples numeric logic from domain-specific types like Price or Quantity.
-#[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct DecimalValue {
     /// The numeric value (mantissa).
     pub value: u128,

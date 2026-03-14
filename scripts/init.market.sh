@@ -158,7 +158,7 @@ echo "Required TEST_ICP: $REQ_ICP ($REQ_E8S e8s)"
 
 # --- 3. BALANCE & FAUCET ---
 echo "Checking balance..."
-if ! BAL_RES=$(dfx canister call "$TEST_ICP_LEDGER" icrc1_balance_of "(record { owner = principal \"$MY_PRINCIPAL\" })" --network "$NETWORK" 2>/dev/null); then
+if ! BAL_RES=$(dfx canister call "$TESTICP_LEDGER" icrc1_balance_of "(record { owner = principal \"$MY_PRINCIPAL\" })" --network "$NETWORK" 2>/dev/null); then
   echo "Warning: Balance check failed."
   CUR_BAL_E8S=0
 else
@@ -181,7 +181,7 @@ while [[ "$CUR_BAL_E8S" -lt "$REQ_E8S" ]]; do
   sleep 5
 
   # Re-check balance
-  if ! BAL_RES=$(dfx canister call "$TEST_ICP_LEDGER" icrc1_balance_of "(record { owner = principal \"$MY_PRINCIPAL\" })" --network "$NETWORK" 2>/dev/null); then
+  if ! BAL_RES=$(dfx canister call "$TESTICP_LEDGER" icrc1_balance_of "(record { owner = principal \"$MY_PRINCIPAL\" })" --network "$NETWORK" 2>/dev/null); then
     echo "Warning: Balance check failed during retry loop."
   else
     CUR_BAL_E8S=$(echo "$BAL_RES" | grep -oE '[0-9_]+ : nat' | head -n1 | awk '{print $1}' | tr -d '_')
@@ -204,7 +204,7 @@ DEPOSIT_AMOUNT=$((CUR_BAL_E8S - 2 * LEDGER_FEE))
 [[ "$DEPOSIT_AMOUNT" -lt 0 ]] && DEPOSIT_AMOUNT=0
 
 echo "  Approving Clearing to spend $APPROVE_AMOUNT e8s of TESTICP..."
-dfx canister call "$TEST_ICP_LEDGER" icrc2_approve "(record { 
+dfx canister call "$TESTICP_LEDGER" icrc2_approve "(record {
     amount = $APPROVE_AMOUNT : nat; 
     spender = record { owner = principal \"$CLEARING_CANISTER\" };
 })" --network "$NETWORK"

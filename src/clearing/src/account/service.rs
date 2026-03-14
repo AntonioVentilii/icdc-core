@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use candid::Nat;
 use shared::{
     constants::{BPS_BASE, USD_DECIMALS},
-    types::{AssetId, AssetMetrics, CollateralAssetConfig},
+    types::{AssetId, AssetMetrics, BalanceDomain, CollateralAssetConfig},
 };
 
 use crate::{
@@ -16,7 +16,7 @@ pub struct AccountService;
 impl AccountService {
     pub fn build_account_state_response(
         state: AccountState,
-        domain: shared::types::BalanceDomain,
+        domain: BalanceDomain,
         configs: &BTreeMap<AssetId, CollateralAssetConfig>,
         metrics: &BTreeMap<AssetId, AssetMetrics>,
     ) -> AccountStateResponse {
@@ -99,11 +99,7 @@ mod tests {
     fn test_build_account_state_response_basic() {
         let mut state = AccountState::new(User::from(Principal::anonymous()));
         let asset_id = AssetId::from("ICP");
-        state.set_balance(
-            shared::types::BalanceDomain::Settlement,
-            asset_id.clone(),
-            100_000_000,
-        ); // 1 ICP (8 decimals)
+        state.set_balance(BalanceDomain::Settlement, asset_id.clone(), 100_000_000); // 1 ICP (8 decimals)
 
         let mut configs = BTreeMap::new();
         configs.insert(
@@ -136,7 +132,7 @@ mod tests {
 
         let response = AccountService::build_account_state_response(
             state,
-            shared::types::BalanceDomain::Settlement,
+            BalanceDomain::Settlement,
             &configs,
             &metrics,
         );
@@ -156,7 +152,7 @@ mod tests {
         let mut state = AccountState::new(User::from(Principal::anonymous()));
         let asset_id = AssetId::from("ETH");
         state.set_balance(
-            shared::types::BalanceDomain::Settlement,
+            BalanceDomain::Settlement,
             asset_id.clone(),
             1_000_000_000_000_000_000,
         ); // 1 ETH (18 decimals)
@@ -192,7 +188,7 @@ mod tests {
 
         let response = AccountService::build_account_state_response(
             state,
-            shared::types::BalanceDomain::Settlement,
+            BalanceDomain::Settlement,
             &configs,
             &metrics,
         );
@@ -206,11 +202,7 @@ mod tests {
     fn test_build_account_state_response_low_decimals() {
         let mut state = AccountState::new(User::from(Principal::anonymous()));
         let asset_id = AssetId::from("USDC");
-        state.set_balance(
-            shared::types::BalanceDomain::Settlement,
-            asset_id.clone(),
-            1_000_000,
-        ); // 1 USDC (6 decimals)
+        state.set_balance(BalanceDomain::Settlement, asset_id.clone(), 1_000_000); // 1 USDC (6 decimals)
 
         let mut configs = BTreeMap::new();
         configs.insert(
@@ -243,7 +235,7 @@ mod tests {
 
         let response = AccountService::build_account_state_response(
             state,
-            shared::types::BalanceDomain::Settlement,
+            BalanceDomain::Settlement,
             &configs,
             &metrics,
         );
@@ -258,11 +250,7 @@ mod tests {
         let mut state = AccountState::new(User::from(Principal::anonymous()));
         let asset_id = AssetId::from("icp");
         // 1 ICP (8 decimals)
-        state.set_balance(
-            shared::types::BalanceDomain::Settlement,
-            asset_id.clone(),
-            100_000_000,
-        );
+        state.set_balance(BalanceDomain::Settlement, asset_id.clone(), 100_000_000);
 
         let mut configs = BTreeMap::new();
         configs.insert(
@@ -295,7 +283,7 @@ mod tests {
 
         let response = AccountService::build_account_state_response(
             state,
-            shared::types::BalanceDomain::Settlement,
+            BalanceDomain::Settlement,
             &configs,
             &metrics,
         );

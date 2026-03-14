@@ -11,12 +11,12 @@ use crate::{
         },
         admin::{
             params::{
-                CancelFundWithdrawalParams, UpdateAssetMetricsParams, UpdateAssetPriceParams,
-                UpdateCollateralAssetParams, WithdrawFundParams,
+                CancelFundWithdrawalParams, RegisterIcrcAssetParams, UpdateAssetMetricsParams,
+                UpdateAssetPriceParams, UpdateCollateralAssetParams, WithdrawFundParams,
             },
             results::{
-                CancelFundWithdrawalResult, GetFundsResult, UpdateAssetPriceResult,
-                WithdrawFundResult,
+                CancelFundWithdrawalResult, GetFundsResult, RegisterIcrcAssetResult,
+                UpdateAssetPriceResult, WithdrawFundResult,
             },
         },
         collateral::{
@@ -44,6 +44,7 @@ use crate::{
     },
 };
 
+pub mod account;
 pub mod api;
 pub mod assets;
 pub mod guards;

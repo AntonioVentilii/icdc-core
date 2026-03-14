@@ -1,7 +1,7 @@
-use ::shared::types::{
-    Description, PayoffType, PayoutUnit, Price, Series, SeriesId, SettlementInput,
-};
 use candid::Principal;
+use shared::types::{
+    BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId, SettlementInput,
+};
 
 use crate::{api::trade::tests::utils::*, trade::types::ExecuteTradeParams, types::trade::TradeId};
 
@@ -27,7 +27,7 @@ fn test_binary_lifecycle_scenario() {
         description: Description::plain("Yes/No Market"),
         icon_url: None,
         banner_url: None,
-        balance_domain: ::shared::types::BalanceDomain::Settlement,
+        balance_domain: BalanceDomain::Settlement,
     };
 
     setup_test_state(vec![
@@ -94,7 +94,7 @@ fn test_binary_settle_no() {
         description: Description::plain("Yes/No Market - Result No"),
         icon_url: None,
         banner_url: None,
-        balance_domain: ::shared::types::BalanceDomain::Settlement,
+        balance_domain: BalanceDomain::Settlement,
     };
 
     setup_test_state(vec![(seller, 20_000_000), (buyer, 10_000_000)]);

@@ -1,20 +1,26 @@
 use candid::{Nat, Principal};
 use ic_cdk_macros::{query, update};
-use shared::types::{AssetId, CollateralAssetConfig};
+use shared::types::{Asset, AssetId, AssetMetrics, CollateralAssetConfig};
 
 use super::{
+    errors::{
+        CancelFundWithdrawalError, RegisterIcrcAssetError, UpdateAssetPriceError, WithdrawFundError,
+    },
     params::{
-        CancelFundWithdrawalParams, FundType, UpdateAssetMetricsParams, UpdateAssetPriceParams,
-        UpdateCollateralAssetParams, WithdrawFundParams,
+        CancelFundWithdrawalParams, FundType, RegisterIcrcAssetParams, UpdateAssetMetricsParams,
+        UpdateAssetPriceParams, UpdateCollateralAssetParams, WithdrawFundParams,
     },
     results::{
-        CancelFundWithdrawalError, CancelFundWithdrawalResult, GetFundsResult,
-        UpdateAssetPriceError, UpdateAssetPriceResult, WithdrawFundError, WithdrawFundResult,
+        CancelFundWithdrawalResult, GetFundsResult, RegisterIcrcAssetResult,
+        UpdateAssetPriceResult, WithdrawFundResult,
     },
 };
 use crate::{
     assets::{
-        asset::{handler::get_handler, params::AssetTransferParams},
+        asset::{
+            handler::{get_handler, AssetHandler},
+            params::AssetTransferParams,
+        },
         types::AssetAmount,
     },
     guards::{caller_is_controller, caller_is_not_anonymous},
@@ -29,6 +35,7 @@ use crate::{
         plans::{FundWithdrawalPlan, FundWithdrawalPlanParams, PlanStatus},
         state::Config,
     },
+    utils::system::now_ns,
 };
 
 /// Sets the principal of the Series Registry canister.
@@ -192,9 +199,16 @@ pub fn cancel_fund_withdrawal(params: CancelFundWithdrawalParams) -> CancelFundW
 #[update(guard = "caller_is_controller")]
 pub fn update_collateral_asset(params: UpdateCollateralAssetParams) {
     let config = params.config;
-    COLLATERAL_ASSETS.with(|assets| {
-        assets.borrow_mut().insert(config.asset_id.clone(), config);
-    });
+
+    // Enforce ICRC registration policy: ICRC assets MUST be registered via register_icrc_asset
+    // to ensure metadata (symbol, decimals, fee) is fetched directly from the ledger.
+    if matches!(config.asset, Asset::Icrc(_)) {
+        ic_cdk::trap(
+            "ICRC assets must be registered via 'register_icrc_asset' to ensure metadata integrity",
+        );
+    }
+
+    insert_collateral_asset_impl(config);
 }
 
 /// Adds or updates dynamic metrics for a collateral asset.
@@ -202,9 +216,89 @@ pub fn update_collateral_asset(params: UpdateCollateralAssetParams) {
 /// This method is gated to canister controllers.
 #[update(guard = "caller_is_controller")]
 pub fn update_asset_metrics(params: UpdateAssetMetricsParams) {
-    let metrics = params.metrics;
+    insert_asset_metrics_impl(params.asset_id, params.metrics);
+}
+
+/// Automatically registers an ICRC asset by fetching its metadata from the ledger.
+///
+/// This method is gated to canister controllers.
+#[update(guard = "caller_is_controller")]
+pub async fn register_icrc_asset(params: RegisterIcrcAssetParams) -> RegisterIcrcAssetResult {
+    let res: Result<(), RegisterIcrcAssetError> = (async {
+        let asset = Asset::Icrc(params.ledger_id);
+
+        let exists =
+            COLLATERAL_ASSETS.with(|assets| assets.borrow().contains_key(&params.asset_id));
+        if exists {
+            return Err(RegisterIcrcAssetError::AssetAlreadyExists);
+        }
+
+        let handler = get_handler(&asset).map_err(|e| {
+            RegisterIcrcAssetError::Common(CommonError::Internal(format!("{:?}", e)))
+        })?;
+
+        let AssetHandler::Icrc(ref icrc_handler) = handler else {
+            return Err(RegisterIcrcAssetError::Common(CommonError::Internal(
+                "Expected ICRC handler".to_string(),
+            )));
+        };
+
+        let metadata = icrc_handler.get_metadata(&asset).await.map_err(|e| {
+            RegisterIcrcAssetError::Common(CommonError::Internal(format!("{:?}", e)))
+        })?;
+
+        let config = CollateralAssetConfig {
+            asset_id: params.asset_id.clone(),
+            asset,
+            symbol: metadata.symbol,
+            decimals: metadata.decimals,
+            is_enabled: params.is_enabled,
+            oracle_id: params.oracle_id,
+        };
+
+        // If it exists, preserve the current price; otherwise start at 0
+        let current_price = ASSET_METRICS.with(|m| {
+            m.borrow()
+                .get(&params.asset_id)
+                .map(|metrics| metrics.price_usd.clone())
+                .unwrap_or_default()
+        });
+
+        let metrics = AssetMetrics {
+            price_usd: current_price,
+            latest_transfer_fee: Some(metadata.fee),
+            haircut_bps: params.haircut_bps,
+            insurance_fee_ratio: None,
+            protocol_fee_ratio: None,
+            last_updated_ns: Some(now_ns()),
+        };
+
+        upsert_asset_state_impl(config, metrics);
+
+        Ok(())
+    })
+    .await;
+
+    res.into()
+}
+
+fn upsert_asset_state_impl(config: CollateralAssetConfig, metrics: AssetMetrics) {
+    let asset_id = config.asset_id.clone();
+
+    insert_collateral_asset_impl(config);
+
+    insert_asset_metrics_impl(asset_id, metrics);
+}
+
+fn insert_collateral_asset_impl(config: CollateralAssetConfig) {
+    COLLATERAL_ASSETS.with(|assets| {
+        assets.borrow_mut().insert(config.asset_id.clone(), config);
+    });
+}
+
+fn insert_asset_metrics_impl(asset_id: AssetId, metrics: AssetMetrics) {
     ASSET_METRICS.with(|assets| {
-        assets.borrow_mut().insert(params.asset_id.clone(), metrics);
+        assets.borrow_mut().insert(asset_id, metrics);
     });
 }
 
@@ -251,7 +345,7 @@ async fn update_asset_price_impl(
         let mut m = m.borrow_mut();
         if let Some(metrics) = m.get_mut(&params.asset_id) {
             metrics.price_usd = params.price.decimal.clone();
-            metrics.last_updated_ns = Some(crate::utils::system::now_ns());
+            metrics.last_updated_ns = Some(now_ns());
             Ok(())
         } else {
             Err(UpdateAssetPriceError::AssetMetricsNotInitialized)

@@ -30,9 +30,9 @@ pub const VUSD_LEDGER: &str = "ap6gq-taaaa-aaaae-acsaq-cai";
 pub const VUSD_INDEX: &str = "x3qir-tyaaa-aaaae-acr6a-cai";
 
 /// Principal ID of the TESTICP Ledger canister
-pub const TEST_ICP_LEDGER: &str = "xafvr-biaaa-aaaai-aql5q-cai";
+pub const TESTICP_LEDGER: &str = "xafvr-biaaa-aaaai-aql5q-cai";
 /// Principal ID of the TESTICP Index canister
-pub const TEST_ICP_INDEX: &str = "qcuy6-bqaaa-aaaai-aqmqq-cai";
+pub const TESTICP_INDEX: &str = "qcuy6-bqaaa-aaaai-aqmqq-cai";
 
 /// Principal ID of the TICRC1 Ledger canister
 pub const TICRC1_LEDGER: &str = "3jkp5-oyaaa-aaaaj-azwqa-cai";

@@ -770,7 +770,7 @@ pub(crate) fn redeem_complete_set_logic(
 #[cfg(test)]
 mod tests {
     use candid::Principal;
-    use shared::types::{Description, PayoffType, PayoutUnit, Price, Series, SeriesId};
+    use shared::types::{Description, Outcome, PayoffType, PayoutUnit, Price, Series, SeriesId};
 
     use super::*;
     use crate::{
@@ -792,13 +792,13 @@ mod tests {
             price_precision: 6,
             payout_unit: PayoutUnit::usd(),
             outcomes: Some(vec![
-                shared::types::Outcome {
+                Outcome {
                     id: "outcome1".to_string().into(),
                     title: "Outcome 1".to_string(),
                     description: None,
                     icon_url: None,
                 },
-                shared::types::Outcome {
+                Outcome {
                     id: "outcome2".to_string().into(),
                     title: "Outcome 2".to_string(),
                     description: None,

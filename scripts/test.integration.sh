@@ -38,11 +38,52 @@ dfx canister call clearing update_config "(record {
 })" || error "Failed to update clearing config"
 
 # --- 2. ASSET SETUP ---
-log "Configuring ICP, vUSD, $TESTICP_SYMBOL & $TICRC1_SYMBOL collateral assets..."
-dfx canister call clearing update_collateral_asset "(record { config = record { asset_id = \"ICP\"; asset = variant { Icrc = principal \"$ICP_LEDGER\" }; symbol = \"ICP\"; decimals = 8; price_usd = record { value = 10000000; decimals = $USD_DECIMALS }; haircut_bps = 0; is_enabled = true; } })" >/dev/null
-dfx canister call clearing update_collateral_asset "(record { config = record { asset_id = \"vUSD\"; asset = variant { Icrc = principal \"aaaaa-aa\" }; symbol = \"vUSD\"; decimals = $USD_DECIMALS; price_usd = record { value = $((10 ** USD_DECIMALS)); decimals = $USD_DECIMALS }; haircut_bps = 0; is_enabled = true; } })" >/dev/null
-dfx canister call clearing update_collateral_asset "(record { config = record { asset_id = \"$TESTICP_SYMBOL\"; asset = variant { Icrc = principal \"$TEST_ICP_LEDGER\" }; symbol = \"$TESTICP_SYMBOL\"; decimals = $TEST_ICP_DECIMALS; price_usd = record { value = $TEST_ICP_PRICE_E6; decimals = $USD_DECIMALS }; haircut_bps = $TEST_ICP_HAIRCUT_BPS; is_enabled = true; } })" >/dev/null
-dfx canister call clearing update_collateral_asset "(record { config = record { asset_id = \"$TICRC1_SYMBOL\"; asset = variant { Icrc = principal \"$TICRC1_LEDGER\" }; symbol = \"$TICRC1_SYMBOL\"; decimals = $TICRC1_DECIMALS; price_usd = record { value = $TICRC1_PRICE_E6; decimals = $USD_DECIMALS }; haircut_bps = $TICRC1_HAIRCUT_BPS; is_enabled = true; } })" >/dev/null
+log "Configuring ICP, $TESTICP_SYMBOL & $TICRC1_SYMBOL collateral assets..."
+
+# ICP
+dfx canister call clearing register_icrc_asset "(record { 
+    asset_id = \"ICP\"; 
+    ledger_id = principal \"$ICP_LEDGER\"; 
+    haircut_bps = 0 : nat16; 
+    oracle_id = null; 
+    is_enabled = true; 
+})" >/dev/null
+
+dfx canister call clearing update_asset_price "(record { 
+    asset_id = \"ICP\"; 
+    price = record { decimal = record { value = 10000000 : nat; decimals = $USD_DECIMALS : nat8 }; oracle_id = null; timestamp = null };
+})" >/dev/null
+
+# TESTICP
+dfx canister call clearing register_icrc_asset "(record { 
+    asset_id = \"$TESTICP_SYMBOL\"; 
+    ledger_id = principal \"$TESTICP_LEDGER\";
+    haircut_bps = $TESTICP_HAIRCUT_BPS : nat16;
+    oracle_id = null;
+    is_enabled = true;
+})" >/dev/null
+
+dfx canister call clearing update_asset_price "(record { 
+    asset_id = \"$TESTICP_SYMBOL\"; 
+    price = record { decimal = record { value = $TESTICP_PRICE_E6 : nat; decimals = $USD_DECIMALS : nat8 }; oracle_id = null; timestamp = null };
+})" >/dev/null
+
+# TICRC1
+dfx canister call clearing register_icrc_asset "(record { 
+    asset_id = \"$TICRC1_SYMBOL\"; 
+    ledger_id = principal \"$TICRC1_LEDGER\";
+    haircut_bps = $TICRC1_HAIRCUT_BPS : nat16;
+    oracle_id = null;
+    is_enabled = true;
+})" >/dev/null
+
+dfx canister call clearing update_asset_price "(record { 
+    asset_id = \"$TICRC1_SYMBOL\"; 
+    price = record { decimal = record { value = $TICRC1_PRICE_E6 : nat; decimals = $USD_DECIMALS : nat8 }; oracle_id = null; timestamp = null };
+})" >/dev/null
+
+# Note: vUSD registration removed as a mock since it requires a real ledger for automatic metadata fetching.
+# If vUSD is needed as collateral, it must be registered via register_icrc_asset with a valid ledger Principal.
 
 # --- 3. IDENTITY SEEDING ---
 log "Seeding identities with test tokens..."

@@ -55,6 +55,37 @@ impl IcrcHandler {
         fee_nat.0.to_u128().ok_or(AssetError::MathOverflow)
     }
 
+    /// Retrieves the symbol of an ICRC ledger.
+    pub async fn get_symbol(&self, asset: &Asset) -> Result<String, AssetError> {
+        let ledger_id = asset.as_icrc()?;
+
+        let (symbol,): (String,) =
+            ic_cdk::call(*ledger_id, "icrc1_symbol", ())
+                .await
+                .map_err(|(code, msg)| AssetError::CallError {
+                    method: "icrc1_symbol".to_string(),
+                    code: code as i32,
+                    message: msg,
+                })?;
+
+        Ok(symbol)
+    }
+
+    /// Retrieves the decimals of an ICRC ledger.
+    pub async fn get_decimals(&self, asset: &Asset) -> Result<u8, AssetError> {
+        let ledger_id = asset.as_icrc()?;
+
+        let (decimals,): (u8,) = ic_cdk::call(*ledger_id, "icrc1_decimals", ())
+            .await
+            .map_err(|(code, msg)| AssetError::CallError {
+                method: "icrc1_decimals".to_string(),
+                code: code as i32,
+                message: msg,
+            })?;
+
+        Ok(decimals)
+    }
+
     /// Executes an ICRC-1 transfer.
     pub async fn transfer(&self, params: AssetTransferParams<'_>) -> Result<u128, AssetError> {
         let ledger_id = params.asset.as_icrc()?;
@@ -155,4 +186,23 @@ impl IcrcHandler {
             }
         }
     }
+
+    /// Fetches all relevant metadata for an ICRC token.
+    pub async fn get_metadata(&self, asset: &Asset) -> Result<IcrcMetadata, AssetError> {
+        let symbol = self.get_symbol(asset).await?;
+        let decimals = self.get_decimals(asset).await?;
+        let fee = self.get_fee(asset).await?;
+
+        Ok(IcrcMetadata {
+            symbol,
+            decimals,
+            fee,
+        })
+    }
+}
+
+pub struct IcrcMetadata {
+    pub symbol: String,
+    pub decimals: u8,
+    pub fee: u128,
 }
