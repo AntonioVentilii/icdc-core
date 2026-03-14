@@ -8,7 +8,7 @@
 		"format": "prettier --write . && ./scripts/format.sh",
 		"format:rust": "./scripts/format.rust.sh",
 		"lint": "prettier --check . && ./scripts/lint.sh",
-		"lint:rust": "./scripts/lint.rust.sh",
+		"lint:rust": "./scripts/lint.rust.sh --fix",
 		"quality": "npm run format && npm run lint",
 		"quality:rust": "npm run format:rust && npm run lint:rust",
 		"did": "./scripts/did.sh && npm run format && npm run lint",

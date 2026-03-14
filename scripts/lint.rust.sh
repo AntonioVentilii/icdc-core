@@ -40,19 +40,19 @@ for canister in "${CANISTERS[@]}"; do
   # Skip non-Rust canisters (or different layouts)
   [[ -f "$manifest_path" ]] || continue
 
-  RUSTFLAGS="${CLIPPY_RUSTFLAGS[*]}" cargo clippy "${FIX_ARGS[@]}" \
+  RUSTFLAGS="${CLIPPY_RUSTFLAGS[*]}" cargo clippy ${FIX_ARGS[@]+"${FIX_ARGS[@]}"} \
     --manifest-path "$manifest_path" \
     --locked \
     --target wasm32-unknown-unknown \
     --all-features
 
-  RUSTFLAGS="${CLIPPY_RUSTFLAGS[*]}" cargo clippy "${FIX_ARGS[@]}" \
+  RUSTFLAGS="${CLIPPY_RUSTFLAGS[*]}" cargo clippy ${FIX_ARGS[@]+"${FIX_ARGS[@]}"} \
     --manifest-path "$manifest_path" \
     --locked \
     --all-features \
     --tests
 
-  RUSTFLAGS="${CLIPPY_RUSTFLAGS[*]}" cargo clippy "${FIX_ARGS[@]}" \
+  RUSTFLAGS="${CLIPPY_RUSTFLAGS[*]}" cargo clippy ${FIX_ARGS[@]+"${FIX_ARGS[@]}"} \
     --manifest-path "$manifest_path" \
     --locked \
     --all-features \
