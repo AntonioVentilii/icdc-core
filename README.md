@@ -9,6 +9,7 @@ The project is divided into two main functional areas:
 - **[Series Registry](src/registry/README.md)**: A global directory for instrument specifications and oracle sources.
 - **[Clearing Engine](src/clearing/README.md)**: The risk and margin engine that acts as a Central Counterparty (CCP) for trades.
 - **[Shared Library](src/shared/)**: Common types and constants used across all canisters.
+- **[Architecture Flows](docs/architecture/flows.md)**: Visual schematics of the core system processes.
 
 ## 🚀 Key Features
 

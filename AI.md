@@ -23,6 +23,7 @@ The repository operates under a multi-layered governance model. Agents MUST veri
 The system is built with a focus on modularity and bounded contexts.
 
 - **Architecture Guide**: [docs/ai/architecture.md](file:///Users/antonio.ventilii/projects/icdc-core/docs/ai/architecture.md)
+- **Flow Schematics**: [docs/architecture/flows.md](file:///Users/antonio.ventilii/projects/icdc-core/docs/architecture/flows.md)
 - **Implementation Rules**: [.agents/](file:///Users/antonio.ventilii/projects/icdc-core/.agents/)
   - [General Instructions](file:///Users/antonio.ventilii/projects/icdc-core/.agents/instructions.md)
   - [Patterns & Conventions](file:///Users/antonio.ventilii/projects/icdc-core/.agents/patterns.md)
