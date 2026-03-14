@@ -1,0 +1,19 @@
+---
+description: Rust coding style, patterns, and conventions.
+globs: ["**/*.rs"]
+---
+
+# 30-Rust-Style: Implementation Standards
+
+Follow idiomatic Rust patterns and repository conventions.
+
+## Core Guidance
+- [Implementation Patterns](file:///Users/antonio.ventilii/projects/icdc-core/.agents/patterns.md): Mandatory coding patterns.
+- [General Instructions](file:///Users/antonio.ventilii/projects/icdc-core/.agents/instructions.md): Low-level coding rules.
+- [Domain Logic](file:///Users/antonio.ventilii/projects/icdc-core/.agents/domain_logic.md): Bounded context and atomicity rules.
+
+## Standards
+- **Idiomatic Rust**: Prefer standard library types and avoid unsafe unless necessary.
+- **Error Handling**: Use explicit error types; avoid `unwrap()` or `expect()`.
+- **Snake Case**: All functions and variables must use `snake_case`.
+- **Atomic Edits**: Targeted changes using specific lines or blocks.

@@ -1,0 +1,18 @@
+---
+description: Testing standards and policy enforcement.
+globs: ["**/*.rs", "tests/**/*"]
+---
+
+# 40-Testing: Quality Assurance
+
+Ensure all changes are verified and adhere to testing policies.
+
+## Testing Documentation
+- [Testing Policy](file:///Users/antonio.ventilii/projects/icdc-core/.policies/testing-policy.md): Mandatory testing requirements.
+- [Testing Standards Workflow](file:///Users/antonio.ventilii/projects/icdc-core/.workflows/testing-standards.md): Process for verifying changes.
+
+## Requirements
+- **Verification Plan**: Every implementation plan must include a section on how changes will be verified.
+- **Unit Tests**: Mandatory for all new logic.
+- **Integration Tests**: Required for cross-canister or complex state transitions.
+- **Quality Checks**: Ensure `npm run quality` passes before completion.

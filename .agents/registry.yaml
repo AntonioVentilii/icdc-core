@@ -1,0 +1,13 @@
+agents:
+  - name: planner
+    role: 'Task decomposition and architectural planning'
+    config: '.agents/planner.md'
+  - name: implementer
+    role: 'Code implementation and file modification'
+    config: '.agents/implementer.md'
+  - name: reviewer
+    role: 'Quality assurance, testing, and style enforcement'
+    config: '.agents/reviewer.md'
+  - name: documentation
+    role: 'Maintaining documentation consistency'
+    config: '.agents/instructions.md'
