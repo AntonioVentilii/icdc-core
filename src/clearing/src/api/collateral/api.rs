@@ -1,4 +1,5 @@
 use candid::Nat;
+use ic_cdk::caller;
 use ic_cdk_macros::{query, update};
 use shared::{
     constants::{BPS_BASE, USD_DECIMALS, VUSD_ASSET_ID},
@@ -37,7 +38,7 @@ use crate::{
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositCollateralResult {
     let result: Result<(), DepositCollateralError> = (async {
-        let user: User = ic_cdk::caller().into();
+        let user: User = caller().into();
 
         let DepositCollateralParams {
             amount,
@@ -130,9 +131,11 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
 
                 if asset_id == VUSD_ASSET_ID {
                     let amount_usd = if config.decimals > USD_DECIMALS {
-                        (amount_u128 / 10u128.pow((config.decimals - USD_DECIMALS) as u32)) as i128
+                        (amount_u128 / 10_u128.pow(u32::from(config.decimals - USD_DECIMALS)))
+                            .cast_signed()
                     } else {
-                        (amount_u128 * 10u128.pow((USD_DECIMALS - config.decimals) as u32)) as i128
+                        (amount_u128 * 10_u128.pow(u32::from(USD_DECIMALS - config.decimals)))
+                            .cast_signed()
                     };
                     let current_cash = state.get_cash_balance_usd(domain);
                     state.set_cash_balance_usd(domain, current_cash + amount_usd);
@@ -157,12 +160,12 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
 ///
 /// This implements the "Deterministic Withdrawal Policy":
 /// 1. Calculate current account equity in USD.
-/// 2. Verify equity >= reserved_margin_usd (risk check).
+/// 2. Verify equity >= `reserved_margin_usd` (risk check).
 /// 3. If ok, proceed with asynchronous ledger transfer.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCollateralResult {
     let result: Result<(), WithdrawCollateralError> = (async {
-        let user: User = ic_cdk::caller().into();
+        let user: User = caller().into();
 
         let WithdrawCollateralParams {
             amount,
@@ -210,13 +213,13 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                 .map_err(|_| WithdrawCollateralError::MathOverflow)?;
 
             let price_value = metric.price_usd.value;
-            let price_decimals = metric.price_usd.decimals as u32;
-            let asset_decimals = config.decimals as u32;
-            let target_decimals = USD_DECIMALS as u32;
+            let price_decimals = u32::from(metric.price_usd.decimals);
+            let asset_decimals = u32::from(config.decimals);
+            let target_decimals = u32::from(USD_DECIMALS);
 
             let withdrawal_value_usd_nat = {
                 let haircut_multiplier =
-                    (BPS_BASE as u128).saturating_sub(metric.haircut_bps as u128);
+                    u128::from(BPS_BASE).saturating_sub(u128::from(metric.haircut_bps));
 
                 let numerator =
                     Nat::from(amount_u128) * Nat::from(price_value) * Nat::from(haircut_multiplier);
@@ -225,10 +228,11 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
 
                 if total_source_decimals >= target_decimals {
                     let divisor = Nat::from(BPS_BASE)
-                        * Nat::from(10u128.pow(total_source_decimals - target_decimals));
+                        * Nat::from(10_u128.pow(total_source_decimals - target_decimals));
                     numerator / divisor
                 } else {
-                    let multiplier = Nat::from(10u128.pow(target_decimals - total_source_decimals));
+                    let multiplier =
+                        Nat::from(10_u128.pow(target_decimals - total_source_decimals));
                     (numerator * multiplier) / Nat::from(BPS_BASE)
                 }
             };
@@ -256,11 +260,11 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                     let mut temp_state = state.clone();
                     if asset_id == VUSD_ASSET_ID {
                         let amount_usd = if config.decimals > USD_DECIMALS {
-                            (amount_u128 / 10u128.pow((config.decimals - USD_DECIMALS) as u32))
-                                as i128
+                            (amount_u128 / 10_u128.pow(u32::from(config.decimals - USD_DECIMALS)))
+                                .cast_signed()
                         } else {
-                            (amount_u128 * 10u128.pow((USD_DECIMALS - config.decimals) as u32))
-                                as i128
+                            (amount_u128 * 10_u128.pow(u32::from(USD_DECIMALS - config.decimals)))
+                                .cast_signed()
                         };
                         let current_cash = temp_state.get_cash_balance_usd(domain);
                         temp_state.set_cash_balance_usd(domain, current_cash - amount_usd);
@@ -297,11 +301,11 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                     let domain = domain.unwrap_or(BalanceDomain::Settlement);
                     if asset_id == VUSD_ASSET_ID {
                         let amount_usd = if config.decimals > USD_DECIMALS {
-                            (amount_u128 / 10u128.pow((config.decimals - USD_DECIMALS) as u32))
-                                as i128
+                            (amount_u128 / 10_u128.pow(u32::from(config.decimals - USD_DECIMALS)))
+                                .cast_signed()
                         } else {
-                            (amount_u128 * 10u128.pow((USD_DECIMALS - config.decimals) as u32))
-                                as i128
+                            (amount_u128 * 10_u128.pow(u32::from(USD_DECIMALS - config.decimals)))
+                                .cast_signed()
                         };
                         let current_cash = state.get_cash_balance_usd(domain);
                         state.set_cash_balance_usd(domain, current_cash - amount_usd);
@@ -408,6 +412,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
 
 /// Returns a list of all supported collateral assets with their metrics.
 #[query(guard = "caller_is_not_anonymous")]
+#[must_use]
 pub fn get_collateral_assets() -> Vec<CollateralAssetInfo> {
     let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
     let metrics = ASSET_METRICS.with(|m| m.borrow().clone());
@@ -423,19 +428,19 @@ pub fn get_collateral_assets() -> Vec<CollateralAssetInfo> {
 
 #[cfg(test)]
 mod tests {
-    use candid::Principal;
-    use shared::types::BalanceDomain;
+    use candid::{Nat, Principal};
+    use shared::{constants::BPS_BASE, types::BalanceDomain};
 
-    use super::*;
+    use crate::types::{margin::AccountState, user::User};
 
     #[test]
-    fn test_withdrawal_value_calculation_with_haircut() {
-        let amount_u128 = 100_000_000u128; // 1 ICP (8 decimals)
-        let price_value = 10_000_000u128; // $10 (6 decimals)
-        let price_decimals = 6u32;
-        let asset_decimals = 8u32;
-        let target_decimals = 6u32;
-        let haircut_bps = 1000u16; // 10% haircut
+    fn withdrawal_value_calculation_with_haircut() {
+        let amount_u128 = 100_000_000_u128; // 1 ICP (8 decimals)
+        let price_value = 10_000_000_u128; // $10 (6 decimals)
+        let price_decimals = 6_u32;
+        let asset_decimals = 8_u32;
+        let target_decimals = 6_u32;
+        let haircut_bps = 1000_u16; // 10% haircut
 
         // Manual calculation:
         // Market value = (1e8 * 10e6) / 10^(8+6-6) = 1e14 / 1e8 = 1e6 ($1 USD, wait)
@@ -450,7 +455,7 @@ mod tests {
         // divisor = 10000 * 10^(8+6-6) = 1e4 * 1e8 = 1e12
         // value = 9e18 / 1e12 = 9e6 = 9 USD. Correct.
 
-        let haircut_multiplier = (BPS_BASE as u128).saturating_sub(haircut_bps as u128);
+        let haircut_multiplier = u128::from(BPS_BASE).saturating_sub(u128::from(haircut_bps));
 
         let numerator =
             Nat::from(amount_u128) * Nat::from(price_value) * Nat::from(haircut_multiplier);
@@ -459,10 +464,10 @@ mod tests {
 
         let value_usd_nat = if total_source_decimals >= target_decimals {
             let divisor = Nat::from(BPS_BASE)
-                * Nat::from(10u128.pow(total_source_decimals - target_decimals));
+                * Nat::from(10_u128.pow(total_source_decimals - target_decimals));
             numerator / divisor
         } else {
-            let multiplier = Nat::from(10u128.pow(target_decimals - total_source_decimals));
+            let multiplier = Nat::from(10_u128.pow(target_decimals - total_source_decimals));
             (numerator * multiplier) / Nat::from(BPS_BASE)
         };
 
@@ -471,10 +476,10 @@ mod tests {
     }
 
     #[test]
-    fn test_domain_isolation() {
+    fn domain_isolation() {
         let user_p = Principal::from_slice(&[42]);
         let user = User(user_p);
-        let asset_id = "ICP".to_string();
+        let asset_id = "ICP".to_owned();
 
         let mut state = AccountState::new(user);
 

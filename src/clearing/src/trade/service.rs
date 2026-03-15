@@ -1,3 +1,5 @@
+use core::cell::RefCell;
+
 use shared::types::{BalanceDomain, Series};
 
 use crate::{
@@ -25,7 +27,7 @@ pub(crate) async fn internal_execute_trade(params: ExecuteTradeParams) -> Result
 
     let series = ensure_series_registered(&series_id).await?;
 
-    execute_trade_impl(series, params)
+    execute_trade_impl(&series, params)
 }
 
 /// Internal implementation of trade execution.
@@ -35,7 +37,7 @@ pub(crate) async fn internal_execute_trade(params: ExecuteTradeParams) -> Result
 /// 3. Atomically updates account balances and positions.
 /// 4. Emits execution events.
 pub(crate) fn execute_trade_impl(
-    series: Series,
+    series: &Series,
     params: ExecuteTradeParams,
 ) -> Result<bool, TradeError> {
     if EXECUTED_TRADES.with(|m| m.borrow().contains_key(&params.trade_id)) {
@@ -67,57 +69,49 @@ pub(crate) fn execute_trade_impl(
         new_seller_qty,
         new_seller_margin_usd,
     ): (i128, i128, i128, i128, i128, u128, i128, u128) =
-        POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| {
+        POSITIONS.with(|positions: &RefCell<PositionsMap>| {
             let positions = positions.borrow();
 
             let old_buyer_margin = positions
                 .get(&(buyer, series_id.clone(), outcome_id.clone()))
-                .map(|p| p.reserved_margin_usd)
-                .unwrap_or(0);
+                .map_or(0, |p| p.reserved_margin_usd);
             let old_seller_margin = positions
                 .get(&(seller, series_id.clone(), outcome_id.clone()))
-                .map(|p| p.reserved_margin_usd)
-                .unwrap_or(0);
+                .map_or(0, |p| p.reserved_margin_usd);
 
             let old_buyer_qty = positions
                 .get(&(buyer, series_id.clone(), outcome_id.clone()))
-                .map(|p| p.net_qty)
-                .unwrap_or(0);
+                .map_or(0, |p| p.net_qty);
             let old_seller_qty = positions
                 .get(&(seller, series_id.clone(), outcome_id.clone()))
-                .map(|p| p.net_qty)
-                .unwrap_or(0);
+                .map_or(0, |p| p.net_qty);
 
             let new_buyer_qty = old_buyer_qty + qty;
             let new_seller_qty = old_seller_qty - qty;
 
             let new_buyer_margin_usd =
-                get_required_margin(&series, &price, new_buyer_qty, &outcome_id).map_err(|e| {
+                get_required_margin(series, &price, new_buyer_qty, &outcome_id).map_err(|e| {
                     TradeError::Common(CommonError::Internal(format!(
-                        "Payoff calculation failed: {:?}",
-                        e
+                        "Payoff calculation failed: {e:?}"
                     )))
                 })?;
             let new_seller_margin_usd =
-                get_required_margin(&series, &price, new_seller_qty, &outcome_id).map_err(|e| {
+                get_required_margin(series, &price, new_seller_qty, &outcome_id).map_err(|e| {
                     TradeError::Common(CommonError::Internal(format!(
-                        "Payoff calculation failed: {:?}",
-                        e
+                        "Payoff calculation failed: {e:?}"
                     )))
                 })?;
 
             let old_buyer_margin_at_price =
-                get_required_margin(&series, &price, old_buyer_qty, &outcome_id).map_err(|e| {
+                get_required_margin(series, &price, old_buyer_qty, &outcome_id).map_err(|e| {
                     TradeError::Common(CommonError::Internal(format!(
-                        "Payoff calculation failed: {:?}",
-                        e
+                        "Payoff calculation failed: {e:?}"
                     )))
                 })?;
             let old_seller_margin_at_price =
-                get_required_margin(&series, &price, old_seller_qty, &outcome_id).map_err(|e| {
+                get_required_margin(series, &price, old_seller_qty, &outcome_id).map_err(|e| {
                     TradeError::Common(CommonError::Internal(format!(
-                        "Payoff calculation failed: {:?}",
-                        e
+                        "Payoff calculation failed: {e:?}"
                     )))
                 })?;
 
@@ -127,21 +121,21 @@ pub(crate) fn execute_trade_impl(
             // This ensures that any PnL from the previous price to 'price'
             // is realized immediately into the cash balance.
             let buyer_cash_delta =
-                (new_buyer_margin_usd as i128) - (old_buyer_margin_at_price as i128);
+                (new_buyer_margin_usd.cast_signed()) - (old_buyer_margin_at_price.cast_signed());
             let seller_cash_delta =
-                (new_seller_margin_usd as i128) - (old_seller_margin_at_price as i128);
+                (new_seller_margin_usd.cast_signed()) - (old_seller_margin_at_price.cast_signed());
 
             // Margin Delta:
             // We calculate how much the TOTAL reserved margin in the account should change.
             // This must account for:
             // 1. The change in the position's margin requirement (new_margin - old_pos_margin)
             // 2. The release of the specific order's collateral (unblock_amount)
-            let b_reserved_delta = (new_buyer_margin_usd as i128)
-                - (old_buyer_margin as i128)
-                - (buyer_unblock_amount.unwrap_or(0) as i128);
-            let s_reserved_delta = (new_seller_margin_usd as i128)
-                - (old_seller_margin as i128)
-                - (seller_unblock_amount.unwrap_or(0) as i128);
+            let b_reserved_delta = (new_buyer_margin_usd.cast_signed())
+                - (old_buyer_margin.cast_signed())
+                - (buyer_unblock_amount.unwrap_or(0).cast_signed());
+            let s_reserved_delta = (new_seller_margin_usd.cast_signed())
+                - (old_seller_margin.cast_signed())
+                - (seller_unblock_amount.unwrap_or(0).cast_signed());
 
             Ok((
                 buyer_cash_delta,
@@ -172,7 +166,7 @@ pub(crate) fn execute_trade_impl(
 
         // Calculate target reserved margin based on the delta.
         let target_buyer_reserved = if buyer_reserved_delta > 0 {
-            buyer_acc.get_reserved_margin_usd(domain) + (buyer_reserved_delta as u128)
+            buyer_acc.get_reserved_margin_usd(domain) + (buyer_reserved_delta.cast_unsigned())
         } else {
             buyer_acc
                 .get_reserved_margin_usd(domain)
@@ -184,7 +178,7 @@ pub(crate) fn execute_trade_impl(
             // Check equity against target margin.
             let buyer_equity = buyer_acc.calculate_raw_equity_i128(domain, &configs, &metrics);
 
-            if buyer_equity < (target_buyer_reserved as i128) {
+            if buyer_equity < (target_buyer_reserved.cast_signed()) {
                 return Err(TradeError::InsufficientMargin {
                     user: buyer,
                     balance: buyer_acc.calculate_equity_usd(domain, &configs, &metrics),
@@ -200,7 +194,7 @@ pub(crate) fn execute_trade_impl(
             .unwrap_or_else(|| AccountState::new(seller));
 
         let target_seller_reserved = if seller_reserved_delta > 0 {
-            seller_acc.get_reserved_margin_usd(domain) + (seller_reserved_delta as u128)
+            seller_acc.get_reserved_margin_usd(domain) + (seller_reserved_delta.cast_unsigned())
         } else {
             seller_acc
                 .get_reserved_margin_usd(domain)
@@ -209,7 +203,7 @@ pub(crate) fn execute_trade_impl(
 
         if domain == BalanceDomain::Settlement {
             let seller_equity = seller_acc.calculate_raw_equity_i128(domain, &configs, &metrics);
-            if seller_equity < (target_seller_reserved as i128) {
+            if seller_equity < (target_seller_reserved.cast_signed()) {
                 return Err(TradeError::InsufficientMargin {
                     user: seller,
                     balance: seller_acc.calculate_equity_usd(domain, &configs, &metrics),
@@ -243,7 +237,7 @@ pub(crate) fn execute_trade_impl(
         seller_acc.set_reserved_margin_usd(domain, target_seller_reserved);
     });
 
-    POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| {
+    POSITIONS.with(|positions: &RefCell<PositionsMap>| {
         let mut positions = positions.borrow_mut();
 
         let b_pos = positions
@@ -318,34 +312,37 @@ pub(crate) fn execute_trade_impl(
 #[cfg(test)]
 mod tests {
     use candid::Principal;
-    use shared::types::{Description, PayoffType, PayoutUnit, Price, Series, SeriesId};
+    use shared::types::{
+        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId,
+    };
 
-    use super::*;
     use crate::{
+        api::trade::errors::TradeError,
         memory::{ACCOUNT_STATES, SERIES},
-        types::{trade::TradeId, user::User},
+        trade::{service::execute_trade_impl, types::ExecuteTradeParams},
+        types::{margin::AccountState, trade::TradeId, user::User},
     };
 
     #[test]
-    fn test_trade_atomicity_on_failure() {
+    fn trade_atomicity_on_failure() {
         let buyer_p = Principal::from_slice(&[1]);
         let seller_p = Principal::from_slice(&[2]);
         let buyer = User(buyer_p);
         let seller = User(seller_p);
-        let series_id = SeriesId::from("test".to_string());
+        let series_id = SeriesId::from("test".to_owned());
 
         let series = Series {
             series_id: series_id.clone(),
-            underlying: "BTC".to_string(),
-            expiry_ns: 2000000000,
+            underlying: "BTC".to_owned(),
+            expiry_ns: 2_000_000_000,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(50_000_000_000, 8)),
             price_precision: 8,
             payout_unit: PayoutUnit::usd(),
-            oracle_source: "oracle".to_string(),
+            oracle_source: "oracle".to_owned(),
             creator: Principal::anonymous(),
-            created_at_ns: 1000000000,
-            title: "Test".to_string(),
+            created_at_ns: 1_000_000_000,
+            title: "Test".to_owned(),
             description: Description::plain("Test Description"),
             outcomes: None,
             icon_url: None,
@@ -372,7 +369,7 @@ mod tests {
         });
 
         let params = ExecuteTradeParams {
-            trade_id: TradeId::from("trade_1".to_string()),
+            trade_id: TradeId::from("trade_1".to_owned()),
             series_id: series_id.clone(),
             buyer,
             seller,
@@ -384,7 +381,7 @@ mod tests {
         };
 
         // Trade should fail for seller due to insufficient margin
-        let result = execute_trade_impl(series, params);
+        let result = execute_trade_impl(&series, params);
         assert!(result.is_err());
 
         if let Err(TradeError::InsufficientMargin { user, .. }) = result {

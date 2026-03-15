@@ -16,6 +16,7 @@ pub enum PayoutUnit {
 }
 
 impl PayoutUnit {
+    #[must_use]
     pub fn as_id_bytes(&self) -> Vec<u8> {
         match self {
             PayoutUnit::Fiat(f) => format!("FIAT-{}", f.as_str()).into_bytes(),
@@ -24,6 +25,7 @@ impl PayoutUnit {
         }
     }
 
+    #[must_use]
     pub fn usd() -> Self {
         PayoutUnit::Fiat(FiatUnit::Usd)
     }
@@ -34,7 +36,7 @@ impl PayoutUnit {
             PayoutUnit::Asset(a) => Ok(a.clone()),
             PayoutUnit::Fiat(FiatUnit::Usd) => Principal::from_text(VUSD_LEDGER)
                 .map(Asset::Icrc)
-                .map_err(|_| AssetError::InvalidAssetId(VUSD_LEDGER.to_string())),
+                .map_err(|_| AssetError::InvalidAssetId(VUSD_LEDGER.to_owned())),
             _ => Err(AssetError::UnsupportedAsset),
         }
     }
@@ -51,6 +53,7 @@ pub enum FiatUnit {
 }
 
 impl FiatUnit {
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             FiatUnit::Usd => "USD",
@@ -69,6 +72,7 @@ pub enum NonMonetaryUnit {
 }
 
 impl NonMonetaryUnit {
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             NonMonetaryUnit::Points => "POINTS",

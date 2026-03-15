@@ -1,5 +1,8 @@
 use candid::Principal;
-use ic_cdk::api::is_controller;
+use ic_cdk::{
+    api::{is_controller, time},
+    caller,
+};
 use ic_cdk_macros::{query, update};
 use shared::types::Oracle;
 
@@ -14,9 +17,10 @@ use crate::{
 
 /// Registers a new price oracle in the registry.
 #[update(guard = "caller_is_controller")]
+#[must_use]
 pub fn add_oracle(params: AddOracleParams) -> OracleResult {
     let result: Result<(), OracleError> = {
-        let caller = ic_cdk::caller();
+        let caller = caller();
 
         let oracle_id = canonical_id_part(&params.oracle_id);
 
@@ -32,7 +36,7 @@ pub fn add_oracle(params: AddOracleParams) -> OracleResult {
                 metadata: params.metadata,
                 authorized_principals: params.authorized_principals.into_iter().collect(),
                 manager: caller,
-                registered_at_ns: ic_cdk::api::time(),
+                registered_at_ns: time(),
             };
 
             store.insert(oracle_id, oracle);
@@ -45,9 +49,10 @@ pub fn add_oracle(params: AddOracleParams) -> OracleResult {
 
 /// Updates the metadata of an existing oracle.
 #[update(guard = "caller_is_not_anonymous")]
+#[must_use]
 pub fn update_oracle_metadata(params: UpdateOracleMetadataParams) -> OracleResult {
     let result: Result<(), OracleError> = {
-        let caller = ic_cdk::caller();
+        let caller = caller();
 
         ORACLE_STORE.with(|store| {
             let mut store = store.borrow_mut();
@@ -69,9 +74,10 @@ pub fn update_oracle_metadata(params: UpdateOracleMetadataParams) -> OracleResul
 
 /// Adds or removes authorised principals for an oracle.
 #[update(guard = "caller_is_not_anonymous")]
+#[must_use]
 pub fn manage_oracle_principals(params: ManageOraclePrincipalsParams) -> OracleResult {
     let result: Result<(), OracleError> = {
-        let caller = ic_cdk::caller();
+        let caller = caller();
 
         ORACLE_STORE.with(|store| {
             let mut store = store.borrow_mut();
@@ -100,15 +106,21 @@ pub fn manage_oracle_principals(params: ManageOraclePrincipalsParams) -> OracleR
 
 /// Retrieves the details of a specific oracle by its ID.
 #[query]
+#[must_use]
+#[expect(clippy::needless_pass_by_value)]
 pub fn get_oracle(oracle_id: String) -> Option<Oracle> {
-    ORACLE_STORE.with(|store| store.borrow().get(&oracle_id).cloned())
+    let oracle_id: &str = oracle_id.as_str();
+    ORACLE_STORE.with(|store| return store.borrow().get(oracle_id).cloned())
 }
 
 /// Checks if a principal is authorized to push settlement data for a given oracle.
 #[query]
+#[must_use]
+#[expect(clippy::needless_pass_by_value)]
 pub fn is_oracle_authorized(oracle_id: String, principal: Principal) -> bool {
+    let oracle_id: &str = oracle_id.as_str();
     ORACLE_STORE.with(|store| {
-        if let Some(oracle) = store.borrow().get(&oracle_id) {
+        if let Some(oracle) = store.borrow().get(oracle_id) {
             oracle.authorized_principals.contains(&principal)
         } else {
             false

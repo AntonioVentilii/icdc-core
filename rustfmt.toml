@@ -4,3 +4,6 @@ comment_width = 120
 imports_granularity = "Crate"
 group_imports = "StdExternalCrate"
 reorder_impl_items = true
+reorder_imports = true
+reorder_modules = true
+unstable_features = true

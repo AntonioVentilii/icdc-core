@@ -21,7 +21,7 @@ impl From<Chain> for ChainId {
 /// canonical EVM `chain_id` as defined in the Ethereum ecosystem.
 ///
 /// Chain IDs follow the standard used by EVM networks:
-/// https://chainlist.org/
+/// <https://chainlist.org>
 #[derive(
     CandidType, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
@@ -33,6 +33,7 @@ pub enum Chain {
 }
 impl Chain {
     /// Returns the canonical EVM chain ID for this network.
+    #[must_use]
     pub fn id(self) -> ChainId {
         match self {
             Self::Ethereum => 1,
@@ -43,10 +44,10 @@ impl Chain {
     }
 
     /// Returns the symbol of the native gas token for this chain.
+    #[must_use]
     pub fn native_symbol(self) -> &'static str {
         match self {
-            Self::Ethereum => "ETH",
-            Self::Base => "ETH",
+            Self::Ethereum | Self::Base => "ETH",
             Self::Bsc => "BNB",
             Self::Polygon => "POL",
         }
@@ -78,11 +79,13 @@ pub struct NativeEvmAsset {
     pub decimals: u8,
 }
 impl NativeEvmAsset {
+    #[must_use]
     pub fn decimals(&self) -> u32 {
-        self.decimals as u32
+        u32::from(self.decimals)
     }
 
     /// Returns the canonical native asset for a given chain.
+    #[must_use]
     pub fn native(chain: Chain) -> Self {
         match chain {
             Chain::Ethereum | Chain::Base | Chain::Bsc | Chain::Polygon => Self {
@@ -114,30 +117,32 @@ pub struct ErcToken {
     pub decimals: u8,
 }
 impl ErcToken {
+    #[must_use]
     pub fn decimals(&self) -> u32 {
-        self.decimals as u32
+        u32::from(self.decimals)
     }
 
     /// Returns the canonical USDC token for a given chain.
+    #[must_use]
     pub fn usdc(chain: Chain) -> Self {
         match chain {
             Chain::Ethereum => Self {
-                token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string(),
+                token_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_owned(),
                 chain_id: chain.id(),
                 decimals: 6,
             },
             Chain::Base => Self {
-                token_address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913".to_string(),
+                token_address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913".to_owned(),
                 chain_id: chain.id(),
                 decimals: 6,
             },
             Chain::Bsc => Self {
-                token_address: "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d".to_string(),
+                token_address: "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d".to_owned(),
                 chain_id: chain.id(),
                 decimals: 18,
             },
             Chain::Polygon => Self {
-                token_address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359".to_string(),
+                token_address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359".to_owned(),
                 chain_id: chain.id(),
                 decimals: 6,
             },
@@ -148,7 +153,7 @@ impl ErcToken {
     pub fn usdt(chain: Chain) -> Result<Self, AssetError> {
         match chain {
             Chain::Ethereum => Ok(Self {
-                token_address: "0xdAC17F958D2ee523a2206206994597C13D831ec7".to_string(),
+                token_address: "0xdAC17F958D2ee523a2206206994597C13D831ec7".to_owned(),
                 chain_id: chain.id(),
                 decimals: 6,
             }),

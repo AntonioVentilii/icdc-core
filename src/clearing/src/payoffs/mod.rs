@@ -2,6 +2,8 @@ pub(crate) mod fees;
 pub(crate) mod types;
 pub(crate) mod utils;
 
+use core::cmp::Ordering;
+
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
 use shared::{
@@ -33,22 +35,21 @@ pub enum PayoffError {
 /// # Arguments
 /// * `series` - The derivative series details.
 /// * `outcome_id` - The specific outcome (for categorical markets).
-/// * `settlement` - The settlement data (Price or OutcomeId).
+/// * `settlement` - The settlement data (Price or `OutcomeId`).
 pub fn get_unit_payoff(
     series: &Series,
     outcome_id: &Option<OutcomeId>,
     settlement: &SettlementInput,
 ) -> Result<u128, PayoffError> {
-    let asset_decimals = USD_DECIMALS as u32;
+    let asset_decimals = u32::from(USD_DECIMALS);
 
     match series.payoff_type {
         PayoffType::Binary | PayoffType::Call | PayoffType::Put => {
-            let settlement_price = match settlement {
-                SettlementInput::Price(p) => p,
-                _ => return Err(PayoffError::InvalidSettlementType),
+            let SettlementInput::Price(settlement_price) = settlement else {
+                return Err(PayoffError::InvalidSettlementType);
             };
 
-            let source_precision = settlement_price.decimals() as u32;
+            let source_precision = u32::from(settlement_price.decimals());
             let price_value = settlement_price.value();
 
             match series.payoff_type {
@@ -73,7 +74,7 @@ pub fn get_unit_payoff(
                             scale_price(
                                 p.value(),
                                 source_precision,
-                                p.decimals() as u32,
+                                u32::from(p.decimals()),
                                 RoundingMode::Floor,
                             )
                         })
@@ -98,7 +99,7 @@ pub fn get_unit_payoff(
                             scale_price(
                                 p.value(),
                                 source_precision,
-                                p.decimals() as u32,
+                                u32::from(p.decimals()),
                                 RoundingMode::Floor,
                             )
                         })
@@ -119,12 +120,11 @@ pub fn get_unit_payoff(
         }
 
         PayoffType::Categorical => {
-            let resolved_id = match settlement {
-                SettlementInput::Outcome(id) => id,
-                _ => return Err(PayoffError::InvalidSettlementType),
+            let SettlementInput::Outcome(resolved_id) = settlement else {
+                return Err(PayoffError::InvalidSettlementType);
             };
 
-            let unit_payoff = 10u128.pow(asset_decimals);
+            let unit_payoff = 10_u128.pow(asset_decimals);
 
             match outcome_id {
                 Some(id) if id == resolved_id => Ok(unit_payoff),
@@ -140,8 +140,8 @@ pub fn get_unit_payoff(
 /// to be credited to the user's account at the end of the series.
 ///
 /// For Binary/Categorical products (Full Collateral model):
-/// - Long: Payout = Qty * UnitPayoff (where UnitPayoff is 0 or 1)
-/// - Short: Payout = Qty * (1.0 - UnitPayoff)
+/// - Long: Payout = Qty * `UnitPayoff` (where `UnitPayoff` is 0 or 1)
+/// - Short: Payout = Qty * (1.0 - `UnitPayoff`)
 ///
 /// Total System Payout (Long + Short) always equals 1 unit of collateral.
 pub fn get_settlement_value(
@@ -151,8 +151,8 @@ pub fn get_settlement_value(
 ) -> Result<u128, PayoffError> {
     let qty = position.net_qty;
     let abs_qty = qty.unsigned_abs();
-    let asset_decimals = USD_DECIMALS as u32;
-    let max_payoff = 10u128.pow(asset_decimals);
+    let asset_decimals = u32::from(USD_DECIMALS);
+    let max_payoff = 10_u128.pow(asset_decimals);
 
     let unit_payoff = get_unit_payoff(series, &position.outcome_id, settlement)?;
 
@@ -193,11 +193,11 @@ pub fn get_required_margin(
     _outcome_id: &Option<OutcomeId>,
 ) -> Result<u128, PayoffError> {
     let abs_qty = qty.unsigned_abs();
-    let asset_decimals = USD_DECIMALS as u32;
+    let asset_decimals = u32::from(USD_DECIMALS);
 
     match series.payoff_type {
         PayoffType::Binary => {
-            let source_precision = price.decimals() as u32;
+            let source_precision = u32::from(price.decimals());
             let price_value = price.value();
             // We use Ceil for margin to ensure the user always has SLIGHTLY MORE
             // than required, protecting the system against micro-insolvencies
@@ -208,19 +208,17 @@ pub fn get_required_margin(
                 source_precision,
                 RoundingMode::Ceil,
             );
-            let max_payoff = 10u128.pow(asset_decimals);
+            let max_payoff = 10_u128.pow(asset_decimals);
 
-            if qty > 0 {
-                Ok(abs_qty * scaled_price)
-            } else if qty < 0 {
-                Ok(abs_qty * (max_payoff.saturating_sub(scaled_price)))
-            } else {
-                Ok(0)
+            match qty.cmp(&0) {
+                Ordering::Greater => Ok(abs_qty * scaled_price),
+                Ordering::Less => Ok(abs_qty * (max_payoff.saturating_sub(scaled_price))),
+                Ordering::Equal => Ok(0),
             }
         }
 
         PayoffType::Call => {
-            let source_precision = price.decimals() as u32;
+            let source_precision = u32::from(price.decimals());
             let price_value = price.value();
             let scaled_price = scale_price(
                 price_value,
@@ -234,7 +232,7 @@ pub fn get_required_margin(
         }
 
         PayoffType::Put => {
-            let source_precision = price.decimals() as u32;
+            let source_precision = u32::from(price.decimals());
             let price_value = price.value();
             let scaled_price = scale_price(
                 price_value,
@@ -244,11 +242,11 @@ pub fn get_required_margin(
             );
 
             if qty < 0 {
-                if let Some(ref strike) = series.strike {
+                if let Some(strike) = &series.strike {
                     let scaled_strike = scale_price(
                         strike.value(),
                         asset_decimals,
-                        strike.decimals() as u32,
+                        u32::from(strike.decimals()),
                         RoundingMode::Ceil,
                     );
                     Ok(abs_qty * scaled_strike)
@@ -261,8 +259,8 @@ pub fn get_required_margin(
         }
 
         PayoffType::Categorical => {
-            let unit_payoff = 10u128.pow(asset_decimals);
-            let source_precision = price.decimals() as u32;
+            let unit_payoff = 10_u128.pow(asset_decimals);
+            let source_precision = u32::from(price.decimals());
             let price_value = price.value();
             let scaled_price = scale_price(
                 price_value,
@@ -271,12 +269,10 @@ pub fn get_required_margin(
                 RoundingMode::Ceil,
             );
 
-            if qty > 0 {
-                Ok(abs_qty * scaled_price)
-            } else if qty < 0 {
-                Ok(abs_qty * unit_payoff.saturating_sub(scaled_price))
-            } else {
-                Ok(0)
+            match qty.cmp(&0) {
+                Ordering::Greater => Ok(abs_qty * scaled_price),
+                Ordering::Less => Ok(abs_qty * unit_payoff.saturating_sub(scaled_price)),
+                Ordering::Equal => Ok(0),
             }
         }
     }
@@ -286,10 +282,14 @@ pub fn get_required_margin(
 mod tests {
     use candid::Principal;
     use shared::types::{
-        BalanceDomain, Description, PayoffType, PayoutUnit, SeriesId, SettlementInput,
+        BalanceDomain, Description, OutcomeId, PayoffType, PayoutUnit, Price, Series, SeriesId,
+        SettlementInput,
     };
 
-    use super::*;
+    use crate::{
+        payoffs::{get_required_margin, get_settlement_value, PayoffError},
+        types::margin::Position,
+    };
 
     fn mock_series(
         payoff_type: PayoffType,
@@ -298,17 +298,17 @@ mod tests {
         payout_unit: PayoutUnit,
     ) -> Series {
         Series {
-            series_id: SeriesId::from("test".to_string()),
-            underlying: "ICP".to_string(),
+            series_id: SeriesId::from("test".to_owned()),
+            underlying: "ICP".to_owned(),
             expiry_ns: 0,
             payoff_type,
             strike,
             price_precision: precision,
             payout_unit,
-            oracle_source: "oracle".to_string(),
+            oracle_source: "oracle".to_owned(),
             creator: Principal::anonymous(),
-            created_at_ns: 1000000000,
-            title: "Test".to_string(),
+            created_at_ns: 1_000_000_000,
+            title: "Test".to_owned(),
             description: Description::plain("Test Description"),
             outcomes: None,
             icon_url: None,
@@ -318,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn test_binary_payoff_usd() {
+    fn binary_payoff_usd() {
         let series = mock_series(PayoffType::Binary, None, 8, PayoutUnit::usd());
         let price = Price::new(60_000_000, 8);
         let settlement = SettlementInput::Price(price);
@@ -350,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn test_call_payoff() {
+    fn call_payoff() {
         let strike_price = Price::new(100_0000_0000, 8); // $100.00
         let settle_price = Price::new(150_0000_0000, 8); // $150.00
         let settlement = SettlementInput::Price(settle_price);
@@ -376,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn test_put_payoff() {
+    fn put_payoff() {
         let strike_price = Price::new(100_0000_0000, 8); // $100.00
         let settle_price = Price::new(80_0000_0000, 8); // $80.00
         let settlement = SettlementInput::Price(settle_price);
@@ -402,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn test_margin_logic() {
+    fn margin_logic() {
         let price = Price::new(60_000_000, 8); // 0.60 (8 decimals)
         let series_usd = mock_series(PayoffType::Binary, None, 8, PayoutUnit::usd());
         // Long Binary (6 decimals): 0.60 -> 600,000
@@ -450,7 +450,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rounding_precision() {
+    fn rounding_precision() {
         // USD: 6 decimals
         let series_usd = mock_series(PayoffType::Binary, None, 8, PayoutUnit::usd());
 
@@ -480,9 +480,9 @@ mod tests {
     }
 
     #[test]
-    fn test_categorical_payoff() {
-        let outcome_a = OutcomeId::from("A".to_string());
-        let outcome_b = OutcomeId::from("B".to_string());
+    fn categorical_payoff() {
+        let outcome_a = OutcomeId::from("A".to_owned());
+        let outcome_b = OutcomeId::from("B".to_owned());
         let series = mock_series(PayoffType::Categorical, None, 8, PayoutUnit::usd());
 
         let pos_a = Position {
@@ -524,8 +524,8 @@ mod tests {
     }
 
     #[test]
-    fn test_categorical_margin() {
-        let outcome_a = OutcomeId::from("A".to_string());
+    fn categorical_margin() {
+        let outcome_a = OutcomeId::from("A".to_owned());
         let series = mock_series(PayoffType::Categorical, None, 8, PayoutUnit::usd());
         let price = Price::new(40_000_000, 8); // $0.40
 
@@ -542,7 +542,7 @@ mod tests {
     }
 
     #[test]
-    fn test_missing_strike() {
+    fn missing_strike() {
         let series = mock_series(PayoffType::Call, None, 8, PayoutUnit::usd());
         let settlement = SettlementInput::Price(Price::new(100, 8));
         let pos = Position {
@@ -558,9 +558,9 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_settlement_type() {
+    fn invalid_settlement_type() {
         let series = mock_series(PayoffType::Binary, None, 8, PayoutUnit::usd());
-        let settlement = SettlementInput::Outcome(OutcomeId::from("A".to_string()));
+        let settlement = SettlementInput::Outcome(OutcomeId::from("A".to_owned()));
         let pos = Position {
             user: Principal::anonymous().into(),
             series_id: series.series_id.clone(),

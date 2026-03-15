@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use candid::CandidType;
+use candid::{CandidType, Nat};
 use serde::{Deserialize, Serialize};
 use shared::types::AssetId;
 
@@ -16,11 +16,11 @@ pub struct GetFundsResult {
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum WithdrawFundResult {
-    Ok(candid::Nat),
+    Ok(Nat),
     Err(WithdrawFundError),
 }
-impl From<Result<candid::Nat, WithdrawFundError>> for WithdrawFundResult {
-    fn from(res: Result<candid::Nat, WithdrawFundError>) -> Self {
+impl From<Result<Nat, WithdrawFundError>> for WithdrawFundResult {
+    fn from(res: Result<Nat, WithdrawFundError>) -> Self {
         match res {
             Ok(v) => Self::Ok(v),
             Err(e) => Self::Err(e),
@@ -36,7 +36,7 @@ pub enum CancelFundWithdrawalResult {
 impl From<Result<(), CancelFundWithdrawalError>> for CancelFundWithdrawalResult {
     fn from(res: Result<(), CancelFundWithdrawalError>) -> Self {
         match res {
-            Ok(_) => Self::Ok,
+            Ok(()) => Self::Ok,
             Err(e) => Self::Err(e),
         }
     }
@@ -50,7 +50,7 @@ pub enum UpdateAssetPriceResult {
 impl From<Result<(), UpdateAssetPriceError>> for UpdateAssetPriceResult {
     fn from(res: Result<(), UpdateAssetPriceError>) -> Self {
         match res {
-            Ok(_) => Self::Ok,
+            Ok(()) => Self::Ok,
             Err(e) => Self::Err(e),
         }
     }
@@ -64,7 +64,7 @@ pub enum RegisterIcrcAssetResult {
 impl From<Result<(), RegisterIcrcAssetError>> for RegisterIcrcAssetResult {
     fn from(res: Result<(), RegisterIcrcAssetError>) -> Self {
         match res {
-            Ok(_) => Self::Ok,
+            Ok(()) => Self::Ok,
             Err(e) => Self::Err(e),
         }
     }

@@ -14,6 +14,7 @@ use crate::{
 pub struct AccountService;
 
 impl AccountService {
+    #[must_use]
     pub fn build_account_state_response(
         state: AccountState,
         domain: BalanceDomain,
@@ -21,24 +22,24 @@ impl AccountService {
         metrics: &BTreeMap<AssetId, AssetMetrics>,
     ) -> AccountStateResponse {
         let mut asset_worths = Vec::new();
-        let target_decimals = USD_DECIMALS as u32;
+        let target_decimals = u32::from(USD_DECIMALS);
 
         if let Some(domain_balances) = state.balances.get(&domain) {
             for (asset_id, balance) in domain_balances {
-                let mut value_usd = 0u128;
-                let mut pre_haircut_value_usd = 0u128;
-                let mut haircut_bps = 0u16;
+                let mut value_usd = 0_u128;
+                let mut pre_haircut_value_usd = 0_u128;
+                let mut haircut_bps = 0_u16;
 
                 if let (Some(config), Some(metric)) = (configs.get(asset_id), metrics.get(asset_id))
                 {
                     if config.is_enabled {
                         let price_value = metric.price_usd.value;
-                        let price_decimals = metric.price_usd.decimals as u32;
-                        let asset_decimals = config.decimals as u32;
+                        let price_decimals = u32::from(metric.price_usd.decimals);
+                        let asset_decimals = u32::from(config.decimals);
                         haircut_bps = metric.haircut_bps;
 
                         let haircut_multiplier =
-                            (BPS_BASE as u128).saturating_sub(metric.haircut_bps as u128);
+                            u128::from(BPS_BASE).saturating_sub(u128::from(metric.haircut_bps));
 
                         let numerator_pre = Nat::from(*balance) * Nat::from(price_value);
                         let numerator_post = numerator_pre.clone() * Nat::from(haircut_multiplier);
@@ -47,13 +48,13 @@ impl AccountService {
 
                         let (v_post_nat, v_pre_nat) = if total_source_decimals >= target_decimals {
                             let diff = total_source_decimals - target_decimals;
-                            let divisor_raw = Nat::from(10u128.pow(diff));
+                            let divisor_raw = Nat::from(10_u128.pow(diff));
                             let divisor_post = Nat::from(BPS_BASE) * divisor_raw.clone();
 
                             (numerator_post / divisor_post, numerator_pre / divisor_raw)
                         } else {
                             let diff = target_decimals - total_source_decimals;
-                            let multiplier_raw = Nat::from(10u128.pow(diff));
+                            let multiplier_raw = Nat::from(10_u128.pow(diff));
                             (
                                 (numerator_post * multiplier_raw.clone()) / Nat::from(BPS_BASE),
                                 numerator_pre * multiplier_raw,
@@ -76,13 +77,13 @@ impl AccountService {
         }
 
         let total_equity_usd = state.calculate_equity_usd(domain, configs, metrics);
-        let available_equity_usd = state.get_available_equity_usd(domain, configs, metrics);
+        let available_margin_usd = state.get_available_margin_usd(domain, configs, metrics);
 
         AccountStateResponse {
             state,
             assets: asset_worths,
             total_equity_usd,
-            available_equity_usd,
+            available_margin_usd,
         }
     }
 }
@@ -96,7 +97,7 @@ mod tests {
     use crate::types::user::User;
 
     #[test]
-    fn test_build_account_state_response_basic() {
+    fn build_account_state_response_basic() {
         let mut state = AccountState::new(User::from(Principal::anonymous()));
         let asset_id = AssetId::from("ICP");
         state.set_balance(BalanceDomain::Settlement, asset_id.clone(), 100_000_000); // 1 ICP (8 decimals)
@@ -107,7 +108,7 @@ mod tests {
             CollateralAssetConfig {
                 asset_id: asset_id.clone(),
                 asset: Asset::Icrc(Principal::anonymous()),
-                symbol: "ICP".to_string(),
+                symbol: "ICP".to_owned(),
                 decimals: 8,
                 is_enabled: true,
                 oracle_id: None,
@@ -148,7 +149,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_account_state_response_high_decimals() {
+    fn build_account_state_response_high_decimals() {
         let mut state = AccountState::new(User::from(Principal::anonymous()));
         let asset_id = AssetId::from("ETH");
         state.set_balance(
@@ -163,7 +164,7 @@ mod tests {
             CollateralAssetConfig {
                 asset_id: asset_id.clone(),
                 asset: Asset::Icrc(Principal::anonymous()),
-                symbol: "ETH".to_string(),
+                symbol: "ETH".to_owned(),
                 decimals: 18,
                 is_enabled: true,
                 oracle_id: None,
@@ -199,7 +200,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_account_state_response_low_decimals() {
+    fn build_account_state_response_low_decimals() {
         let mut state = AccountState::new(User::from(Principal::anonymous()));
         let asset_id = AssetId::from("USDC");
         state.set_balance(BalanceDomain::Settlement, asset_id.clone(), 1_000_000); // 1 USDC (6 decimals)
@@ -210,7 +211,7 @@ mod tests {
             CollateralAssetConfig {
                 asset_id: asset_id.clone(),
                 asset: Asset::Icrc(Principal::anonymous()),
-                symbol: "USDC".to_string(),
+                symbol: "USDC".to_owned(),
                 decimals: 6,
                 is_enabled: true,
                 oracle_id: None,
@@ -246,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    fn test_high_haircut_with_decimal_scaling() {
+    fn high_haircut_with_decimal_scaling() {
         let mut state = AccountState::new(User::from(Principal::anonymous()));
         let asset_id = AssetId::from("icp");
         // 1 ICP (8 decimals)
@@ -258,7 +259,7 @@ mod tests {
             CollateralAssetConfig {
                 asset_id: asset_id.clone(),
                 asset: Asset::Icrc(Principal::anonymous()),
-                symbol: "ICP".to_string(),
+                symbol: "ICP".to_owned(),
                 decimals: 8,
                 is_enabled: true,
                 oracle_id: None,

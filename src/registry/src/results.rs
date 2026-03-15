@@ -39,7 +39,7 @@ pub enum OracleResult {
 impl From<Result<(), OracleError>> for OracleResult {
     fn from(value: Result<(), OracleError>) -> Self {
         match value {
-            Ok(_) => OracleResult::Ok,
+            Ok(()) => OracleResult::Ok,
             Err(e) => OracleResult::Err(e),
         }
     }

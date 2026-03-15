@@ -100,6 +100,7 @@ pub struct DepositPlan {
 }
 impl DepositPlan {
     /// Retrieves an existing deposit plan or creates a new one if it doesn't exist.
+    #[must_use]
     pub fn get_or_create(params: DepositPlanParams) -> Self {
         DEPOSIT_PLANS.with(|m| {
             let mut m = m.borrow_mut();
@@ -161,6 +162,7 @@ pub struct WithdrawalPlan {
 }
 impl WithdrawalPlan {
     /// Retrieves an existing withdrawal plan or creates a new one if it doesn't exist.
+    #[must_use]
     pub fn get_or_create(params: WithdrawalPlanParams) -> Self {
         WITHDRAWAL_PLANS.with(|m| {
             let mut m = m.borrow_mut();
@@ -229,6 +231,7 @@ pub struct SettlementPlan {
 
 impl SettlementPlan {
     /// Retrieves an existing settlement plan or creates a new one if it doesn't exist.
+    #[must_use]
     pub fn get_or_create(params: SettlementPlanParams) -> Self {
         SETTLEMENT_PLANS.with(|m| {
             let mut m = m.borrow_mut();
@@ -301,6 +304,7 @@ pub struct FundWithdrawalPlan {
 
 impl FundWithdrawalPlan {
     /// Retrieves an existing fund withdrawal plan or creates a new one.
+    #[must_use]
     pub fn get_or_create(params: FundWithdrawalPlanParams) -> Self {
         FUND_WITHDRAWAL_PLANS.with(|m| {
             let mut m = m.borrow_mut();

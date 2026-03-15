@@ -1,5 +1,7 @@
+use core::cell::RefCell;
 use std::collections::BTreeMap;
 
+use ic_cdk::caller;
 use ic_cdk_macros::{query, update};
 use shared::types::{AssetId, BalanceDomain};
 
@@ -24,8 +26,9 @@ use crate::{
 ///
 /// This does not refresh balances from external ledgers.
 #[query(guard = "caller_is_not_anonymous")]
+#[must_use]
 pub fn get_account_state_query() -> GetAccountStateResult {
-    let user: User = ic_cdk::caller().into();
+    let user: User = caller().into();
 
     ACCOUNT_STATES
         .with(|accounts| {
@@ -57,7 +60,7 @@ pub fn get_account_state_query() -> GetAccountStateResult {
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn get_account_state(params: GetAccountStateParams) -> GetAccountStateResult {
     let result: Result<(AccountState, BalanceDomain), AccountStateError> = (async {
-        let user: User = ic_cdk::caller().into();
+        let user: User = caller().into();
 
         let GetAccountStateParams { refresh, domain } = params;
 
@@ -137,8 +140,9 @@ pub async fn get_account_state(params: GetAccountStateParams) -> GetAccountState
 
 /// Retrieves a specific position for the caller.
 #[query(guard = "caller_is_not_anonymous")]
+#[must_use]
 pub fn get_position(params: GetPositionParams) -> Option<Position> {
-    let caller: User = ic_cdk::caller().into();
+    let caller: User = caller().into();
 
     POSITIONS.with(|positions| {
         positions
@@ -150,9 +154,10 @@ pub fn get_position(params: GetPositionParams) -> Option<Position> {
 
 /// Retrieves all open positions for the caller.
 #[query(guard = "caller_is_not_anonymous")]
+#[must_use]
 pub fn get_positions() -> Vec<Position> {
-    let caller: User = ic_cdk::caller().into();
-    POSITIONS.with(|positions: &std::cell::RefCell<PositionsMap>| {
+    let caller: User = caller().into();
+    POSITIONS.with(|positions: &RefCell<PositionsMap>| {
         positions
             .borrow()
             .iter()

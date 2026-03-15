@@ -1,11 +1,11 @@
 pub(crate) mod account;
 pub(crate) mod errors;
-pub(crate) mod event;
+pub mod event;
 pub(crate) mod http;
-pub(crate) mod margin;
+pub mod margin;
 pub(crate) mod payment;
-pub(crate) mod plans;
-pub(crate) mod state;
+pub mod plans;
+pub mod state;
 pub(crate) mod stats;
-pub(crate) mod trade;
-pub(crate) mod user;
+pub mod trade;
+pub mod user;

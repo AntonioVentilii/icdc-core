@@ -13,15 +13,15 @@ use crate::{
 };
 
 #[test]
-fn test_categorical_arbitrage_validation() {
-    let series_id = SeriesId::from("arb_test".to_string());
-    let outcome_yes = OutcomeId::from("Yes".to_string());
-    let outcome_no = OutcomeId::from("No".to_string());
+fn categorical_arbitrage_validation() {
+    let series_id = SeriesId::from("arb_test".to_owned());
+    let outcome_yes = OutcomeId::from("Yes".to_owned());
+    let outcome_no = OutcomeId::from("No".to_owned());
 
     let series = Series {
         series_id: series_id.clone(),
-        underlying: "ARB_TEST".to_string(),
-        expiry_ns: 2000000000,
+        underlying: "ARB_TEST".to_owned(),
+        expiry_ns: 2_000_000_000,
         payoff_type: PayoffType::Categorical,
         strike: None,
         price_precision: 6,
@@ -29,21 +29,21 @@ fn test_categorical_arbitrage_validation() {
         outcomes: Some(vec![
             Outcome {
                 id: outcome_yes.clone(),
-                title: "Yes".to_string(),
+                title: "Yes".to_owned(),
                 description: None,
                 icon_url: None,
             },
             Outcome {
                 id: outcome_no.clone(),
-                title: "No".to_string(),
+                title: "No".to_owned(),
                 description: None,
                 icon_url: None,
             },
         ]),
-        oracle_source: "oracle".to_string(),
+        oracle_source: "oracle".to_owned(),
         creator: Principal::anonymous(),
-        created_at_ns: 1000000000,
-        title: "Arbitrage Test".to_string(),
+        created_at_ns: 1_000_000_000,
+        title: "Arbitrage Test".to_owned(),
         description: Description::plain("Test for arbitrage"),
         icon_url: None,
         banner_url: None,
@@ -54,7 +54,7 @@ fn test_categorical_arbitrage_validation() {
 
     // 1. Submit "Yes" order at $0.60 (Allowed)
     let params_yes = SubmitLimitOrderParams {
-        order_id: OrderId::from("order_yes".to_string()),
+        order_id: OrderId::from("order_yes".to_owned()),
         series_id: series_id.clone(),
         outcome_id: Some(outcome_yes.clone()),
         side: Side::Buy,
@@ -84,7 +84,7 @@ fn test_categorical_arbitrage_validation() {
 
     // 2. Submit "No" order at $0.30 (Allowed, Sum = 0.90)
     let params_no_low = SubmitLimitOrderParams {
-        order_id: OrderId::from("order_no_low".to_string()),
+        order_id: OrderId::from("order_no_low".to_owned()),
         series_id: series_id.clone(),
         outcome_id: Some(outcome_no.clone()),
         side: Side::Buy,
@@ -95,7 +95,7 @@ fn test_categorical_arbitrage_validation() {
 
     // 3. Submit "No" order at $0.50 (Violation, Sum = 0.60 + 0.50 = 1.10)
     let params_no_high = SubmitLimitOrderParams {
-        order_id: OrderId::from("order_no_high".to_string()),
+        order_id: OrderId::from("order_no_high".to_owned()),
         series_id: series_id.clone(),
         outcome_id: Some(outcome_no.clone()),
         side: Side::Buy,
@@ -113,21 +113,21 @@ fn test_categorical_arbitrage_validation() {
 }
 
 #[test]
-fn test_binary_arbitrage_validation() {
-    let series_id = SeriesId::from("binary_arb".to_string());
+fn binary_arbitrage_validation() {
+    let series_id = SeriesId::from("binary_arb".to_owned());
     let series = Series {
         series_id: series_id.clone(),
-        underlying: "BTC".to_string(),
-        expiry_ns: 2000000000,
+        underlying: "BTC".to_owned(),
+        expiry_ns: 2_000_000_000,
         payoff_type: PayoffType::Binary,
         strike: Some(Price::new(50_000, 0)),
         price_precision: 6,
         payout_unit: PayoutUnit::usd(),
         outcomes: None,
-        oracle_source: "oracle".to_string(),
+        oracle_source: "oracle".to_owned(),
         creator: Principal::anonymous(),
-        created_at_ns: 1000000000,
-        title: "Binary Arb".to_string(),
+        created_at_ns: 1_000_000_000,
+        title: "Binary Arb".to_owned(),
         description: Description::plain("Binary arb test"),
         icon_url: None,
         banner_url: None,
@@ -136,7 +136,7 @@ fn test_binary_arbitrage_validation() {
 
     // Price $1.10 (Violation)
     let params = SubmitLimitOrderParams {
-        order_id: OrderId::from("order1".to_string()),
+        order_id: OrderId::from("order1".to_owned()),
         series_id: series_id.clone(),
         outcome_id: None,
         side: Side::Buy,

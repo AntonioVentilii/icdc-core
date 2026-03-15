@@ -12,7 +12,8 @@ pub struct DecimalValue {
 }
 
 impl DecimalValue {
-    /// Creates a new DecimalValue.
+    /// Creates a new `DecimalValue`.
+    #[must_use]
     pub fn new(value: u128, decimals: u8) -> Self {
         Self { value, decimals }
     }

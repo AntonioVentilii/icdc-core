@@ -1,5 +1,6 @@
 use candid::CandidType;
 use serde::Deserialize;
+use serde_bytes::ByteBuf;
 
 /// Represents a header field in an HTTP request or response.
 #[derive(CandidType, Deserialize, Clone, Debug)]
@@ -13,7 +14,7 @@ pub struct HttpRequest {
     /// The HTTP method (e.g., "GET", "POST").
     pub method: String,
     /// The request body.
-    pub body: serde_bytes::ByteBuf,
+    pub body: ByteBuf,
     /// The request headers.
     pub headers: Vec<HeaderField>,
 }
@@ -22,7 +23,7 @@ pub struct HttpRequest {
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct HttpResponse {
     /// The response body.
-    pub body: serde_bytes::ByteBuf,
+    pub body: ByteBuf,
     /// The response headers.
     pub headers: Vec<HeaderField>,
     /// The HTTP status code.

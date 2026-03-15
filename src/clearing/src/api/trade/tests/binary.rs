@@ -6,24 +6,24 @@ use shared::types::{
 use crate::{api::trade::tests::utils::*, trade::types::ExecuteTradeParams, types::trade::TradeId};
 
 #[test]
-fn test_binary_lifecycle_scenario() {
+fn binary_lifecycle_scenario() {
     let seller = create_test_user(1);
     let buyer = create_test_user(2);
-    let series_id = SeriesId::from("binary_test".to_string());
+    let series_id = SeriesId::from("binary_test".to_owned());
 
     let series = Series {
         series_id: series_id.clone(),
-        underlying: "BITCOIN_UP_50K".to_string(),
-        expiry_ns: 2000000000,
+        underlying: "BITCOIN_UP_50K".to_owned(),
+        expiry_ns: 2_000_000_000,
         payoff_type: PayoffType::Binary,
         strike: Some(Price::new(50_000, 0)),
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
         outcomes: None,
-        oracle_source: "oracle".to_string(),
+        oracle_source: "oracle".to_owned(),
         creator: Principal::anonymous(),
-        created_at_ns: 1000000000,
-        title: "Binary Test".to_string(),
+        created_at_ns: 1_000_000_000,
+        title: "Binary Test".to_owned(),
         description: Description::plain("Yes/No Market"),
         icon_url: None,
         banner_url: None,
@@ -39,14 +39,14 @@ fn test_binary_lifecycle_scenario() {
     let qty = 10;
 
     execute_trade_checked(
-        series.clone(),
+        &series.clone(),
         ExecuteTradeParams {
-            trade_id: TradeId::from("trade_1".to_string()),
+            trade_id: TradeId::from("trade_1".to_owned()),
             series_id: series_id.clone(),
             outcome_id: None,
             buyer,
             seller,
-            qty: qty as i128,
+            qty: i128::from(qty),
             price,
             buyer_unblock_amount: None,
             seller_unblock_amount: None,
@@ -63,7 +63,7 @@ fn test_binary_lifecycle_scenario() {
 
     // 3. Final Settlement: Result is "Yes" (Price = 1.0)
     // 1.0 USD with 8 decimals = 100,000,000
-    settle_series_checked(&series, SettlementInput::Price(Price::new(100_000_000, 8)));
+    settle_series_checked(&series, &SettlementInput::Price(Price::new(100_000_000, 8)));
 
     // Final Balances:
     // Buyer: $7 (cash) + 10 * $1.00 (payoff) = $17.00 = 17,000,000
@@ -73,24 +73,24 @@ fn test_binary_lifecycle_scenario() {
 }
 
 #[test]
-fn test_binary_settle_no() {
+fn binary_settle_no() {
     let seller = create_test_user(1);
     let buyer = create_test_user(2);
-    let series_id = SeriesId::from("binary_test_no".to_string());
+    let series_id = SeriesId::from("binary_test_no".to_owned());
 
     let series = Series {
         series_id: series_id.clone(),
-        underlying: "BITCOIN_UP_50K".to_string(),
-        expiry_ns: 2000000000,
+        underlying: "BITCOIN_UP_50K".to_owned(),
+        expiry_ns: 2_000_000_000,
         payoff_type: PayoffType::Binary,
         strike: Some(Price::new(50_000, 0)),
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
         outcomes: None,
-        oracle_source: "oracle".to_string(),
+        oracle_source: "oracle".to_owned(),
         creator: Principal::anonymous(),
-        created_at_ns: 1000000000,
-        title: "Binary Test NO".to_string(),
+        created_at_ns: 1_000_000_000,
+        title: "Binary Test NO".to_owned(),
         description: Description::plain("Yes/No Market - Result No"),
         icon_url: None,
         banner_url: None,
@@ -103,14 +103,14 @@ fn test_binary_settle_no() {
     let qty = 10;
 
     execute_trade_checked(
-        series.clone(),
+        &series.clone(),
         ExecuteTradeParams {
-            trade_id: TradeId::from("trade_no".to_string()),
+            trade_id: TradeId::from("trade_no".to_owned()),
             series_id: series_id.clone(),
             outcome_id: None,
             buyer,
             seller,
-            qty: qty as i128,
+            qty: i128::from(qty),
             price,
             buyer_unblock_amount: None,
             seller_unblock_amount: None,
@@ -118,7 +118,7 @@ fn test_binary_settle_no() {
     );
 
     // 0.0 USD with 8 decimals = 0
-    settle_series_checked(&series, SettlementInput::Price(Price::new(0, 8)));
+    settle_series_checked(&series, &SettlementInput::Price(Price::new(0, 8)));
 
     // Final Balances:
     // Buyer: $7 (cash) + 10 * $0 (payoff) = $7.00 = 7,000,000

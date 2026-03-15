@@ -1,9 +1,10 @@
-use std::ops::Bound;
+use core::ops::Bound;
 
+use ic_cdk::{api::time, caller};
 use ic_cdk_macros::{query, update};
 use shared::{
     constants::{MAX_SERIES_DESCRIPTION_LEN, MAX_SERIES_TITLE_LEN},
-    types::{Series, SeriesId, SeriesIdParams},
+    types::{PayoutUnit, Series, SeriesId, SeriesIdParams},
 };
 
 use crate::{
@@ -28,6 +29,7 @@ use crate::{
 /// * [`AddSeriesResult::Err`] with [`SeriesError::SeriesAlreadyExists`] if the series is already
 ///   registered.
 #[update(guard = "caller_is_authorized_creator")]
+#[must_use]
 pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
     let AddSeriesParams {
         underlying,
@@ -46,7 +48,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
     } = params;
 
     // Validate payout unit - currently only USD is supported across the protocol
-    if payout_unit != shared::types::PayoutUnit::usd() {
+    if payout_unit != PayoutUnit::usd() {
         return Err(SeriesError::UnsupportedPayoutUnit).into();
     }
 
@@ -84,8 +86,8 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
         payout_unit,
         outcomes,
         oracle_source,
-        creator: ic_cdk::caller(),
-        created_at_ns: ic_cdk::api::time(),
+        creator: caller(),
+        created_at_ns: time(),
         title,
         description,
         icon_url,
@@ -116,12 +118,16 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
 /// * `Some(Series)` if the series exists in the registry.
 /// * `None` otherwise.
 #[query]
+#[must_use]
+#[expect(clippy::needless_pass_by_value)]
 pub fn get_series(series_id: SeriesId) -> Option<Series> {
-    SERIES_STORE.with(|store| store.borrow().get(&series_id).cloned())
+    SERIES_STORE.with(|store| return store.borrow().get(&series_id).cloned())
 }
 
 /// Returns a paginated page of registered derivative series, optionally filtered.
 #[query]
+#[must_use]
+#[expect(clippy::needless_pass_by_value)]
 pub fn list_series_with(params: ListSeriesParams) -> SeriesPage {
     SERIES_STORE.with(|store| {
         let store = store.borrow();
@@ -147,6 +153,7 @@ pub fn list_series_with(params: ListSeriesParams) -> SeriesPage {
 
 /// Returns a paginated page of all registered derivative series.
 #[query]
+#[must_use]
 pub fn list_series(pagination: PaginationParams) -> SeriesPage {
     let params = ListSeriesParams {
         pagination: Some(pagination),
@@ -158,22 +165,22 @@ pub fn list_series(pagination: PaginationParams) -> SeriesPage {
 
 #[cfg(test)]
 mod tests {
-    use shared::types::{BalanceDomain, Description, PayoffType, PayoutUnit};
+    use shared::types::{BalanceDomain, Description, FiatUnit, PayoffType, PayoutUnit};
 
-    use super::*;
+    use crate::{api::add_series, AddSeriesParams, AddSeriesResult, SeriesError};
 
     #[test]
-    fn test_add_series_unsupported_payout_unit() {
+    fn add_series_unsupported_payout_unit() {
         let params = AddSeriesParams {
-            underlying: "ICP".to_string(),
+            underlying: "ICP".to_owned(),
             balance_domain: BalanceDomain::Settlement,
             expiry_ns: 1000,
             payoff_type: PayoffType::Call,
             strike: None,
             price_precision: 8,
-            payout_unit: PayoutUnit::Fiat(shared::types::FiatUnit::Eur), // Unsupported
-            oracle_source: "oracle".to_string(),
-            title: "Test".to_string(),
+            payout_unit: PayoutUnit::Fiat(FiatUnit::Eur), // Unsupported
+            oracle_source: "oracle".to_owned(),
+            title: "Test".to_owned(),
             description: Description::plain("Test"),
             outcomes: None,
             icon_url: None,

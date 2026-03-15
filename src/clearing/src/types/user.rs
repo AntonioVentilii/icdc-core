@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct User(pub Principal);
 impl User {
     /// Returns the underlying [`Principal`].
+    #[must_use]
     pub fn principal(self) -> Principal {
         self.0
     }

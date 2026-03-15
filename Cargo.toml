@@ -8,7 +8,6 @@ edition = "2021"
 
 [workspace.dependencies]
 candid = "0.10"
-clearing = { path = "src/clearing" }
 registry = { path = "src/registry" }
 minter = { path = "src/minter" }
 shared = { path = "src/shared" }
@@ -21,11 +20,28 @@ ic-cdk = "0.17"
 num-traits = "0.2.19"
 ic-cdk-macros = "0.17"
 ic-cdk-timers = "0.10"
+pocket-ic = "12.0.0"
 
 [workspace.lints.rust]
 warnings = "deny"
-unused_attributes = "warn"
+unused_attributes = "deny"
+redundant_imports = "deny"
 
 [workspace.lints.clippy]
-pedantic = { level = "warn", priority = -1 }
-allow_attributes = "warn"
+pedantic = { level = "deny", priority = -1 }
+enum_glob_use = "deny"
+single_component_path_imports = "warn"
+absolute_paths = "deny"
+allow_attributes = "deny"
+std_instead_of_core = "deny"
+unseparated_literal_suffix = "deny"
+redundant_test_prefix = "deny"
+str_to_string = "deny"
+string_add = "deny"
+suspicious_xor_used_as_pow = "deny"
+missing_errors_doc = { level = "allow", priority = 1 }
+missing_panics_doc = { level = "allow", priority = 1 }
+unnecessary_wraps = { level = "allow", priority = 1 }
+too_many_lines = { level = "allow", priority = 1 }
+format_push_string = { level = "allow", priority = 1 }
+similar_names = { level = "allow", priority = 1 }

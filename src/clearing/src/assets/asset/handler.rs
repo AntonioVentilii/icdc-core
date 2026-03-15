@@ -29,7 +29,7 @@ impl AssetHandler {
     pub async fn transfer(&self, params: AssetTransferParams<'_>) -> Result<u128, AssetError> {
         match self {
             AssetHandler::Icrc(h) => h.transfer(params).await,
-            AssetHandler::Evm(h) => h.transfer(params).await,
+            AssetHandler::Evm(h) => h.transfer(params),
         }
     }
 
@@ -40,16 +40,16 @@ impl AssetHandler {
     ) -> Result<u128, AssetError> {
         match self {
             AssetHandler::Icrc(h) => h.transfer_from(params).await,
-            AssetHandler::Evm(h) => h.transfer_from(params).await,
+            AssetHandler::Evm(h) => h.transfer_from(params),
         }
     }
 
     /// Retrieves the transfer fee for the given asset.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub async fn get_fee(&self, asset: &Asset) -> Result<u128, AssetError> {
         match self {
             AssetHandler::Icrc(h) => h.get_fee(asset).await,
-            AssetHandler::Evm(h) => h.get_fee(asset).await,
+            AssetHandler::Evm(h) => h.get_fee(asset),
         }
     }
 }

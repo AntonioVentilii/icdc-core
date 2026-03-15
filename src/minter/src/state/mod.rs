@@ -6,7 +6,7 @@ pub fn read_config() -> Result<Config, String> {
     CONFIG.with(|c| {
         c.borrow()
             .clone()
-            .ok_or_else(|| "Config not initialised".to_string())
+            .ok_or_else(|| "Config not initialised".to_owned())
     })
 }
 

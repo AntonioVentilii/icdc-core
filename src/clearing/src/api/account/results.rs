@@ -30,7 +30,7 @@ pub struct AccountStateResponse {
     /// Total equity in USD (cash balance + sum of collateral values).
     pub total_equity_usd: u128,
     /// Available equity in USD (total equity - reserved margin).
-    pub available_equity_usd: i128,
+    pub available_margin_usd: i128,
 }
 
 /// Result of an account state retrieval request.

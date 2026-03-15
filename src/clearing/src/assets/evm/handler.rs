@@ -1,5 +1,6 @@
 use candid::{Nat, Principal};
-use num_traits::ToPrimitive;
+use ic_cdk::id;
+use num_traits::ToPrimitive as _;
 use shared::types::{
     asset::errors::AssetError,
     evm::{Chain, EvmAssetRef},
@@ -32,16 +33,16 @@ impl EvmHandler {
         match params.asset.as_evm()? {
             EvmAssetRef::Native(native) => {
                 let chain =
-                    Chain::try_from(native.chain_id).map_err(|_| AssetError::UnsupportedAsset)?;
+                    Chain::try_from(native.chain_id).map_err(|()| AssetError::UnsupportedAsset)?;
 
-                let config = self.get_rpc_config(chain);
+                let config = get_rpc_config(chain);
 
                 let res: Nat = self
                     .rpc_client
-                    .get_balance(address, "latest".to_string(), config)
+                    .get_balance(address, "latest".to_owned(), config)
                     .await
                     .map_err(|e| AssetError::CallError {
-                        method: "eth_getBalance".to_string(),
+                        method: "eth_getBalance".to_owned(),
                         code: 0,
                         message: e,
                     })?;
@@ -53,9 +54,9 @@ impl EvmHandler {
 
             EvmAssetRef::Erc20(token) => {
                 let chain =
-                    Chain::try_from(token.chain_id).map_err(|_| AssetError::UnsupportedAsset)?;
+                    Chain::try_from(token.chain_id).map_err(|()| AssetError::UnsupportedAsset)?;
 
-                let config = self.get_rpc_config(chain);
+                let config = get_rpc_config(chain);
 
                 let data = format!(
                     "0x70a08231000000000000000000000000{}",
@@ -67,12 +68,12 @@ impl EvmHandler {
                     .call(
                         token.token_address.clone(),
                         data,
-                        "latest".to_string(),
+                        "latest".to_owned(),
                         config,
                     )
                     .await
                     .map_err(|e| AssetError::CallError {
-                        method: "eth_call".to_string(),
+                        method: "eth_call".to_owned(),
                         code: 0,
                         message: e,
                     })?;
@@ -85,22 +86,22 @@ impl EvmHandler {
         }
     }
 
-    pub async fn transfer(&self, _params: AssetTransferParams<'_>) -> Result<u128, AssetError> {
+    #[expect(clippy::unused_self)]
+    pub fn transfer(&self, _params: AssetTransferParams<'_>) -> Result<u128, AssetError> {
         Err(AssetError::TransferError(
-            "EVM transfer not fully implemented yet".to_string(),
+            "EVM transfer not fully implemented yet".to_owned(),
         ))
     }
 
-    pub async fn transfer_from(
-        &self,
-        _params: AssetTransferFromParams<'_>,
-    ) -> Result<u128, AssetError> {
+    #[expect(clippy::unused_self)]
+    pub fn transfer_from(&self, _params: AssetTransferFromParams<'_>) -> Result<u128, AssetError> {
         Err(AssetError::TransferError(
-            "EVM transferFrom not fully implemented yet".to_string(),
+            "EVM transferFrom not fully implemented yet".to_owned(),
         ))
     }
 
-    pub async fn get_fee(&self, _asset: &Asset) -> Result<u128, AssetError> {
+    #[expect(clippy::unused_self)]
+    pub fn get_fee(&self, _asset: &Asset) -> Result<u128, AssetError> {
         // Standard gas limit for basic ETH/native transfers in this version.
         Ok(21000)
     }
@@ -115,7 +116,7 @@ impl EvmHandler {
             .eth_address(principal)
             .await
             .map_err(|e| AssetError::CallError {
-                method: "eth_address".to_string(),
+                method: "eth_address".to_owned(),
                 code: 0,
                 message: e,
             })?;
@@ -129,7 +130,7 @@ impl EvmHandler {
     async fn resolve_account(&self, account: AssetAccount) -> Result<String, AssetError> {
         match account {
             AssetAccount::UserClearing(u) => self.get_or_fetch_address(u.principal()).await,
-            AssetAccount::CanisterMain => self.get_or_fetch_address(ic_cdk::id()).await,
+            AssetAccount::CanisterMain => self.get_or_fetch_address(id()).await,
             AssetAccount::External(ExternalAssetAccount::Principal(principal)) => {
                 self.get_or_fetch_address(principal).await
             }
@@ -139,14 +140,14 @@ impl EvmHandler {
             AssetAccount::External(ExternalAssetAccount::Evm(address)) => Ok(address),
         }
     }
+}
 
-    fn get_rpc_config(&self, chain: Chain) -> RpcConfig {
-        let service = match chain {
-            Chain::Ethereum => RpcService::EthereumMainnet,
-            Chain::Base => RpcService::BaseMainnet,
-            Chain::Bsc => RpcService::BscMainnet,
-            Chain::Polygon => RpcService::PolygonMainnet,
-        };
-        RpcConfig { service }
-    }
+fn get_rpc_config(chain: Chain) -> RpcConfig {
+    let service = match chain {
+        Chain::Ethereum => RpcService::EthereumMainnet,
+        Chain::Base => RpcService::BaseMainnet,
+        Chain::Bsc => RpcService::BscMainnet,
+        Chain::Polygon => RpcService::PolygonMainnet,
+    };
+    RpcConfig { service }
 }

@@ -1,7 +1,8 @@
-use std::{cell::RefCell, collections::BTreeMap};
+use core::cell::RefCell;
+use std::collections::BTreeMap;
 
 use candid::Principal;
-use ic_cdk::storage;
+use ic_cdk::{storage, trap};
 use shared::types::{Oracle, Series, SeriesId};
 
 thread_local! {
@@ -15,12 +16,13 @@ thread_local! {
 
 pub fn save_state() {
     let state = (
-        SERIES_STORE.with(|s| s.borrow().clone()),
-        ORACLE_STORE.with(|o| o.borrow().clone()),
-        AUTHORIZED_CREATORS.with(|a| a.borrow().clone()),
+        SERIES_STORE.with(|s| return s.borrow().clone()),
+        ORACLE_STORE.with(|o| return o.borrow().clone()),
+        AUTHORIZED_CREATORS.with(|a| return a.borrow().clone()),
     );
 
-    storage::stable_save(state).expect("Failed to save to stable storage");
+    storage::stable_save(state)
+        .unwrap_or_else(|e| trap(&format!("Failed to save to stable storage: {e:?}",)));
 }
 
 pub fn restore_state() {
@@ -28,7 +30,8 @@ pub fn restore_state() {
         BTreeMap<SeriesId, Series>,
         BTreeMap<String, Oracle>,
         BTreeMap<Principal, bool>,
-    ) = storage::stable_restore().expect("Failed to restore from stable storage");
+    ) = storage::stable_restore()
+        .unwrap_or_else(|e| trap(&format!("Failed to restore from stable storage: {e:?}")));
 
     SERIES_STORE.with(|w| *w.borrow_mut() = series);
     ORACLE_STORE.with(|w| *w.borrow_mut() = oracles);

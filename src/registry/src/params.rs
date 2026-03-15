@@ -1,3 +1,5 @@
+use core::cmp::min;
+
 use candid::{CandidType, Deserialize, Principal};
 use serde::Serialize;
 use shared::types::{
@@ -57,11 +59,12 @@ impl PaginationParams {
     {
         let cursor = params.and_then(|p| p.cursor.as_ref());
         // Default to u64::MAX if no limit is provided ("give them all").
-        let limit = params.and_then(|p| p.limit).unwrap_or(u64::MAX) as usize;
+        let limit =
+            usize::try_from(params.and_then(|p| p.limit).unwrap_or(u64::MAX)).unwrap_or(usize::MAX);
 
         // Pre-allocate the vector with a sensible cap (100) to prevent
         // massive allocations if the requested limit is extremely high.
-        let mut items = Vec::with_capacity(std::cmp::min(limit, 100));
+        let mut items = Vec::with_capacity(min(limit, 100));
         let mut next_cursor = None;
 
         // Fallback: Skip items up to the cursor if the caller didn't use a range optimization.
@@ -110,6 +113,7 @@ pub struct ListSeriesParams {
 }
 impl ListSeriesParams {
     /// Returns true if the provided series matches all defined filter criteria.
+    #[must_use]
     pub fn matches(&self, series: &Series) -> bool {
         if let Some(underlying) = &self.underlying {
             if series.underlying.to_lowercase() != underlying.to_lowercase() {
@@ -214,24 +218,24 @@ pub struct ManageOraclePrincipalsParams {
 #[cfg(test)]
 mod tests {
     use candid::Principal;
-    use shared::types::{Description, PayoffType, PayoutUnit, SeriesId};
-
-    use super::*;
+    use shared::types::{
+        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId,
+    };
 
     fn create_test_series() -> Series {
         Series {
-            series_id: SeriesId::from("test-id".to_string()),
+            series_id: SeriesId::from("test-id".to_owned()),
             balance_domain: BalanceDomain::Settlement,
-            underlying: "ICP".to_string(),
+            underlying: "ICP".to_owned(),
             expiry_ns: 1000,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(100, 8)),
             price_precision: 8,
             payout_unit: PayoutUnit::usd(),
-            oracle_source: "Coingecko".to_string(),
+            oracle_source: "Coingecko".to_owned(),
             creator: Principal::anonymous(),
             created_at_ns: 0,
-            title: "ICP Call".to_string(),
+            title: "ICP Call".to_owned(),
             description: Description::plain("Test description"),
             outcomes: None,
             icon_url: None,
@@ -241,25 +245,26 @@ mod tests {
 
     mod list_series_params {
         use super::*;
+        use crate::ListSeriesParams;
 
         #[test]
-        fn test_matches_underlying() {
+        fn matches_underlying() {
             let series = create_test_series();
             let params = ListSeriesParams {
-                underlying: Some("icp".to_string()),
+                underlying: Some("icp".to_owned()),
                 ..Default::default()
             };
             assert!(params.matches(&series));
 
             let params = ListSeriesParams {
-                underlying: Some("btc".to_string()),
+                underlying: Some("btc".to_owned()),
                 ..Default::default()
             };
             assert!(!params.matches(&series));
         }
 
         #[test]
-        fn test_matches_payoff_type() {
+        fn matches_payoff_type() {
             let series = create_test_series();
             let params = ListSeriesParams {
                 payoff_type: Some(PayoffType::Call),
@@ -275,43 +280,43 @@ mod tests {
         }
 
         #[test]
-        fn test_matches_oracle_partial() {
+        fn matches_oracle_partial() {
             let series = create_test_series();
             let params = ListSeriesParams {
-                oracle_source: Some("GECKO".to_string()),
+                oracle_source: Some("GECKO".to_owned()),
                 ..Default::default()
             };
             assert!(params.matches(&series));
         }
 
         #[test]
-        fn test_matches_search_term() {
+        fn matches_search_term() {
             let series = create_test_series();
 
             // Match title
             let params = ListSeriesParams {
-                search_term: Some("call".to_string()),
+                search_term: Some("call".to_owned()),
                 ..Default::default()
             };
             assert!(params.matches(&series));
 
             // Match description
             let params = ListSeriesParams {
-                search_term: Some("test".to_string()),
+                search_term: Some("test".to_owned()),
                 ..Default::default()
             };
             assert!(params.matches(&series));
 
             // Match ID
             let params = ListSeriesParams {
-                search_term: Some("id".to_string()),
+                search_term: Some("id".to_owned()),
                 ..Default::default()
             };
             assert!(params.matches(&series));
 
             // No match
             let params = ListSeriesParams {
-                search_term: Some("nomatch".to_string()),
+                search_term: Some("nomatch".to_owned()),
                 ..Default::default()
             };
             assert!(!params.matches(&series));
@@ -319,15 +324,17 @@ mod tests {
     }
 
     mod pagination_params {
-        use super::*;
+        use shared::types::{Series, SeriesId};
+
+        use crate::{params::tests::create_test_series, PaginationParams};
 
         #[test]
-        fn test_apply_pagination_cursor() {
+        fn apply_pagination_cursor() {
             let s1 = create_test_series();
             let mut s2 = s1.clone();
-            s2.series_id = SeriesId::from("test-id-2".to_string());
+            s2.series_id = SeriesId::from("test-id-2".to_owned());
             let mut s3 = s1.clone();
-            s3.series_id = SeriesId::from("test-id-3".to_string());
+            s3.series_id = SeriesId::from("test-id-3".to_owned());
 
             let items = [
                 (s1.series_id.clone(), s1),
@@ -351,18 +358,21 @@ mod tests {
             let (result, next) =
                 PaginationParams::apply(pagination.as_ref(), items_ref.clone().into_iter());
             assert_eq!(result.len(), 2);
-            assert_eq!(next, Some(SeriesId::from("test-id-3".to_string())));
+            assert_eq!(next, Some(SeriesId::from("test-id-3".to_owned())));
 
             // From cursor
             let pagination = Some(PaginationParams {
                 limit: Some(1),
-                cursor: Some(SeriesId::from("test-id".to_string())),
+                cursor: Some(SeriesId::from("test-id".to_owned())),
             });
             let (result, next) =
                 PaginationParams::apply(pagination.as_ref(), items_ref.clone().into_iter());
             assert_eq!(result.len(), 1);
-            assert_eq!(result[0].series_id.as_str(), "test-id-2");
-            assert_eq!(next, Some(SeriesId::from("test-id-3".to_string())));
+            assert_eq!(
+                result.first().map(|r| r.series_id.as_str()),
+                Some("test-id-2")
+            );
+            assert_eq!(next, Some(SeriesId::from("test-id-3".to_owned())));
         }
     }
 }

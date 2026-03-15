@@ -4,7 +4,7 @@ use serde::Serialize;
 use crate::types::decimal::DecimalValue;
 
 /// Encapsulates a price with its numerical value and domain-specific metadata.
-/// Decouples the mathematical representation (DecimalValue) from the
+/// Decouples the mathematical representation (`DecimalValue`) from the
 /// reporting context (timestamp, oracle Source).
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Price {
@@ -18,6 +18,7 @@ pub struct Price {
 
 impl Price {
     /// Creates a new Price instance with just the numeric part.
+    #[must_use]
     pub fn new(value: u128, decimals: u8) -> Self {
         Self {
             decimal: DecimalValue::new(value, decimals),
@@ -27,11 +28,13 @@ impl Price {
     }
 
     /// Convenience getter for the numeric value.
+    #[must_use]
     pub fn value(&self) -> u128 {
         self.decimal.value
     }
 
     /// Convenience getter for the decimals.
+    #[must_use]
     pub fn decimals(&self) -> u8 {
         self.decimal.decimals
     }

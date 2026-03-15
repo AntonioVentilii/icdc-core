@@ -1,4 +1,6 @@
 use candid::{CandidType, Nat, Principal};
+use hex::encode;
+use ic_cdk::call;
 use serde::{Deserialize, Serialize};
 
 #[derive(CandidType, Serialize, Deserialize, Debug)]
@@ -23,14 +25,13 @@ impl ChainFusionSignerClient {
 
     pub async fn eth_address(&self, principal: Principal) -> Result<String, String> {
         let args = EthAddressArgs { principal };
-        let (res,): (Result<String, String>,) =
-            ic_cdk::call(self.canister_id, "eth_address", (args,))
-                .await
-                .map_err(|(code, msg)| format!("Call error: {}: {}", code as i32, msg))?;
+        let (res,): (Result<String, String>,) = call(self.canister_id, "eth_address", (args,))
+            .await
+            .map_err(|(code, msg)| format!("Call error: {}: {}", code as i32, msg))?;
         res
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub async fn eth_sign_transaction(
         &self,
         transaction: Vec<u8>,
@@ -41,7 +42,7 @@ impl ChainFusionSignerClient {
             principal,
         };
         let (res,): (Result<Vec<u8>, String>,) =
-            ic_cdk::call(self.canister_id, "eth_sign_transaction", (args,))
+            call(self.canister_id, "eth_sign_transaction", (args,))
                 .await
                 .map_err(|(code, msg)| format!("Call error: {}: {}", code as i32, msg))?;
         res
@@ -91,7 +92,7 @@ impl EvmRpcClient {
         config: RpcConfig,
     ) -> Result<Nat, String> {
         let (res,): (JsonRpcResult<Nat>,) =
-            ic_cdk::call(self.canister_id, "eth_getBalance", (address, block, config))
+            call(self.canister_id, "eth_getBalance", (address, block, config))
                 .await
                 .map_err(|(code, msg)| format!("Call error: {}: {}", code as i32, msg))?;
         match res {
@@ -100,15 +101,15 @@ impl EvmRpcClient {
         }
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub async fn send_raw_transaction(
         &self,
         raw_tx: Vec<u8>,
         config: RpcConfig,
     ) -> Result<String, String> {
-        let hex_tx = format!("0x{}", hex::encode(raw_tx));
+        let hex_tx = format!("0x{}", encode(raw_tx));
         let (res,): (JsonRpcResult<String>,) =
-            ic_cdk::call(self.canister_id, "eth_sendRawTransaction", (hex_tx, config))
+            call(self.canister_id, "eth_sendRawTransaction", (hex_tx, config))
                 .await
                 .map_err(|(code, msg)| format!("Call error: {}: {}", code as i32, msg))?;
         match res {
@@ -129,7 +130,7 @@ impl EvmRpcClient {
             data: Some(data),
         };
         let (res,): (JsonRpcResult<String>,) =
-            ic_cdk::call(self.canister_id, "eth_call", (call_args, block, config))
+            call(self.canister_id, "eth_call", (call_args, block, config))
                 .await
                 .map_err(|(code, msg)| format!("Call error: {}: {}", code as i32, msg))?;
         match res {

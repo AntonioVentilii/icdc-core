@@ -1,4 +1,5 @@
 use candid::{CandidType, Principal};
+use hex::encode;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -19,6 +20,7 @@ impl From<String> for SeriesId {
 }
 impl SeriesId {
     /// Returns the inner string representation of the series ID.
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -35,6 +37,7 @@ impl From<String> for OutcomeId {
     }
 }
 impl OutcomeId {
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -67,6 +70,7 @@ pub enum PayoffType {
 }
 impl PayoffType {
     /// Returns the unique identifier bytes used for ID generation.
+    #[must_use]
     pub fn as_id_bytes(&self) -> &'static [u8] {
         match self {
             PayoffType::Binary => b"BINARY",
@@ -127,6 +131,8 @@ impl Series {
     ///
     /// The ID is computed using a SHA-256 hash of all defining parameters,
     /// ensuring that identical series have the same ID while preventing collisions.
+    #[must_use]
+    #[expect(clippy::needless_pass_by_value)]
     pub fn generate_id(params: SeriesIdParams) -> SeriesId {
         let SeriesIdParams {
             underlying,
@@ -189,7 +195,7 @@ impl Series {
         hasher.update(b"|ORACLE|");
         hasher.update(oracle_source.as_bytes());
 
-        let series_id = hex::encode(hasher.finalize());
+        let series_id = encode(hasher.finalize());
 
         series_id.into()
     }
@@ -210,10 +216,14 @@ pub struct SeriesIdParams<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use candid::Principal;
+
+    use crate::types::{
+        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId, SeriesIdParams,
+    };
 
     #[test]
-    fn test_generate_series_id_consistency() {
+    fn generate_series_id_consistency() {
         let underlying = "ICP";
         let expiry = 1735689600;
         let payoff_type = PayoffType::Call;
@@ -250,7 +260,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_series_id_different_expiry() {
+    fn generate_series_id_different_expiry() {
         let underlying = "ICP";
         let payoff_type = PayoffType::Call;
         let strike = Some(Price::new(100, 8));
@@ -286,7 +296,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_series_id_different_precision() {
+    fn generate_series_id_different_precision() {
         let underlying = "ICP";
         let expiry = 100;
         let payoff_type = PayoffType::Call;
@@ -322,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn test_series_with_metadata() {
+    fn series_with_metadata() {
         let series = Series {
             series_id: SeriesId::from("test".to_string()),
             underlying: "ICP".to_string(),

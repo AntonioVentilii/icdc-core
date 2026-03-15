@@ -37,13 +37,14 @@ pub struct AccountState {
     pub user: User,
     /// Real deposited collateral assets and their balances, scoped by domain.
     pub balances: BTreeMap<BalanceDomain, BTreeMap<AssetId, u128>>,
-    /// Internal realised PnL / debt / credits, scoped by domain.
+    /// Internal realised `PnL` / debt / credits, scoped by domain.
     pub cash_balances_usd: BTreeMap<BalanceDomain, i128>,
     /// The total required margin reserved for current activity, scoped by domain.
     pub reserved_margins_usd: BTreeMap<BalanceDomain, u128>,
 }
 
 impl AccountState {
+    #[must_use]
     pub fn new(user: User) -> Self {
         Self {
             user,
@@ -54,6 +55,7 @@ impl AccountState {
     }
 
     /// Retrieves the balance for a specific asset in a given domain.
+    #[must_use]
     pub fn get_balance(&self, domain: BalanceDomain, asset_id: &AssetId) -> u128 {
         self.balances
             .get(&domain)
@@ -79,6 +81,7 @@ impl AccountState {
         }
     }
 
+    #[must_use]
     pub fn get_cash_balance_usd(&self, domain: BalanceDomain) -> i128 {
         *self.cash_balances_usd.get(&domain).unwrap_or(&0)
     }
@@ -91,6 +94,7 @@ impl AccountState {
         }
     }
 
+    #[must_use]
     pub fn get_reserved_margin_usd(&self, domain: BalanceDomain) -> u128 {
         *self.reserved_margins_usd.get(&domain).unwrap_or(&0)
     }
@@ -107,8 +111,9 @@ impl AccountState {
     /// domain.
     ///
     /// Formula (all integer):
-    /// value_usd = (balance * price_value * (10000 - haircut_bps)) / (10000 * 10^(decimals +
-    /// price_decimals - 6))
+    /// `value_usd` = (balance * `price_value` * (10000 - `haircut_bps`)) / (10000 * 10^(decimals +
+    /// `price_decimals` - 6))
+    #[must_use]
     pub fn calculate_equity_usd(
         &self,
         domain: BalanceDomain,
@@ -119,7 +124,7 @@ impl AccountState {
         if raw < 0 {
             0
         } else {
-            raw as u128
+            raw.cast_unsigned()
         }
     }
 
@@ -127,15 +132,17 @@ impl AccountState {
     ///
     /// Use this when you need to simulate post-settlement equity by adding a
     /// cashflow before applying the `max(0, ...)` floor.
+    #[must_use]
     pub fn calculate_raw_equity_i128(
         &self,
         domain: BalanceDomain,
         configs: &BTreeMap<AssetId, CollateralAssetConfig>,
         metrics: &BTreeMap<AssetId, AssetMetrics>,
     ) -> i128 {
-        let mut total_equity_usd: i128 = self.get_cash_balance_usd(domain);
+        let mut total_equity_usd: i128 = self.get_cash_balance_usd(domain)
+            + (self.get_reserved_margin_usd(domain).cast_signed());
 
-        let target_decimals = USD_DECIMALS as u32;
+        let target_decimals = u32::from(USD_DECIMALS);
 
         if let Some(domain_balances) = self.balances.get(&domain) {
             for (asset_id, balance) in domain_balances {
@@ -143,11 +150,11 @@ impl AccountState {
                 {
                     if config.is_enabled {
                         let price_value = metric.price_usd.value;
-                        let price_decimals = metric.price_usd.decimals as u32;
-                        let asset_decimals = config.decimals as u32;
+                        let price_decimals = u32::from(metric.price_usd.decimals);
+                        let asset_decimals = u32::from(config.decimals);
 
                         let haircut_multiplier =
-                            (BPS_BASE as u128).saturating_sub(metric.haircut_bps as u128);
+                            u128::from(BPS_BASE).saturating_sub(u128::from(metric.haircut_bps));
 
                         let numerator = Nat::from(*balance)
                             * Nat::from(price_value)
@@ -157,16 +164,16 @@ impl AccountState {
 
                         let value_usd_nat = if total_source_decimals >= target_decimals {
                             let divisor = Nat::from(BPS_BASE)
-                                * Nat::from(10u128.pow(total_source_decimals - target_decimals));
+                                * Nat::from(10_u128.pow(total_source_decimals - target_decimals));
                             numerator / divisor
                         } else {
                             let multiplier =
-                                Nat::from(10u128.pow(target_decimals - total_source_decimals));
+                                Nat::from(10_u128.pow(target_decimals - total_source_decimals));
                             (numerator * multiplier) / Nat::from(BPS_BASE)
                         };
 
                         let value_usd: u128 = value_usd_nat.0.try_into().unwrap_or(u128::MAX);
-                        total_equity_usd += value_usd as i128;
+                        total_equity_usd += value_usd.cast_signed();
                     }
                 }
             }
@@ -176,13 +183,14 @@ impl AccountState {
     }
 
     /// Calculates the available equity (excess margin) in USD for a specific domain.
-    pub fn get_available_equity_usd(
+    #[must_use]
+    pub fn get_available_margin_usd(
         &self,
         domain: BalanceDomain,
         configs: &BTreeMap<AssetId, CollateralAssetConfig>,
         metrics: &BTreeMap<AssetId, AssetMetrics>,
     ) -> i128 {
         let equity = self.calculate_equity_usd(domain, configs, metrics);
-        (equity as i128) - (self.get_reserved_margin_usd(domain) as i128)
+        (equity.cast_signed()) - (self.get_reserved_margin_usd(domain).cast_signed())
     }
 }

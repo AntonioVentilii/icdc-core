@@ -14,7 +14,7 @@ pub enum BlockCollateralResult {
 impl From<Result<(), BlockingError>> for BlockCollateralResult {
     fn from(value: Result<(), BlockingError>) -> Self {
         match value {
-            Ok(_) => BlockCollateralResult::Ok,
+            Ok(()) => BlockCollateralResult::Ok,
             Err(e) => BlockCollateralResult::Err(e),
         }
     }
@@ -31,7 +31,7 @@ pub enum UnblockCollateralResult {
 impl From<Result<(), BlockingError>> for UnblockCollateralResult {
     fn from(value: Result<(), BlockingError>) -> Self {
         match value {
-            Ok(_) => UnblockCollateralResult::Ok,
+            Ok(()) => UnblockCollateralResult::Ok,
             Err(e) => UnblockCollateralResult::Err(e),
         }
     }
@@ -48,7 +48,7 @@ pub enum DepositCollateralResult {
 impl From<Result<(), DepositCollateralError>> for DepositCollateralResult {
     fn from(value: Result<(), DepositCollateralError>) -> Self {
         match value {
-            Ok(_) => DepositCollateralResult::Ok,
+            Ok(()) => DepositCollateralResult::Ok,
             Err(e) => DepositCollateralResult::Err(e),
         }
     }
@@ -65,7 +65,7 @@ pub enum WithdrawCollateralResult {
 impl From<Result<(), WithdrawCollateralError>> for WithdrawCollateralResult {
     fn from(value: Result<(), WithdrawCollateralError>) -> Self {
         match value {
-            Ok(_) => WithdrawCollateralResult::Ok,
+            Ok(()) => WithdrawCollateralResult::Ok,
             Err(e) => WithdrawCollateralResult::Err(e),
         }
     }

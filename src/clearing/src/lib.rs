@@ -1,7 +1,9 @@
 use candid::Principal;
 use ic_cdk::export_candid;
 use ic_cdk_macros::{post_upgrade, pre_upgrade};
-use shared::types::{CollateralAssetConfig, CollateralAssetInfo, Series, SeriesId};
+use shared::types::{
+    AssetId, AssetMetrics, CollateralAssetConfig, CollateralAssetInfo, Series, SeriesId,
+};
 
 use crate::{
     api::{

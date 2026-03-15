@@ -1,4 +1,9 @@
-use ic_cdk::{export_candid, storage};
+pub mod guards;
+pub mod state;
+pub mod types;
+pub mod utils;
+
+use ic_cdk::{call, export_candid, storage};
 use ic_cdk_macros::{init, post_upgrade, pre_upgrade, query, update};
 use icrc_ledger_types::icrc1::transfer::{BlockIndex, TransferArg, TransferError};
 
@@ -13,12 +18,6 @@ use crate::{
     utils::to_account,
 };
 
-mod guards;
-
-mod state;
-mod types;
-mod utils;
-
 #[init]
 fn init(config: Config) {
     set_config(config);
@@ -26,7 +25,7 @@ fn init(config: Config) {
 
 #[pre_upgrade]
 fn pre_upgrade() {
-    let config = CONFIG.with(|c| c.borrow().clone());
+    let config = CONFIG.with(|c| return c.borrow().clone());
 
     storage::stable_save((config,)).expect("Failed to save state");
 }
@@ -39,6 +38,7 @@ fn post_upgrade() {
 }
 
 #[query(guard = "caller_is_not_anonymous")]
+#[must_use]
 pub fn config() -> ConfigResult {
     read_config().into()
 }
@@ -52,7 +52,7 @@ pub fn update_config(config: Config) {
 pub async fn mint(params: MintParams) -> MintResult {
     let config = match read_config() {
         Ok(config) => config,
-        Err(err) => return MintResult::Err(err.to_string()),
+        Err(err) => return MintResult::Err(err.clone()),
     };
 
     let arg = TransferArg {
@@ -65,10 +65,10 @@ pub async fn mint(params: MintParams) -> MintResult {
     };
 
     let (res,): (Result<BlockIndex, TransferError>,) =
-        match ic_cdk::call(config.ledger_canister, "icrc1_transfer", (arg,)).await {
+        match call(config.ledger_canister, "icrc1_transfer", (arg,)).await {
             Ok(v) => v,
             Err((code, msg)) => {
-                return MintResult::Err(format!("Ledger call failed: {:?} - {}", code, msg));
+                return MintResult::Err(format!("Ledger call failed: {code:?} - {msg}"));
             }
         };
 

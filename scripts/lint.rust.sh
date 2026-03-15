@@ -5,6 +5,10 @@ FIX_ARGS=()
 
 CLIPPY_RUSTFLAGS=(-W deprecated)
 
+# On native targets, ic_cdk print macros expand to their std:: equivalents
+# (the wasm32 run above already enforces disallowed_macros on production code).
+DISALLOWED_MACROS_ALLOW=(-- -A clippy::disallowed_macros)
+
 [[ "${1:-}" != "--help" ]] || {
   cat <<-EOF
 
@@ -50,12 +54,14 @@ for canister in "${CANISTERS[@]}"; do
     --manifest-path "$manifest_path" \
     --locked \
     --all-features \
-    --tests
+    --tests \
+    "${DISALLOWED_MACROS_ALLOW[@]}"
 
   RUSTFLAGS="${CLIPPY_RUSTFLAGS[*]}" cargo clippy ${FIX_ARGS[@]+"${FIX_ARGS[@]}"} \
     --manifest-path "$manifest_path" \
     --locked \
     --all-features \
     --examples \
-    --benches
+    --benches \
+    "${DISALLOWED_MACROS_ALLOW[@]}"
 done

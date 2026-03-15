@@ -1,4 +1,5 @@
 use candid::Principal;
+use ic_cdk::call;
 use shared::types::{PayoutUnit, Series, SeriesId};
 
 use crate::{
@@ -29,10 +30,10 @@ pub async fn ensure_series_registered(series_id: &SeriesId) -> Result<Series, Tr
         return Err(TradeError::Common(CommonError::RegistryNotSet));
     }
 
-    let (series_opt,): (Option<Series>,) = ic_cdk::call(registry, "get_series", (series_id,))
+    let (series_opt,): (Option<Series>,) = call(registry, "get_series", (series_id,))
         .await
         .map_err(|(code, msg)| {
-            TradeError::RegistryError(format!("Registry call failed: {:?}: {}", code, msg))
+            TradeError::RegistryError(format!("Registry call failed: {code:?}: {msg}"))
         })?;
 
     let series = series_opt.ok_or_else(|| TradeError::SeriesNotFound(series_id.clone()))?;

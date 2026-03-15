@@ -4,3 +4,6 @@ disallowed-macros = [
     { path = "std::eprint", reason = "Use ic_cdk::eprint instead" },
     { path = "std::eprintln", reason = "Use ic_cdk::eprintln instead" },
 ]
+
+absolute-paths-max-segments = 1
+absolute-paths-allowed-crates = []

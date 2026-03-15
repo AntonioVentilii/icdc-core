@@ -16,10 +16,12 @@ pub enum SettleSeriesResult {
 }
 
 impl SettleSeriesResult {
+    #[must_use]
     pub fn ok() -> Self {
         SettleSeriesResult::Ok
     }
 
+    #[must_use]
     pub fn processing() -> Self {
         SettleSeriesResult::Processing
     }
@@ -28,7 +30,7 @@ impl SettleSeriesResult {
 impl From<Result<(), SettlementError>> for SettleSeriesResult {
     fn from(value: Result<(), SettlementError>) -> Self {
         match value {
-            Ok(_) => SettleSeriesResult::Ok,
+            Ok(()) => SettleSeriesResult::Ok,
             Err(e) => SettleSeriesResult::Err(e),
         }
     }

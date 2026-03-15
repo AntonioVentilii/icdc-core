@@ -36,16 +36,18 @@ pub fn remove_authorized_creators(principals: Vec<Principal>) {
 ///
 /// This method is gated to canister controllers.
 #[query(guard = "caller_is_controller")]
+#[must_use]
 pub fn list_authorized_creators() -> Vec<Principal> {
-    AUTHORIZED_CREATORS.with(|a| a.borrow().keys().cloned().collect())
+    AUTHORIZED_CREATORS.with(|a| return a.borrow().keys().copied().collect())
 }
 
 /// Checks if a principal is authorized to create derivative series.
 #[query]
+#[must_use]
 pub fn is_authorized_creator(principal: Principal) -> bool {
     if is_controller(&principal) {
         return true;
     }
 
-    AUTHORIZED_CREATORS.with(|a| *a.borrow().get(&principal).unwrap_or(&false))
+    AUTHORIZED_CREATORS.with(|a| return *a.borrow().get(&principal).unwrap_or(&false))
 }

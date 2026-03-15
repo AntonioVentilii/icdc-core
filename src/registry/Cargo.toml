@@ -12,3 +12,6 @@ ic-cdk = { workspace = true }
 ic-cdk-macros = { workspace = true }
 serde = { workspace = true }
 shared = { workspace = true }
+
+[lints]
+workspace = true

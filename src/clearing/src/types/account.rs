@@ -36,7 +36,7 @@ impl AssetAccount {
     }
 
     /// Creates an `AssetAccount` for an EVM address.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn external_evm(address: impl Into<String>) -> Self {
         Self::External(ExternalAssetAccount::Evm(address.into()))
     }

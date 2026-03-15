@@ -6,10 +6,10 @@ use crate::memory::AUTHORIZED_CREATORS;
 /// Guard function to ensure the caller is not anonymous.
 pub fn caller_is_not_anonymous() -> Result<(), String> {
     if caller() == Principal::anonymous() {
-        Err("Update call error. RejectionCode: CanisterReject, Error: Anonymous caller not authorised.".to_string())
-    } else {
-        Ok(())
+        return Err("Update call error. RejectionCode: CanisterReject, Error: Anonymous caller not authorised.".to_owned());
     }
+
+    Ok(())
 }
 
 /// Guard function to ensure the caller is one of the canister controllers.
@@ -19,7 +19,7 @@ pub fn caller_is_controller() -> Result<(), String> {
     if is_controller(&caller) {
         Ok(())
     } else {
-        Err("Caller is not a controller.".to_string())
+        Err("Caller is not a controller.".to_owned())
     }
 }
 
@@ -33,11 +33,12 @@ pub fn caller_is_authorized_creator() -> Result<(), String> {
         return Ok(());
     }
 
-    let is_authorized = AUTHORIZED_CREATORS.with(|a| *a.borrow().get(&caller).unwrap_or(&false));
+    let is_authorized =
+        AUTHORIZED_CREATORS.with(|a| return *a.borrow().get(&caller).unwrap_or(&false));
 
     if is_authorized {
         Ok(())
     } else {
-        Err("Caller is not an authorized series creator.".to_string())
+        Err("Caller is not an authorized series creator.".to_owned())
     }
 }

@@ -27,7 +27,7 @@ impl From<Result<BlockIndex, TransferError>> for MintResult {
     fn from(value: Result<BlockIndex, TransferError>) -> Self {
         match value {
             Ok(v) => MintResult::Ok(v),
-            Err(e) => MintResult::Err(format!("Transfer error: {:?}", e)),
+            Err(e) => MintResult::Err(format!("Transfer error: {e:?}")),
         }
     }
 }

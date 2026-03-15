@@ -76,6 +76,14 @@ if [[ -n "$VUSD_LEDGER" ]]; then
       asset_id = \"$VUSD_SYMBOL\"; 
       price = record { decimal = record { value = $VUSD_PRICE_E6 : nat; decimals = $USD_DECIMALS : nat8 }; oracle_id = null; timestamp = null };
   })" --network "$NETWORK"
+
+  # 7. Add Clearing as controller of vUSD Ledger
+  echo "Guaranteeing Clearing canister as controller of $VUSD_SYMBOL Ledger..."
+  # Fetch current controllers and add clearing if not already present
+  CURRENT_CONTROLLERS=$(dfx canister status "$VUSD_LEDGER" --network "$NETWORK" | grep "Controllers:" | cut -d: -f2)
+  if [[ ! "$CURRENT_CONTROLLERS" == *"$CLEARING_CANISTER"* ]]; then
+    dfx canister update-settings "$VUSD_LEDGER" --network "$NETWORK" --add-controller "$CLEARING_CANISTER"
+  fi
 fi
 
 echo "ICDC Clearing Framework initialized successfully."

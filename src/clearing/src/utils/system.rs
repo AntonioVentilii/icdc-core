@@ -1,15 +1,18 @@
 use candid::Principal;
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+use ic_cdk::{api::time, id};
 
 /// Returns the current time in nanoseconds.
 ///
-/// In a canister environment, this uses `ic_cdk::api::time()`.
-/// In a test environment, it returns 0 to avoid panics.
+/// On the IC, this uses `ic_cdk::api::time()`.
+/// Off-chain (for tests / host builds), it returns 0.
 pub fn now_ns() -> u64 {
-    #[cfg(not(test))]
+    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
     {
-        ic_cdk::api::time()
+        time()
     }
-    #[cfg(test)]
+
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
     {
         0
     }
@@ -17,14 +20,15 @@ pub fn now_ns() -> u64 {
 
 /// Returns the current canister ID.
 ///
-/// In a canister environment, this uses `ic_cdk::id()`.
-/// In a test environment, it returns `Principal::anonymous()` to avoid panics.
+/// On the IC, this uses `ic_cdk::id()`.
+/// Off-chain (for tests / host builds), it returns `Principal::anonymous()`.
 pub fn canister_id() -> Principal {
-    #[cfg(not(test))]
+    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
     {
-        ic_cdk::id()
+        id()
     }
-    #[cfg(test)]
+
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
     {
         Principal::anonymous()
     }

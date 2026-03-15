@@ -1,8 +1,10 @@
-use std::{cell::RefCell, collections::BTreeMap};
+use core::cell::RefCell;
+use std::collections::BTreeMap;
 
 use candid::Nat;
-use ic_cdk::api::is_controller;
+use ic_cdk::{api::is_controller, caller};
 use ic_cdk_macros::query;
+use serde_bytes::ByteBuf;
 use shared::types::{Asset, AssetId, CollateralAssetConfig};
 
 use crate::{
@@ -23,6 +25,7 @@ use crate::{
 ///
 /// This method is gated to canister controllers.
 #[query(guard = "caller_is_controller")]
+#[must_use]
 pub fn stats() -> Stats {
     // --- POSITIONS & OPEN INTEREST ---
     let (total_open_interest, total_reserved_margin) = POSITIONS.with(|p| {
@@ -40,7 +43,7 @@ pub fn stats() -> Stats {
             for account in m.values() {
                 for domain_balances in account.balances.values() {
                     for (asset_id, amount) in domain_balances {
-                        *balances.entry(asset_id.clone()).or_insert(0u128) += amount;
+                        *balances.entry(asset_id.clone()).or_insert(0_u128) += amount;
                     }
                 }
             }
@@ -79,7 +82,7 @@ pub fn stats() -> Stats {
                 EventType::Settled => "settled",
                 EventType::Liquidated => "liquidated",
             };
-            *counts.entry(label.to_string()).or_insert(0u64) += 1;
+            *counts.entry(label.to_owned()).or_insert(0_u64) += 1;
         }
         (counts, trades)
     });
@@ -104,6 +107,7 @@ pub fn stats() -> Stats {
 ///
 /// This method is gated to canister controllers.
 #[query(guard = "caller_is_controller")]
+#[must_use]
 pub fn metrics() -> String {
     let stats = stats();
 
@@ -134,9 +138,9 @@ pub fn metrics() -> String {
         let asset_str = match asset {
             Asset::Icrc(p) => {
                 if p == icp_ledger() {
-                    "ICP".to_string()
+                    "ICP".to_owned()
                 } else if p == ckusdc_ledger() {
-                    "ckUSDC".to_string()
+                    "ckUSDC".to_owned()
                 } else {
                     p.to_text()
                 }
@@ -145,8 +149,7 @@ pub fn metrics() -> String {
             Asset::Erc20(token) => token.to_string(),
         };
         metrics.push_str(&format!(
-            "clearing_total_margin_balance{{asset=\"{}\"}} {}\n",
-            asset_str, balance
+            "clearing_total_margin_balance{{asset=\"{asset_str}\"}} {balance}\n"
         ));
     }
 
@@ -165,8 +168,7 @@ pub fn metrics() -> String {
     metrics.push_str("# TYPE clearing_event_count_total counter\n");
     for (label, count) in stats.event_counts {
         metrics.push_str(&format!(
-            "clearing_event_count_total{{type=\"{}\"}} {}\n",
-            label, count
+            "clearing_event_count_total{{type=\"{label}\"}} {count}\n"
         ));
     }
 
@@ -174,20 +176,22 @@ pub fn metrics() -> String {
 }
 
 #[query]
+#[must_use]
+#[expect(clippy::needless_pass_by_value)]
 pub fn http_request(req: HttpRequest) -> HttpResponse {
     if req.method != "GET" || req.url != "/metrics" {
         return HttpResponse {
             status_code: 404,
             headers: vec![],
-            body: serde_bytes::ByteBuf::from("Not Found"),
+            body: ByteBuf::from("Not Found"),
         };
     }
 
-    if !is_controller(&ic_cdk::caller()) {
+    if !is_controller(&caller()) {
         return HttpResponse {
             status_code: 403,
             headers: vec![],
-            body: serde_bytes::ByteBuf::from("Forbidden: Controller only"),
+            body: ByteBuf::from("Forbidden: Controller only"),
         };
     }
 
@@ -197,11 +201,11 @@ pub fn http_request(req: HttpRequest) -> HttpResponse {
         status_code: 200,
         headers: vec![
             HeaderField(
-                "Content-Type".to_string(),
-                "text/plain; version=0.0.4".to_string(),
+                "Content-Type".to_owned(),
+                "text/plain; version=0.0.4".to_owned(),
             ),
-            HeaderField("Content-Length".to_string(), body.len().to_string()),
+            HeaderField("Content-Length".to_owned(), body.len().to_string()),
         ],
-        body: serde_bytes::ByteBuf::from(body),
+        body: ByteBuf::from(body),
     }
 }

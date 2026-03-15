@@ -1,4 +1,5 @@
 use candid::Nat;
+use ic_cdk::{call, id};
 use icrc_ledger_types::{
     icrc1::{
         account::Account,
@@ -6,7 +7,7 @@ use icrc_ledger_types::{
     },
     icrc2::transfer_from::{TransferFromArgs, TransferFromError},
 };
-use num_traits::ToPrimitive;
+use num_traits::ToPrimitive as _;
 use shared::types::{asset::errors::AssetError, Asset};
 
 use crate::{
@@ -14,7 +15,7 @@ use crate::{
         asset::params::{AssetBalanceOfParams, AssetTransferFromParams, AssetTransferParams},
         types::AssetAmount,
     },
-    traits::ClearingAccountExt,
+    traits::ClearingAccountExt as _,
     types::account::{AssetAccount, ExternalAssetAccount},
 };
 
@@ -26,12 +27,12 @@ impl IcrcHandler {
     pub async fn balance_of(&self, params: AssetBalanceOfParams<'_>) -> Result<u128, AssetError> {
         let ledger_id = params.asset.as_icrc()?;
 
-        let account = self.resolve_account(params.account)?;
+        let account = resolve_account(&params.account)?;
 
-        let (ledger_balance,): (Nat,) = ic_cdk::call(*ledger_id, "icrc1_balance_of", (account,))
+        let (ledger_balance,): (Nat,) = call(*ledger_id, "icrc1_balance_of", (account,))
             .await
             .map_err(|(code, msg)| AssetError::CallError {
-                method: "icrc1_balance_of".to_string(),
+                method: "icrc1_balance_of".to_owned(),
                 code: code as i32,
                 message: msg,
             })?;
@@ -44,10 +45,10 @@ impl IcrcHandler {
         let ledger_id = asset.as_icrc()?;
 
         let (fee_nat,): (Nat,) =
-            ic_cdk::call(*ledger_id, "icrc1_fee", ())
+            call(*ledger_id, "icrc1_fee", ())
                 .await
                 .map_err(|(code, msg)| AssetError::CallError {
-                    method: "icrc1_fee".to_string(),
+                    method: "icrc1_fee".to_owned(),
                     code: code as i32,
                     message: msg,
                 })?;
@@ -60,10 +61,10 @@ impl IcrcHandler {
         let ledger_id = asset.as_icrc()?;
 
         let (symbol,): (String,) =
-            ic_cdk::call(*ledger_id, "icrc1_symbol", ())
+            call(*ledger_id, "icrc1_symbol", ())
                 .await
                 .map_err(|(code, msg)| AssetError::CallError {
-                    method: "icrc1_symbol".to_string(),
+                    method: "icrc1_symbol".to_owned(),
                     code: code as i32,
                     message: msg,
                 })?;
@@ -75,13 +76,14 @@ impl IcrcHandler {
     pub async fn get_decimals(&self, asset: &Asset) -> Result<u8, AssetError> {
         let ledger_id = asset.as_icrc()?;
 
-        let (decimals,): (u8,) = ic_cdk::call(*ledger_id, "icrc1_decimals", ())
-            .await
-            .map_err(|(code, msg)| AssetError::CallError {
-                method: "icrc1_decimals".to_string(),
-                code: code as i32,
-                message: msg,
-            })?;
+        let (decimals,): (u8,) =
+            call(*ledger_id, "icrc1_decimals", ())
+                .await
+                .map_err(|(code, msg)| AssetError::CallError {
+                    method: "icrc1_decimals".to_owned(),
+                    code: code as i32,
+                    message: msg,
+                })?;
 
         Ok(decimals)
     }
@@ -90,9 +92,9 @@ impl IcrcHandler {
     pub async fn transfer(&self, params: AssetTransferParams<'_>) -> Result<u128, AssetError> {
         let ledger_id = params.asset.as_icrc()?;
 
-        let from_account = self.resolve_account(params.from)?;
+        let from_account = resolve_account(&params.from)?;
 
-        let to_account = self.resolve_account(params.to)?;
+        let to_account = resolve_account(&params.to)?;
 
         let AssetAmount::Fixed(amount_u128) = params.amount;
 
@@ -106,10 +108,10 @@ impl IcrcHandler {
         };
 
         let (res,): (Result<Nat, TransferError>,) =
-            ic_cdk::call(*ledger_id, "icrc1_transfer", (icrc_args,))
+            call(*ledger_id, "icrc1_transfer", (icrc_args,))
                 .await
                 .map_err(|(code, msg)| AssetError::CallError {
-                    method: "icrc1_transfer".to_string(),
+                    method: "icrc1_transfer".to_owned(),
                     code: code as i32,
                     message: msg,
                 })?;
@@ -119,22 +121,22 @@ impl IcrcHandler {
             Err(TransferError::Duplicate { duplicate_of }) => {
                 duplicate_of.0.to_u128().ok_or(AssetError::MathOverflow)
             }
-            Err(e) => Err(AssetError::TransferError(format!("{:?}", e))),
+            Err(e) => Err(AssetError::TransferError(format!("{e:?}"))),
         }
     }
 
-    /// Executes an ICRC-2 transfer_from call.
+    /// Executes an ICRC-2 `transfer_from` call.
     pub async fn transfer_from(
         &self,
         params: AssetTransferFromParams<'_>,
     ) -> Result<u128, AssetError> {
         let ledger_id = params.asset.as_icrc()?;
 
-        let spender_account = self.resolve_account(params.spender)?;
+        let spender_account = resolve_account(&params.spender)?;
 
-        let from_account = self.resolve_account(params.from)?;
+        let from_account = resolve_account(&params.from)?;
 
-        let to_account = self.resolve_account(params.to)?;
+        let to_account = resolve_account(&params.to)?;
 
         let AssetAmount::Fixed(amount_u128) = params.amount;
 
@@ -149,10 +151,10 @@ impl IcrcHandler {
         };
 
         let (res,): (Result<Nat, TransferFromError>,) =
-            ic_cdk::call(*ledger_id, "icrc2_transfer_from", (icrc_args,))
+            call(*ledger_id, "icrc2_transfer_from", (icrc_args,))
                 .await
                 .map_err(|(code, msg)| AssetError::CallError {
-                    method: "icrc2_transfer_from".to_string(),
+                    method: "icrc2_transfer_from".to_owned(),
                     code: code as i32,
                     message: msg,
                 })?;
@@ -162,28 +164,7 @@ impl IcrcHandler {
             Err(TransferFromError::Duplicate { duplicate_of }) => {
                 duplicate_of.0.to_u128().ok_or(AssetError::MathOverflow)
             }
-            Err(e) => Err(AssetError::TransferError(format!("{:?}", e))),
-        }
-    }
-
-    /// Resolves a [`AssetAccount`] into a concrete [`Account`].
-    fn resolve_account(&self, account: AssetAccount) -> Result<Account, AssetError> {
-        match account {
-            AssetAccount::UserClearing(u) => Ok(u.clearing_account()),
-            AssetAccount::CanisterMain => Ok(Account {
-                owner: ic_cdk::id(),
-                subaccount: None,
-            }),
-            AssetAccount::External(ExternalAssetAccount::Principal(principal)) => Ok(Account {
-                owner: principal,
-                subaccount: None,
-            }),
-            AssetAccount::External(ExternalAssetAccount::Icrc { owner, subaccount }) => {
-                Ok(Account { owner, subaccount })
-            }
-            AssetAccount::External(ExternalAssetAccount::Evm(_)) => {
-                Err(AssetError::InvalidAssetForHandler)
-            }
+            Err(e) => Err(AssetError::TransferError(format!("{e:?}"))),
         }
     }
 
@@ -205,4 +186,26 @@ pub struct IcrcMetadata {
     pub symbol: String,
     pub decimals: u8,
     pub fee: u128,
+}
+
+/// Resolves a [`AssetAccount`] into a concrete [`Account`].
+fn resolve_account(account: &AssetAccount) -> Result<Account, AssetError> {
+    match account {
+        AssetAccount::UserClearing(u) => Ok(u.clearing_account()),
+        AssetAccount::CanisterMain => Ok(Account {
+            owner: id(),
+            subaccount: None,
+        }),
+        AssetAccount::External(ExternalAssetAccount::Principal(principal)) => Ok(Account {
+            owner: *principal,
+            subaccount: None,
+        }),
+        AssetAccount::External(ExternalAssetAccount::Icrc { owner, subaccount }) => Ok(Account {
+            owner: *owner,
+            subaccount: *subaccount,
+        }),
+        AssetAccount::External(ExternalAssetAccount::Evm(_)) => {
+            Err(AssetError::InvalidAssetForHandler)
+        }
+    }
 }

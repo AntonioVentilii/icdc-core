@@ -1,4 +1,5 @@
 use candid::{Nat, Principal};
+use ic_cdk::{api::is_controller, call, caller, trap};
 use ic_cdk_macros::{query, update};
 use shared::types::{Asset, AssetId, AssetMetrics, CollateralAssetConfig};
 
@@ -38,6 +39,12 @@ use crate::{
     utils::system::now_ns,
 };
 
+#[query(guard = "caller_is_controller")]
+#[must_use]
+pub fn get_registry_canister() -> Principal {
+    REGISTRY_CANISTER.with(|r| *r.borrow())
+}
+
 /// Sets the principal of the Series Registry canister.
 ///
 /// This principal is used to discover and validate derivative series.
@@ -47,6 +54,12 @@ pub fn set_registry_canister(registry: Principal) {
     REGISTRY_CANISTER.with(|r| {
         *r.borrow_mut() = registry;
     });
+}
+
+#[query(guard = "caller_is_controller")]
+#[must_use]
+pub fn config() -> Config {
+    CONFIG.with(|c| c.borrow().clone())
 }
 
 /// Updates the global configuration for the Clearing canister.
@@ -63,6 +76,7 @@ pub fn update_config(config: Config) {
 ///
 /// This method is gated to canister controllers.
 #[query(guard = "caller_is_controller")]
+#[must_use]
 pub fn get_funds() -> GetFundsResult {
     let insurance_fund = INSURANCE_FUND.with(|f| f.borrow().clone());
     let treasury = TREASURY.with(|f| f.borrow().clone());
@@ -91,7 +105,7 @@ pub async fn withdraw_fund(params: WithdrawFundParams) -> WithdrawFundResult {
             let config =
                 COLLATERAL_ASSETS.with(|assets| {
                     assets.borrow().get(&asset_id).cloned().ok_or(
-                        WithdrawFundError::TransferFailed("Unsupported asset".to_string()),
+                        WithdrawFundError::TransferFailed("Unsupported asset".to_owned()),
                     )
                 })?;
 
@@ -108,7 +122,7 @@ pub async fn withdraw_fund(params: WithdrawFundParams) -> WithdrawFundResult {
 
             if plan.status == PlanStatus::Finalised {
                 return plan.receipt.map(|r| r.block_index()).ok_or(
-                    WithdrawFundError::TransferFailed("No receipt found".to_string()),
+                    WithdrawFundError::TransferFailed("No receipt found".to_owned()),
                 );
             }
 
@@ -124,7 +138,7 @@ pub async fn withdraw_fund(params: WithdrawFundParams) -> WithdrawFundResult {
             // ---------- Phase C: Execute ledger transfer ----------
             if plan.receipt.is_none() {
                 let handler = get_handler(&asset)
-                    .map_err(|e| WithdrawFundError::TransferFailed(format!("{:?}", e)))?;
+                    .map_err(|e| WithdrawFundError::TransferFailed(format!("{e:?}")))?;
 
                 let transfer_res = handler
                     .transfer(AssetTransferParams {
@@ -147,7 +161,7 @@ pub async fn withdraw_fund(params: WithdrawFundParams) -> WithdrawFundResult {
                         // duplicating Phase B. Because the exact identical `idempotency_ns` will be
                         // provided on retry, the ICRC ledger handler duplicate check makes retrying
                         // entirely safe.
-                        return Err(WithdrawFundError::TransferFailed(format!("{:?}", e)));
+                        return Err(WithdrawFundError::TransferFailed(format!("{e:?}")));
                     }
                 }
 
@@ -165,11 +179,11 @@ pub async fn withdraw_fund(params: WithdrawFundParams) -> WithdrawFundResult {
 ///
 /// This method is gated to canister controllers.
 #[update(guard = "caller_is_controller")]
+#[must_use]
 pub fn cancel_fund_withdrawal(params: CancelFundWithdrawalParams) -> CancelFundWithdrawalResult {
     let old_plan = FUND_WITHDRAWAL_PLANS.with(|m| m.borrow_mut().remove(&params.request_id));
-    let plan = match old_plan {
-        Some(p) => p,
-        None => return Err(CancelFundWithdrawalError::PlanNotFound).into(),
+    let Some(plan) = old_plan else {
+        return Err(CancelFundWithdrawalError::PlanNotFound).into();
     };
 
     if plan.status != PlanStatus::Executing || plan.receipt.is_some() {
@@ -186,7 +200,7 @@ pub fn cancel_fund_withdrawal(params: CancelFundWithdrawalParams) -> CancelFundW
 
     store.with(|f| {
         let mut f = f.borrow_mut();
-        let current = f.get(&plan.asset_id).cloned().unwrap_or(0);
+        let current = f.get(&plan.asset_id).copied().unwrap_or(0);
         f.insert(plan.asset_id.clone(), current + plan.amount);
     });
 
@@ -203,7 +217,7 @@ pub fn update_collateral_asset(params: UpdateCollateralAssetParams) {
     // Enforce ICRC registration policy: ICRC assets MUST be registered via register_icrc_asset
     // to ensure metadata (symbol, decimals, fee) is fetched directly from the ledger.
     if matches!(config.asset, Asset::Icrc(_)) {
-        ic_cdk::trap(
+        trap(
             "ICRC assets must be registered via 'register_icrc_asset' to ensure metadata integrity",
         );
     }
@@ -233,19 +247,19 @@ pub async fn register_icrc_asset(params: RegisterIcrcAssetParams) -> RegisterIcr
             return Err(RegisterIcrcAssetError::AssetAlreadyExists);
         }
 
-        let handler = get_handler(&asset).map_err(|e| {
-            RegisterIcrcAssetError::Common(CommonError::Internal(format!("{:?}", e)))
-        })?;
+        let handler = get_handler(&asset)
+            .map_err(|e| RegisterIcrcAssetError::Common(CommonError::Internal(format!("{e:?}"))))?;
 
-        let AssetHandler::Icrc(ref icrc_handler) = handler else {
+        let AssetHandler::Icrc(icrc_handler) = &handler else {
             return Err(RegisterIcrcAssetError::Common(CommonError::Internal(
-                "Expected ICRC handler".to_string(),
+                "Expected ICRC handler".to_owned(),
             )));
         };
 
-        let metadata = icrc_handler.get_metadata(&asset).await.map_err(|e| {
-            RegisterIcrcAssetError::Common(CommonError::Internal(format!("{:?}", e)))
-        })?;
+        let metadata = icrc_handler
+            .get_metadata(&asset)
+            .await
+            .map_err(|e| RegisterIcrcAssetError::Common(CommonError::Internal(format!("{e:?}"))))?;
 
         let config = CollateralAssetConfig {
             asset_id: params.asset_id.clone(),
@@ -313,13 +327,13 @@ pub async fn update_asset_price(params: UpdateAssetPriceParams) -> UpdateAssetPr
 async fn update_asset_price_impl(
     params: UpdateAssetPriceParams,
 ) -> Result<(), UpdateAssetPriceError> {
-    let caller = ic_cdk::caller();
+    let caller = caller();
 
     let asset_config = COLLATERAL_ASSETS
         .with(|assets| assets.borrow().get(&params.asset_id).cloned())
         .ok_or(UpdateAssetPriceError::AssetNotFound)?;
 
-    if !ic_cdk::api::is_controller(&caller) {
+    if !is_controller(&caller) {
         let oracle_id = asset_config
             .oracle_id
             .ok_or(UpdateAssetPriceError::OracleNotConfigured)?;
@@ -328,7 +342,7 @@ async fn update_asset_price_impl(
             return Err(UpdateAssetPriceError::Common(CommonError::RegistryNotSet));
         }
 
-        let is_authorized: Result<(bool,), _> = ic_cdk::call(
+        let is_authorized: Result<(bool,), _> = call(
             registry_canister,
             "is_oracle_authorized",
             (oracle_id, caller),
@@ -357,14 +371,20 @@ async fn update_asset_price_impl(
 ///
 /// This method is gated to canister controllers.
 #[query(guard = "caller_is_controller")]
+#[must_use]
 pub fn list_collateral_assets() -> Vec<CollateralAssetConfig> {
     COLLATERAL_ASSETS.with(|assets| assets.borrow().values().cloned().collect())
 }
 
-/// Debug: returns the principal of the registry canister.
 #[query(guard = "caller_is_controller")]
-pub fn debug_get_registry_canister() -> Principal {
-    REGISTRY_CANISTER.with(|r| *r.borrow())
+#[must_use]
+pub fn get_asset_metrics() -> Vec<(AssetId, AssetMetrics)> {
+    ASSET_METRICS.with(|m| {
+        m.borrow()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    })
 }
 
 pub(crate) fn deduct_fund_balance_impl(
@@ -378,7 +398,7 @@ pub(crate) fn deduct_fund_balance_impl(
     };
     store.with(|f| {
         let mut f = f.borrow_mut();
-        let current = f.get(asset_id).cloned().unwrap_or(0);
+        let current = f.get(asset_id).copied().unwrap_or(0);
         if current < amount {
             return Err(WithdrawFundError::InsufficientFunds);
         }
@@ -391,11 +411,14 @@ pub(crate) fn deduct_fund_balance_impl(
 mod tests {
     use shared::types::AssetId;
 
-    use super::*;
+    use crate::{
+        api::admin::{api::deduct_fund_balance_impl, errors::WithdrawFundError, params::FundType},
+        memory::{INSURANCE_FUND, TREASURY},
+    };
 
     #[test]
-    fn test_withdraw_fund_resilience_on_transfer_failure() {
-        let asset_id = AssetId::from("vUSD".to_string());
+    fn withdraw_fund_resilience_on_transfer_failure() {
+        let asset_id = AssetId::from("vUSD".to_owned());
         let amount = 1_000_000; // $1
 
         // Initialize insurance fund with $10
@@ -410,20 +433,20 @@ mod tests {
         assert!(deduct_res.is_ok());
 
         INSURANCE_FUND.with(|f| {
-            assert_eq!(f.borrow().get(&asset_id).cloned().unwrap(), 9_000_000);
+            assert_eq!(f.borrow().get(&asset_id).copied().unwrap(), 9_000_000);
         });
 
         // Step 2: In the new implementation we deliberately DO NOT rollback
         // upon transfer error. The internal fund deduction stands and Phase B
         // is not retried.
         INSURANCE_FUND.with(|f| {
-            assert_eq!(f.borrow().get(&asset_id).cloned().unwrap(), 9_000_000);
+            assert_eq!(f.borrow().get(&asset_id).copied().unwrap(), 9_000_000);
         });
     }
 
     #[test]
-    fn test_withdraw_fund_insufficient_funds() {
-        let asset_id = AssetId::from("vUSD".to_string());
+    fn withdraw_fund_insufficient_funds() {
+        let asset_id = AssetId::from("vUSD".to_owned());
         let amount = 100_000_000; // $100
 
         // Initialize treasury with $10
@@ -442,7 +465,7 @@ mod tests {
 
         // Internal balance should remain untouched
         TREASURY.with(|f| {
-            assert_eq!(f.borrow().get(&asset_id).cloned().unwrap(), 10_000_000);
+            assert_eq!(f.borrow().get(&asset_id).copied().unwrap(), 10_000_000);
         });
     }
 }

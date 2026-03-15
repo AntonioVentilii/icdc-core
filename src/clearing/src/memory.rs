@@ -1,7 +1,8 @@
-use std::{cell::RefCell, collections::BTreeMap};
+use core::cell::RefCell;
+use std::collections::BTreeMap;
 
 use candid::Principal;
-use ic_cdk::storage;
+use ic_cdk::{storage, trap};
 use shared::{
     constants::{CKUSDC_LEDGER, ICP_LEDGER},
     types::{AssetId, AssetMetrics, CollateralAssetConfig, Series, SeriesId},
@@ -104,7 +105,7 @@ pub fn restore_state() {
     let state = match result {
         Ok((s,)) => s,
         Err(e) => {
-            ic_cdk::trap(&format!("Failed to restore stable state: {:?}", e));
+            trap(&format!("Failed to restore stable state: {e:?}"));
         }
     };
 
@@ -163,11 +164,13 @@ pub fn restore_state() {
 }
 
 /// Returns the principal of the ICP ledger.
+#[must_use]
 pub fn icp_ledger() -> Principal {
     Principal::from_text(ICP_LEDGER).expect("invalid ICP_LEDGER")
 }
 
 /// Returns the principal of the ckUSDC ledger.
+#[must_use]
 pub fn ckusdc_ledger() -> Principal {
     Principal::from_text(CKUSDC_LEDGER).expect("invalid CKUSDC_LEDGER")
 }

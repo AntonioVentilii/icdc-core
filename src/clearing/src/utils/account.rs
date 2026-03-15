@@ -1,9 +1,10 @@
 use candid::Principal;
-use sha2::{Digest, Sha256};
+use ic_cdk::id;
+use sha2::{Digest as _, Sha256};
 
 /// Derives the subaccount for a user in the current canister.
 pub(crate) fn derive_user_subaccount(user: Principal) -> [u8; 32] {
-    derive_user_subaccount_for_canister(ic_cdk::id(), user)
+    derive_user_subaccount_for_canister(id(), user)
 }
 
 /// Derives a consistent subaccount for a user in a target canister using a salt.
@@ -23,18 +24,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_subaccount_derivation() {
-        let canister_id = Principal::from_slice(&[0u8; 29]);
-        let user = Principal::from_slice(&[1u8; 29]);
+    fn subaccount_derivation() {
+        let canister_id = Principal::from_slice(&[0_u8; 29]);
+        let user = Principal::from_slice(&[1_u8; 29]);
         let sub1 = derive_user_subaccount_for_canister(canister_id, user);
         let sub2 = derive_user_subaccount_for_canister(canister_id, user);
         assert_eq!(sub1, sub2);
 
-        let user2 = Principal::from_slice(&[2u8; 29]);
+        let user2 = Principal::from_slice(&[2_u8; 29]);
         let sub3 = derive_user_subaccount_for_canister(canister_id, user2);
         assert_ne!(sub1, sub3);
 
-        let canister_id2 = Principal::from_slice(&[3u8; 29]);
+        let canister_id2 = Principal::from_slice(&[3_u8; 29]);
         let sub4 = derive_user_subaccount_for_canister(canister_id2, user);
         assert_ne!(sub1, sub4);
     }

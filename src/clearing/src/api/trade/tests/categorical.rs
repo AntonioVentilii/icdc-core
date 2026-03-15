@@ -14,16 +14,16 @@ use crate::{
 };
 
 #[test]
-fn test_categorical_mint_redeem_complete_set() {
+fn categorical_mint_redeem_complete_set() {
     let user = create_test_user(1);
-    let series_id = SeriesId::from("cat_test".to_string());
-    let outcome_a = OutcomeId::from("A".to_string());
-    let outcome_b = OutcomeId::from("B".to_string());
+    let series_id = SeriesId::from("cat_test".to_owned());
+    let outcome_a = OutcomeId::from("A".to_owned());
+    let outcome_b = OutcomeId::from("B".to_owned());
 
     let series = Series {
         series_id: series_id.clone(),
-        underlying: "ICP".to_string(),
-        expiry_ns: 2000000000,
+        underlying: "ICP".to_owned(),
+        expiry_ns: 2_000_000_000,
         payoff_type: PayoffType::Categorical,
         strike: None,
         price_precision: 8,
@@ -31,21 +31,21 @@ fn test_categorical_mint_redeem_complete_set() {
         outcomes: Some(vec![
             Outcome {
                 id: outcome_a.clone(),
-                title: "A".to_string(),
+                title: "A".to_owned(),
                 description: None,
                 icon_url: None,
             },
             Outcome {
                 id: outcome_b.clone(),
-                title: "B".to_string(),
+                title: "B".to_owned(),
                 description: None,
                 icon_url: None,
             },
         ]),
-        oracle_source: "oracle".to_string(),
+        oracle_source: "oracle".to_owned(),
         creator: Principal::anonymous(),
-        created_at_ns: 1000000000,
-        title: "Cat Test".to_string(),
+        created_at_ns: 1_000_000_000,
+        title: "Cat Test".to_owned(),
         description: Description::plain("Categorical test"),
         icon_url: None,
         banner_url: None,
@@ -54,30 +54,30 @@ fn test_categorical_mint_redeem_complete_set() {
 
     setup_test_state(vec![(user, 10_000_000)]);
 
-    mint_complete_set_logic(user, series_id.clone(), series.clone(), 5).expect("mint failed");
+    mint_complete_set_logic(user, &series_id.clone(), &series.clone(), 5).expect("mint failed");
     verify_cash_balance(user, 5_000_000);
-    verify_position_qty(user, &series_id, Some(outcome_a.clone()), 5);
-    verify_position_qty(user, &series_id, Some(outcome_b.clone()), 5);
+    verify_position_qty(user, &series_id, Some(&outcome_a.clone()), 5);
+    verify_position_qty(user, &series_id, Some(&outcome_b.clone()), 5);
 
-    redeem_complete_set_logic(user, series_id.clone(), series, 2).expect("redeem failed");
+    redeem_complete_set_logic(user, &series_id.clone(), &series, 2).expect("redeem failed");
     verify_cash_balance(user, 7_000_000);
-    verify_position_qty(user, &series_id, Some(outcome_a.clone()), 3);
-    verify_position_qty(user, &series_id, Some(outcome_b.clone()), 3);
+    verify_position_qty(user, &series_id, Some(&outcome_a.clone()), 3);
+    verify_position_qty(user, &series_id, Some(&outcome_b.clone()), 3);
 }
 
 #[test]
-fn test_categorical_lifecycle_scenario() {
+fn categorical_lifecycle_scenario() {
     let seller = create_test_user(1);
     let buyer = create_test_user(2);
-    let series_id = SeriesId::from("lifecycle_test".to_string());
-    let outcome_a = OutcomeId::from("A".to_string());
-    let outcome_b = OutcomeId::from("B".to_string());
-    let outcome_c = OutcomeId::from("C".to_string());
+    let series_id = SeriesId::from("lifecycle_test".to_owned());
+    let outcome_a = OutcomeId::from("A".to_owned());
+    let outcome_b = OutcomeId::from("B".to_owned());
+    let outcome_c = OutcomeId::from("C".to_owned());
 
     let series = Series {
         series_id: series_id.clone(),
-        underlying: "EVENT_2024".to_string(),
-        expiry_ns: 2000000000,
+        underlying: "EVENT_2024".to_owned(),
+        expiry_ns: 2_000_000_000,
         payoff_type: PayoffType::Categorical,
         strike: None,
         price_precision: 8,
@@ -85,27 +85,27 @@ fn test_categorical_lifecycle_scenario() {
         outcomes: Some(vec![
             Outcome {
                 id: outcome_a.clone(),
-                title: "A".to_string(),
+                title: "A".to_owned(),
                 description: None,
                 icon_url: None,
             },
             Outcome {
                 id: outcome_b.clone(),
-                title: "B".to_string(),
+                title: "B".to_owned(),
                 description: None,
                 icon_url: None,
             },
             Outcome {
                 id: outcome_c.clone(),
-                title: "C".to_string(),
+                title: "C".to_owned(),
                 description: None,
                 icon_url: None,
             },
         ]),
-        oracle_source: "oracle".to_string(),
+        oracle_source: "oracle".to_owned(),
         creator: Principal::anonymous(),
-        created_at_ns: 1000000000,
-        title: "Lifecycle Test".to_string(),
+        created_at_ns: 1_000_000_000,
+        title: "Lifecycle Test".to_owned(),
         description: Description::plain("Full scenario test"),
         icon_url: None,
         banner_url: None,
@@ -114,13 +114,13 @@ fn test_categorical_lifecycle_scenario() {
 
     setup_test_state(vec![(seller, 20_000_000), (buyer, 10_000_000)]);
 
-    mint_complete_set_logic(seller, series_id.clone(), series.clone(), 10).expect("mint failed");
+    mint_complete_set_logic(seller, &series_id.clone(), &series.clone(), 10).expect("mint failed");
     verify_cash_balance(seller, 10_000_000);
 
     execute_trade_checked(
-        series.clone(),
+        &series.clone(),
         ExecuteTradeParams {
-            trade_id: TradeId::from("trade_1".to_string()),
+            trade_id: TradeId::from("trade_1".to_owned()),
             series_id: series_id.clone(),
             outcome_id: Some(outcome_a.clone()),
             buyer,
@@ -135,33 +135,33 @@ fn test_categorical_lifecycle_scenario() {
     verify_cash_balance(seller, 14_000_000);
     verify_cash_balance(buyer, 6_000_000);
 
-    verify_position_qty(seller, &series_id, Some(outcome_a.clone()), 0);
-    verify_position_qty(seller, &series_id, Some(outcome_b.clone()), 10);
-    verify_position_qty(seller, &series_id, Some(outcome_c.clone()), 10);
-    verify_position_qty(buyer, &series_id, Some(outcome_a.clone()), 10);
+    verify_position_qty(seller, &series_id, Some(&outcome_a.clone()), 0);
+    verify_position_qty(seller, &series_id, Some(&outcome_b.clone()), 10);
+    verify_position_qty(seller, &series_id, Some(&outcome_c.clone()), 10);
+    verify_position_qty(buyer, &series_id, Some(&outcome_a.clone()), 10);
 
-    settle_series_checked(&series, SettlementInput::Outcome(outcome_a.clone()));
+    settle_series_checked(&series, &SettlementInput::Outcome(outcome_a.clone()));
 
     verify_cash_balance(buyer, 16_000_000);
     verify_cash_balance(seller, 14_000_000);
 
-    verify_position_qty(buyer, &series_id, Some(outcome_a.clone()), 0);
-    verify_position_qty(seller, &series_id, Some(outcome_b.clone()), 0);
-    verify_position_qty(seller, &series_id, Some(outcome_c.clone()), 0);
+    verify_position_qty(buyer, &series_id, Some(&outcome_a.clone()), 0);
+    verify_position_qty(seller, &series_id, Some(&outcome_b.clone()), 0);
+    verify_position_qty(seller, &series_id, Some(&outcome_c.clone()), 0);
 }
 
 #[test]
-fn test_categorical_short_settlement() {
+fn categorical_short_settlement() {
     let seller = create_test_user(1);
     let buyer = create_test_user(2);
-    let series_id = SeriesId::from("short_test".to_string());
-    let outcome_a = OutcomeId::from("A".to_string());
-    let outcome_b = OutcomeId::from("B".to_string());
+    let series_id = SeriesId::from("short_test".to_owned());
+    let outcome_a = OutcomeId::from("A".to_owned());
+    let outcome_b = OutcomeId::from("B".to_owned());
 
     let series = Series {
         series_id: series_id.clone(),
-        underlying: "EVENT".to_string(),
-        expiry_ns: 2000000000,
+        underlying: "EVENT".to_owned(),
+        expiry_ns: 2_000_000_000,
         payoff_type: PayoffType::Categorical,
         strike: None,
         price_precision: 8,
@@ -169,21 +169,21 @@ fn test_categorical_short_settlement() {
         outcomes: Some(vec![
             Outcome {
                 id: outcome_a.clone(),
-                title: "A".to_string(),
+                title: "A".to_owned(),
                 description: None,
                 icon_url: None,
             },
             Outcome {
                 id: outcome_b.clone(),
-                title: "B".to_string(),
+                title: "B".to_owned(),
                 description: None,
                 icon_url: None,
             },
         ]),
-        oracle_source: "oracle".to_string(),
+        oracle_source: "oracle".to_owned(),
         creator: Principal::anonymous(),
-        created_at_ns: 1000000000,
-        title: "Short Test".to_string(),
+        created_at_ns: 1_000_000_000,
+        title: "Short Test".to_owned(),
         description: Description::plain("Short test"),
         icon_url: None,
         banner_url: None,
@@ -193,9 +193,9 @@ fn test_categorical_short_settlement() {
     setup_test_state(vec![(seller, 10_000_000), (buyer, 10_000_000)]);
 
     execute_trade_checked(
-        series.clone(),
+        &series.clone(),
         ExecuteTradeParams {
-            trade_id: TradeId::from("short_trade".to_string()),
+            trade_id: TradeId::from("short_trade".to_owned()),
             series_id: series_id.clone(),
             outcome_id: Some(outcome_a.clone()),
             buyer,
@@ -214,7 +214,7 @@ fn test_categorical_short_settlement() {
     verify_cash_balance(seller, 4_000_000);
 
     // Settle with Outcome B winning (so A loses)
-    settle_series_checked(&series, SettlementInput::Outcome(outcome_b.clone()));
+    settle_series_checked(&series, &SettlementInput::Outcome(outcome_b.clone()));
 
     // Results:
     // Buyer (Long A): receives 0. Final = 6 + 0 = 6.
@@ -224,17 +224,17 @@ fn test_categorical_short_settlement() {
 }
 
 #[test]
-fn test_categorical_short_loss() {
+fn categorical_short_loss() {
     let seller = create_test_user(1);
     let buyer = create_test_user(2);
-    let series_id = SeriesId::from("short_loss_test".to_string());
-    let outcome_a = OutcomeId::from("A".to_string());
-    let outcome_b = OutcomeId::from("B".to_string());
+    let series_id = SeriesId::from("short_loss_test".to_owned());
+    let outcome_a = OutcomeId::from("A".to_owned());
+    let outcome_b = OutcomeId::from("B".to_owned());
 
     let series = Series {
         series_id: series_id.clone(),
-        underlying: "EVENT".to_string(),
-        expiry_ns: 2000000000,
+        underlying: "EVENT".to_owned(),
+        expiry_ns: 2_000_000_000,
         payoff_type: PayoffType::Categorical,
         strike: None,
         price_precision: 8,
@@ -242,21 +242,21 @@ fn test_categorical_short_loss() {
         outcomes: Some(vec![
             Outcome {
                 id: outcome_a.clone(),
-                title: "A".to_string(),
+                title: "A".to_owned(),
                 description: None,
                 icon_url: None,
             },
             Outcome {
                 id: outcome_b.clone(),
-                title: "B".to_string(),
+                title: "B".to_owned(),
                 description: None,
                 icon_url: None,
             },
         ]),
-        oracle_source: "oracle".to_string(),
+        oracle_source: "oracle".to_owned(),
         creator: Principal::anonymous(),
-        created_at_ns: 1000000000,
-        title: "Short Loss Test".to_string(),
+        created_at_ns: 1_000_000_000,
+        title: "Short Loss Test".to_owned(),
         description: Description::plain("Short loss test"),
         icon_url: None,
         banner_url: None,
@@ -266,9 +266,9 @@ fn test_categorical_short_loss() {
     setup_test_state(vec![(seller, 10_000_000), (buyer, 10_000_000)]);
 
     execute_trade_checked(
-        series.clone(),
+        &series.clone(),
         ExecuteTradeParams {
-            trade_id: TradeId::from("short_loss_trade".to_string()),
+            trade_id: TradeId::from("short_loss_trade".to_owned()),
             series_id: series_id.clone(),
             outcome_id: Some(outcome_a.clone()),
             buyer,
@@ -281,7 +281,7 @@ fn test_categorical_short_loss() {
     );
 
     // Settle with Outcome A winning
-    settle_series_checked(&series, SettlementInput::Outcome(outcome_a.clone()));
+    settle_series_checked(&series, &SettlementInput::Outcome(outcome_a.clone()));
 
     // Results:
     // Buyer (Long A): receives 1.0. Final = 6 + 10 = 16.

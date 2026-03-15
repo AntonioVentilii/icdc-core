@@ -374,8 +374,7 @@ service : {
 	//
 	// Only the creator of the order can cancel it.
 	cancel_limit_order : (CancelLimitOrderParams) -> (SubmitMatchedTradeResult);
-	// Debug: returns the principal of the registry canister.
-	debug_get_registry_canister : () -> (principal) query;
+	config : () -> (Config) query;
 	// Deposits collateral into the user's account state.
 	//
 	// This is a multi-phase operation:
@@ -399,6 +398,7 @@ service : {
 	//
 	// This does not refresh balances from external ledgers.
 	get_account_state_query : () -> (GetAccountStateResult) query;
+	get_asset_metrics : () -> (vec record { text; AssetMetrics }) query;
 	// Returns a list of all supported collateral assets with their metrics.
 	get_collateral_assets : () -> (vec CollateralAssetInfo) query;
 	// Returns the current balances of the Insurance Fund and Treasury.
@@ -411,6 +411,7 @@ service : {
 	get_position : (GetPositionParams) -> (opt Position) query;
 	// Retrieves all open positions for the caller.
 	get_positions : () -> (vec Position) query;
+	get_registry_canister : () -> (principal) query;
 	// Returns the full settlement plan including per-position accounting details (admin only).
 	get_settlement_plan : (text) -> (opt SettlementPlan) query;
 	// Returns the public settlement progress for a derivative series without exposing user positions.
@@ -506,7 +507,7 @@ service : {
 	//
 	// This implements the "Deterministic Withdrawal Policy":
 	// 1. Calculate current account equity in USD.
-	// 2. Verify equity >= reserved_margin_usd (risk check).
+	// 2. Verify equity >= `reserved_margin_usd` (risk check).
 	// 3. If ok, proceed with asynchronous ledger transfer.
 	withdraw_collateral : (WithdrawCollateralParams) -> (
 		WithdrawCollateralResult

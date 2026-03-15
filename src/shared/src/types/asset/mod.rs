@@ -1,4 +1,4 @@
-use std::fmt::{Display, Formatter};
+use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
@@ -39,13 +39,13 @@ impl Asset {
         match self {
             Self::NativeEvm(a) => Ok(EvmAssetRef::Native(a)),
             Self::Erc20(t) => Ok(EvmAssetRef::Erc20(t)),
-            _ => Err(AssetError::InvalidAssetForHandler),
+            Self::Icrc(_) => Err(AssetError::InvalidAssetForHandler),
         }
     }
 }
 
 impl Display for Asset {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         match self {
             Self::Icrc(p) => write!(f, "ICRC-{}", p.to_text()),
             Self::NativeEvm(n) => write!(f, "NATIVE-{}", n.chain_id),
