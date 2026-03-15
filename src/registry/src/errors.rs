@@ -12,6 +12,8 @@ pub enum SeriesError {
     DescriptionTooLong,
     /// Returned when the caller is not authorized to add a series.
     Unauthorized,
+    /// Returned when the provided payout unit is not supported by the protocol.
+    UnsupportedPayoutUnit,
 }
 
 /// Errors that can occur during oracle-related operations.

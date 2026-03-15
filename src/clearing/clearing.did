@@ -86,6 +86,7 @@ type DecimalValue = record { decimals : nat8; value : nat };
 type DepositCollateralError = variant { MathOverflow; Asset : AssetError };
 type DepositCollateralParams = record {
 	deposit_id : text;
+	domain : opt BalanceDomain;
 	asset_id : text;
 	amount : nat
 };
@@ -194,6 +195,18 @@ type Price = record {
 	oracle_id : opt text;
 	decimal : DecimalValue
 };
+type RegisterIcrcAssetError = variant {
+	AssetAlreadyExists;
+	Common : CommonError
+};
+type RegisterIcrcAssetParams = record {
+	haircut_bps : nat16;
+	is_enabled : bool;
+	ledger_id : principal;
+	oracle_id : opt text;
+	asset_id : text
+};
+type RegisterIcrcAssetResult = variant { Ok; Err : RegisterIcrcAssetError };
 type Series = record {
 	title : text;
 	strike : opt Price;
@@ -296,6 +309,7 @@ type SubmitMatchedTradeParams = record {
 type SubmitMatchedTradeResult = variant { Ok : bool; Err : TradeError };
 type TradeError = variant {
 	OrderNotFound : text;
+	ArbitrageLimitExceeded : record { limit_usd : nat; sum_usd : nat };
 	RegistryError : text;
 	InsufficientMargin : record {
 		balance : nat;
@@ -325,6 +339,7 @@ type WithdrawCollateralError = variant {
 	Asset : AssetError
 };
 type WithdrawCollateralParams = record {
+	domain : opt BalanceDomain;
 	withdrawal_id : text;
 	asset_id : text;
 	amount : nat
@@ -424,6 +439,10 @@ service : {
 	//
 	// Returns 1.0 USD (vUSD) for every full set of N outcome positions provided.
 	redeem_complete_set : (text, int) -> (SubmitMatchedTradeResult);
+	// Automatically registers an ICRC asset by fetching its metadata from the ledger.
+	//
+	// This method is gated to canister controllers.
+	register_icrc_asset : (RegisterIcrcAssetParams) -> (RegisterIcrcAssetResult);
 	// Admin function to manually resume a stuck settlement plan, e.g., if the timer was dropped during
 	// upgrade.
 	resume_settlement : (text) -> (SettleSeriesResult);

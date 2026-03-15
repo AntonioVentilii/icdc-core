@@ -45,6 +45,11 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
         banner_url,
     } = params;
 
+    // Validate payout unit - currently only USD is supported across the protocol
+    if payout_unit != shared::types::PayoutUnit::usd() {
+        return Err(SeriesError::UnsupportedPayoutUnit).into();
+    }
+
     if title.chars().count() > MAX_SERIES_TITLE_LEN {
         return Err(SeriesError::TitleTooLong).into();
     }
@@ -149,4 +154,36 @@ pub fn list_series(pagination: PaginationParams) -> SeriesPage {
     };
 
     list_series_with(params)
+}
+
+#[cfg(test)]
+mod tests {
+    use shared::types::{BalanceDomain, Description, PayoffType, PayoutUnit};
+
+    use super::*;
+
+    #[test]
+    fn test_add_series_unsupported_payout_unit() {
+        let params = AddSeriesParams {
+            underlying: "ICP".to_string(),
+            balance_domain: BalanceDomain::Settlement,
+            expiry_ns: 1000,
+            payoff_type: PayoffType::Call,
+            strike: None,
+            price_precision: 8,
+            payout_unit: PayoutUnit::Fiat(shared::types::FiatUnit::Eur), // Unsupported
+            oracle_source: "oracle".to_string(),
+            title: "Test".to_string(),
+            description: Description::plain("Test"),
+            outcomes: None,
+            icon_url: None,
+            banner_url: None,
+        };
+
+        let result = add_series(params);
+        assert!(matches!(
+            result,
+            AddSeriesResult::Err(SeriesError::UnsupportedPayoutUnit)
+        ));
+    }
 }

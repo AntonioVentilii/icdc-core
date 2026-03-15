@@ -113,6 +113,7 @@ type SeriesError = variant {
 	DescriptionTooLong;
 	TitleTooLong;
 	Unauthorized;
+	UnsupportedPayoutUnit;
 	SeriesAlreadyExists
 };
 type SeriesPage = record { next_cursor : opt text; items : vec Series };
