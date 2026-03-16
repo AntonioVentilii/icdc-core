@@ -3,6 +3,7 @@ mod admin;
 mod atomicity;
 mod collateral;
 mod settlement;
+mod settlement_exhaustive;
 mod setup;
 mod trade;
 mod utils;

@@ -131,6 +131,27 @@ impl Default for TestSetup {
                     },
                     Nat::from(1_000_000_000_000_000_u64),
                 ),
+                (
+                    ICRC1Account {
+                        owner: test_user(56),
+                        subaccount: None,
+                    },
+                    Nat::from(1_000_000_000_000_000_u64),
+                ),
+                (
+                    ICRC1Account {
+                        owner: test_user(57),
+                        subaccount: None,
+                    },
+                    Nat::from(1_000_000_000_000_000_u64),
+                ),
+                (
+                    ICRC1Account {
+                        owner: test_user(58),
+                        subaccount: None,
+                    },
+                    Nat::from(1_000_000_000_000_000_u64),
+                ),
             ],
             archive_options: ArchiveOptions {
                 num_blocks_to_archive: 1000,
@@ -174,6 +195,27 @@ impl Default for TestSetup {
                 (
                     ICRC1Account {
                         owner: test_user(55),
+                        subaccount: None,
+                    },
+                    Nat::from(1_000_000_000_000_000_u64),
+                ),
+                (
+                    ICRC1Account {
+                        owner: test_user(56),
+                        subaccount: None,
+                    },
+                    Nat::from(1_000_000_000_000_000_u64),
+                ),
+                (
+                    ICRC1Account {
+                        owner: test_user(57),
+                        subaccount: None,
+                    },
+                    Nat::from(1_000_000_000_000_000_u64),
+                ),
+                (
+                    ICRC1Account {
+                        owner: test_user(58),
                         subaccount: None,
                     },
                     Nat::from(1_000_000_000_000_000_u64),
