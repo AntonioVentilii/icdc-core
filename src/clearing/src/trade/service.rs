@@ -44,6 +44,10 @@ pub(crate) fn execute_trade_impl(
         return Ok(true);
     }
 
+    if params.buyer == params.seller {
+        return Err(TradeError::SelfTradingNotAllowed);
+    }
+
     let ExecuteTradeParams {
         trade_id,
         series_id,
@@ -422,5 +426,46 @@ mod tests {
                 "Buyer's cash should NOT be debited on seller failure"
             );
         });
+    }
+
+    #[test]
+    fn self_trading() {
+        let user_p = Principal::from_slice(&[1]);
+        let user = User(user_p);
+        let series_id = SeriesId::from("test".to_owned());
+
+        let series = Series {
+            series_id: series_id.clone(),
+            underlying: "BTC".to_owned(),
+            expiry_ns: 2_000_000_000,
+            payoff_type: PayoffType::Call,
+            strike: Some(Price::new(50_000_000_000, 8)),
+            price_precision: 8,
+            payout_unit: PayoutUnit::usd(),
+            oracle_source: "oracle".to_owned(),
+            creator: Principal::anonymous(),
+            created_at_ns: 1_000_000_000,
+            title: "Test".to_owned(),
+            description: Description::plain("Test Description"),
+            outcomes: None,
+            icon_url: None,
+            banner_url: None,
+            balance_domain: BalanceDomain::Settlement,
+        };
+
+        let params = ExecuteTradeParams {
+            trade_id: TradeId::from("trade_self".to_owned()),
+            series_id: series_id.clone(),
+            buyer: user,
+            seller: user,
+            qty: 1,
+            price: Price::new(60_000_000_000, 8),
+            buyer_unblock_amount: None,
+            seller_unblock_amount: None,
+            outcome_id: None,
+        };
+
+        let result = execute_trade_impl(&series, params);
+        assert!(matches!(result, Err(TradeError::SelfTradingNotAllowed)));
     }
 }

@@ -33,4 +33,6 @@ pub enum TradeError {
         /// The hard limit (usually 1.0 USD).
         limit_usd: u128,
     },
+    /// A user tried to trade with themselves.
+    SelfTradingNotAllowed,
 }
