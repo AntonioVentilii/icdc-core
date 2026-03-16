@@ -1,5 +1,6 @@
 mod account;
 mod admin;
+mod atomicity;
 mod collateral;
 mod settlement;
 mod setup;

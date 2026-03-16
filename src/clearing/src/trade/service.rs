@@ -64,11 +64,9 @@ pub(crate) fn execute_trade_impl(
         seller_cash_delta,
         buyer_reserved_delta,
         seller_reserved_delta,
-        new_buyer_qty,
         new_buyer_margin_usd,
-        new_seller_qty,
         new_seller_margin_usd,
-    ): (i128, i128, i128, i128, i128, u128, i128, u128) =
+    ): (i128, i128, i128, i128, u128, u128) =
         POSITIONS.with(|positions: &RefCell<PositionsMap>| {
             let positions = positions.borrow();
 
@@ -142,9 +140,7 @@ pub(crate) fn execute_trade_impl(
                 seller_cash_delta,
                 b_reserved_delta,
                 s_reserved_delta,
-                new_buyer_qty,
                 new_buyer_margin_usd,
-                new_seller_qty,
                 new_seller_margin_usd,
             ))
         })?;
@@ -153,7 +149,7 @@ pub(crate) fn execute_trade_impl(
     // No state and no memory is mutated during this phase.
     // If ANY check fails (InsufficientMargin, etc.), we return early with an Err,
     // leaving the system state exactly as it was.
-    let (target_buyer_reserved, target_seller_reserved) = ACCOUNT_STATES.with(|accounts| {
+    ACCOUNT_STATES.with(|accounts| {
         let accounts = accounts.borrow();
         let domain = series.balance_domain;
 
@@ -212,7 +208,7 @@ pub(crate) fn execute_trade_impl(
             }
         }
 
-        Ok((target_buyer_reserved, target_seller_reserved))
+        Ok(())
     })?;
 
     // Mutation Phase: Apply all changes only after all validations pass.
@@ -226,7 +222,21 @@ pub(crate) fn execute_trade_impl(
             .or_insert_with(|| AccountState::new(buyer));
         let buyer_cash = buyer_acc.get_cash_balance_usd(domain);
         buyer_acc.set_cash_balance_usd(domain, buyer_cash - buyer_cash_delta);
-        buyer_acc.set_reserved_margin_usd(domain, target_buyer_reserved);
+
+        // If buyer == seller, this is the same object. We must fetch again if we want to be safe,
+        // but here we can just update it.
+        let current_reserved = buyer_acc.get_reserved_margin_usd(domain);
+        if buyer_reserved_delta > 0 {
+            buyer_acc.set_reserved_margin_usd(
+                domain,
+                current_reserved + (buyer_reserved_delta.cast_unsigned()),
+            );
+        } else {
+            buyer_acc.set_reserved_margin_usd(
+                domain,
+                current_reserved.saturating_sub(buyer_reserved_delta.unsigned_abs()),
+            );
+        }
 
         // Update Seller
         let seller_acc = accounts
@@ -234,7 +244,19 @@ pub(crate) fn execute_trade_impl(
             .or_insert_with(|| AccountState::new(seller));
         let seller_cash = seller_acc.get_cash_balance_usd(domain);
         seller_acc.set_cash_balance_usd(domain, seller_cash - seller_cash_delta);
-        seller_acc.set_reserved_margin_usd(domain, target_seller_reserved);
+
+        let current_reserved = seller_acc.get_reserved_margin_usd(domain);
+        if seller_reserved_delta > 0 {
+            seller_acc.set_reserved_margin_usd(
+                domain,
+                current_reserved + (seller_reserved_delta.cast_unsigned()),
+            );
+        } else {
+            seller_acc.set_reserved_margin_usd(
+                domain,
+                current_reserved.saturating_sub(seller_reserved_delta.unsigned_abs()),
+            );
+        }
     });
 
     POSITIONS.with(|positions: &RefCell<PositionsMap>| {
@@ -249,7 +271,7 @@ pub(crate) fn execute_trade_impl(
                 net_qty: 0,
                 reserved_margin_usd: 0,
             });
-        b_pos.net_qty = new_buyer_qty;
+        b_pos.net_qty += qty;
         b_pos.reserved_margin_usd = new_buyer_margin_usd;
 
         let s_pos = positions
@@ -261,7 +283,7 @@ pub(crate) fn execute_trade_impl(
                 net_qty: 0,
                 reserved_margin_usd: 0,
             });
-        s_pos.net_qty = new_seller_qty;
+        s_pos.net_qty -= qty;
         s_pos.reserved_margin_usd = new_seller_margin_usd;
     });
 
