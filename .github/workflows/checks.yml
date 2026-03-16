@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-24.04
     concurrency:
       group: checks-format-${{ github.ref }}
-      cancel-in-progress: true
+      cancel-in-progress: false
     permissions:
       contents: write # Required to push formatting/lint fixes back to the repo (add-and-commit).
 
@@ -54,7 +54,7 @@ jobs:
     runs-on: ubuntu-24.04
     concurrency:
       group: checks-lint-${{ github.ref }}
-      cancel-in-progress: true
+      cancel-in-progress: false
     permissions:
       contents: read
 
@@ -77,7 +77,7 @@ jobs:
     runs-on: ubuntu-24.04
     concurrency:
       group: checks-pass-${{ github.ref }}
-      cancel-in-progress: true
+      cancel-in-progress: false
     permissions:
       contents: read
     steps:

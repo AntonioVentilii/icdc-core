@@ -4,6 +4,7 @@
 	"scripts": {
 		"build": "./scripts/build.sh",
 		"test:unit": "scripts/test.unit.sh",
+		"test:integration": "scripts/test.integration.sh",
 		"test": "npm run test:unit",
 		"format": "prettier --write . && ./scripts/format.sh",
 		"format:rust": "./scripts/format.rust.sh",
