@@ -52,6 +52,12 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
             )));
         }
 
+        if params.price.value() == 0 {
+            return Err(TradeError::Common(CommonError::InvalidInput(
+                "Price must be positive".to_owned(),
+            )));
+        }
+
         if LIMIT_ORDERS.with(|m| m.borrow().contains_key(&params.order_id)) {
             return Ok(true);
         }
@@ -258,6 +264,13 @@ pub async fn submit_matched_trade(params: SubmitMatchedTradeParams) -> SubmitMat
             "Quantity must be positive".to_owned(),
         )));
     }
+
+    if params.price.value() == 0 {
+        return SubmitMatchedTradeResult::Err(TradeError::Common(CommonError::InvalidInput(
+            "Price must be positive".to_owned(),
+        )));
+    }
+
     let result = internal_execute_trade(ExecuteTradeParams {
         trade_id: params.trade_id,
         series_id: params.series_id,

@@ -193,8 +193,5 @@ fn atomicity_invalid_params() {
         .update(env.controller, "submit_matched_trade", (params_zero_price,))
         .unwrap();
 
-    match res_price {
-        SubmitMatchedTradeResult::Err(_) => {}
-        SubmitMatchedTradeResult::Ok(_) => {}
-    }
+    assert!(matches!(res_price, SubmitMatchedTradeResult::Err(_)));
 }
