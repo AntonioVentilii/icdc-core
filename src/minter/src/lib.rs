@@ -1,20 +1,15 @@
 pub mod guards;
 pub mod state;
-pub mod types;
 pub mod utils;
 
 use ic_cdk::{call, export_candid, storage};
 use ic_cdk_macros::{init, post_upgrade, pre_upgrade, query, update};
 use icrc_ledger_types::icrc1::transfer::{BlockIndex, TransferArg, TransferError};
+use shared::types::minter::{Config, ConfigResult, MintParams, MintResult};
 
 use crate::{
     guards::{caller_is_authorized, caller_is_controller, caller_is_not_anonymous},
     state::{memory::CONFIG, read_config, set_config},
-    types::{
-        params::MintParams,
-        results::{ConfigResult, MintResult},
-        state::Config,
-    },
     utils::to_account,
 };
 

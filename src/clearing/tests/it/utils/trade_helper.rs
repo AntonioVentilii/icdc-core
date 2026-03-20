@@ -17,10 +17,11 @@ use clearing::{
     },
 };
 use icrc_ledger_types::icrc2::approve::ApproveArgs;
-use registry::{AddSeriesParams, AddSeriesResult};
 use shared::types::{
-    evm::NativeEvmAsset, Asset, AssetMetrics, BalanceDomain, CollateralAssetConfig, DecimalValue,
-    Description, PayoffType, PayoutUnit, Price, SeriesId,
+    evm::NativeEvmAsset,
+    series::{AddSeriesParams, AddSeriesResult},
+    Asset, AssetMetrics, BalanceDomain, CollateralAssetConfig, DecimalValue, Description,
+    PayoffType, PayoutUnit, Price, SeriesId,
 };
 
 use super::{pic_canister::PicCanisterTrait as _, test_environment::TestSetup};

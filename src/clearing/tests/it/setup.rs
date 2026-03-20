@@ -1,7 +1,6 @@
 use candid::Principal;
 use ic_cdk::println;
-use minter::types::results::ConfigResult;
-use shared::constants::VUSD_LEDGER;
+use shared::{constants::VUSD_LEDGER, types::minter::ConfigResult};
 
 use crate::utils::{pic_canister::PicCanisterTrait as _, test_environment::TestSetup};
 

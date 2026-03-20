@@ -44,9 +44,8 @@ thread_local! {
 }
 
 pub fn save_state() {
-    let config: Config = CONFIG.with(|c: &RefCell<Config>| c.borrow().clone());
-    let positions: Vec<Position> =
-        POSITIONS.with(|p: &RefCell<PositionsMap>| p.borrow().values().cloned().collect());
+    let config: Config = CONFIG.with(|c| c.borrow().clone());
+    let positions: Vec<Position> = POSITIONS.with(|p| p.borrow().values().cloned().collect());
     let accounts: BTreeMap<User, AccountState> = ACCOUNT_STATES.with(|a| a.borrow().clone());
     let series: BTreeMap<SeriesId, Series> = SERIES.with(|s| s.borrow().clone());
     let events: Vec<Event> = EVENTS.with(|e| e.borrow().clone());

@@ -1,4 +1,6 @@
-use crate::{state::memory::CONFIG, Config};
+use shared::types::minter::Config;
+
+use crate::state::memory::CONFIG;
 
 pub mod memory;
 

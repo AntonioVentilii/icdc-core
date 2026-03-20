@@ -4,17 +4,16 @@ use ic_cdk::{api::time, caller};
 use ic_cdk_macros::{query, update};
 use shared::{
     constants::{MAX_SERIES_DESCRIPTION_LEN, MAX_SERIES_TITLE_LEN},
-    types::{PayoutUnit, Series, SeriesId, SeriesIdParams},
+    types::{
+        series::{
+            AddSeriesParams, AddSeriesResult, ListSeriesParams, PaginationParams, Series,
+            SeriesError, SeriesPage,
+        },
+        PayoutUnit, SeriesId, SeriesIdParams,
+    },
 };
 
-use crate::{
-    guards::caller_is_authorized_creator,
-    memory::SERIES_STORE,
-    params::{AddSeriesParams, ListSeriesParams, PaginationParams},
-    results::AddSeriesResult,
-    utils::canonical_id_part,
-    SeriesError, SeriesPage,
-};
+use crate::{guards::caller_is_authorized_creator, memory::SERIES_STORE, utils::canonical_id_part};
 
 /// Adds a new derivative series to the registry.
 ///

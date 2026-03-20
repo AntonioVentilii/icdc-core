@@ -202,10 +202,8 @@ dependencies = [
  "ic-cdk-macros 0.17.2",
  "ic-cdk-timers",
  "icrc-ledger-types",
- "minter",
  "num-traits",
  "pocket-ic",
- "registry",
  "serde",
  "serde_bytes",
  "sha2",
@@ -1124,6 +1122,7 @@ dependencies = [
  "ic-cdk-macros 0.17.2",
  "icrc-ledger-types",
  "serde",
+ "shared",
 ]
 
 [[package]]
@@ -1848,6 +1847,7 @@ version = "0.0.3"
 dependencies = [
  "candid",
  "hex",
+ "icrc-ledger-types",
  "serde",
  "sha2",
 ]

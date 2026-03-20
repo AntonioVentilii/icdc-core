@@ -4,14 +4,14 @@ use ic_cdk::{
     caller,
 };
 use ic_cdk_macros::{query, update};
-use shared::types::Oracle;
+use shared::types::oracle::{
+    AddOracleParams, ManageOraclePrincipalsParams, Oracle, OracleError, OracleResult,
+    UpdateOracleMetadataParams,
+};
 
 use crate::{
-    errors::OracleError,
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::ORACLE_STORE,
-    params::{AddOracleParams, ManageOraclePrincipalsParams, UpdateOracleMetadataParams},
-    results::OracleResult,
     utils::canonical_id_part,
 };
 

@@ -3,6 +3,7 @@ pub mod collateral;
 pub mod decimal;
 pub mod description;
 pub mod domain;
+pub mod minter;
 pub mod oracle;
 pub mod payout;
 pub mod price;

@@ -3,18 +3,15 @@ use std::{collections::BTreeMap, sync::Arc};
 use candid::{encode_one, CandidType, Nat, Principal};
 use pocket_ic::{PocketIc, PocketIcBuilder};
 use serde::Deserialize;
-use shared::constants::{ICP_LEDGER, VUSD_LEDGER};
+use shared::{
+    constants::{ICP_LEDGER, VUSD_LEDGER},
+    types::minter::Config as MinterConfig,
+};
 
 use super::{
     mock::{CONTROLLER, NON_CONTROLLER},
     pic_canister::{PicCanister, PicCanisterBuilder, PicCanisterTrait as _},
 };
-
-#[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct MinterConfig {
-    pub ledger_canister: Principal,
-    pub authorized_callers: Vec<Principal>,
-}
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub enum MetadataValue {
