@@ -50,6 +50,35 @@ jobs:
           name: minter.wasm.gz
           path: ./target/wasm32-unknown-unknown/release/minter.wasm.gz
 
+      - name: Gzip external WASMs
+        run: |
+          gzip -c target/ic/ledger.wasm > target/ic/ledger.wasm.gz
+          gzip -c target/ic/index.wasm > target/ic/index.wasm.gz
+
+      - name: Upload ledger.wasm.gz
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: ledger.wasm.gz
+          path: ./target/ic/ledger.wasm.gz
+
+      - name: Upload index.wasm.gz
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: index.wasm.gz
+          path: ./target/ic/index.wasm.gz
+
+      - name: Upload ledger.did
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: ledger.did
+          path: ./target/ic/ledger.did
+
+      - name: Upload index.did
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: index.did
+          path: ./target/ic/index.did
+
   candid:
     name: Generate Candid
     runs-on: ubuntu-24.04
@@ -131,6 +160,30 @@ jobs:
           name: minter.did
           path: .
 
+      - name: Download ledger.wasm.gz
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: ledger.wasm.gz
+          path: .
+
+      - name: Download ledger.did
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: ledger.did
+          path: .
+
+      - name: Download index.wasm.gz
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: index.wasm.gz
+          path: .
+
+      - name: Download index.did
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: index.did
+          path: .
+
       - name: Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
         if: startsWith(github.ref, 'refs/tags/')
@@ -142,3 +195,7 @@ jobs:
             ./registry.did
             ./minter.wasm.gz
             ./minter.did
+            ./ledger.wasm.gz
+            ./ledger.did
+            ./index.wasm.gz
+            ./index.did
