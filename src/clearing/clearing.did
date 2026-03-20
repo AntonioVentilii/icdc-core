@@ -12,9 +12,9 @@ type AccountStateError = variant {
 };
 type AccountStateResponse = record {
 	assets : vec AssetWorth;
-	available_equity_usd : int;
 	state : AccountState;
-	total_equity_usd : nat
+	total_equity_usd : nat;
+	available_margin_usd : int
 };
 type Asset = variant {
 	Erc20 : ErcToken;
@@ -308,6 +308,7 @@ type SubmitMatchedTradeParams = record {
 };
 type SubmitMatchedTradeResult = variant { Ok : bool; Err : TradeError };
 type TradeError = variant {
+	SelfTradingNotAllowed;
 	OrderNotFound : text;
 	ArbitrageLimitExceeded : record { limit_usd : nat; sum_usd : nat };
 	RegistryError : text;
