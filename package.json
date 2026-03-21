@@ -17,7 +17,13 @@
 		"deploy:staging": "dfx deploy --network staging --upgrade-unchanged",
 		"deploy:prod": "dfx deploy --ic --upgrade-unchanged",
 		"reinstall": "./scripts/reinstall.sh",
-		"reinstall:staging": "./scripts/reinstall.sh --staging"
+		"reinstall:staging": "./scripts/reinstall.sh --staging",
+		"init:registry": "./scripts/init.registry.sh",
+		"init:registry:staging": "./scripts/init.registry.sh --staging",
+		"init:clearing": "./scripts/init.clearing.sh",
+		"init:clearing:staging": "./scripts/init.clearing.sh --staging",
+		"init": "npm run init:registry && npm run init:clearing",
+		"init:staging": "npm run init:registry:staging && npm run init:clearing:staging"
 	},
 	"devDependencies": {
 		"@icp-sdk/bindgen": "^0.2.1",

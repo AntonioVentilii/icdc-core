@@ -61,7 +61,7 @@ dfx canister call clearing register_icrc_asset "(record {
     ledger_id = principal \"$TESTICP_LEDGER\";
     haircut_bps = $TESTICP_HAIRCUT_BPS : nat16;
     oracle_id = null;
-    is_enabled = true;
+    is_enabled = false;
     allowed_balance_domains = $CLEARING_DOMAINS_PLAYGROUND;
 })" --network "$NETWORK"
 
@@ -79,7 +79,7 @@ dfx canister call clearing register_icrc_asset "(record {
     ledger_id = principal \"$TICRC1_LEDGER\";
     haircut_bps = $TICRC1_HAIRCUT_BPS : nat16;
     oracle_id = null;
-    is_enabled = true;
+    is_enabled = false;
     allowed_balance_domains = $CLEARING_DOMAINS_PLAYGROUND;
 })" --network "$NETWORK"
 
