@@ -133,7 +133,7 @@ pub fn restore_state() {
     let state = match result {
         Ok((s,)) => s,
         Err(e) => {
-            trap(&format!("Failed to restore stable state: {e:?}"));
+            trap(format!("Failed to restore stable state: {e:?}"));
         }
     };
 

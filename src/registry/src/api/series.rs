@@ -1,6 +1,6 @@
 use core::ops::Bound;
 
-use ic_cdk::{api::time, caller};
+use ic_cdk::api::{msg_caller, time};
 use ic_cdk_macros::{query, update};
 use shared::{
     constants::{MAX_SERIES_DESCRIPTION_LEN, MAX_SERIES_TITLE_LEN},
@@ -62,7 +62,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
     let underlying = canonical_id_part(&underlying);
     let oracle_source = canonical_id_part(&oracle_source);
 
-    let series_id = Series::generate_id(SeriesIdParams {
+    let series_id = Series::generate_id(&SeriesIdParams {
         underlying: &underlying,
         balance_domain,
         expiry_ns,
@@ -85,7 +85,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
         payout_unit,
         outcomes,
         oracle_source,
-        creator: caller(),
+        creator: msg_caller(),
         created_at_ns: time(),
         title,
         description,
@@ -118,17 +118,15 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
 /// * `None` otherwise.
 #[query]
 #[must_use]
-#[expect(clippy::needless_pass_by_value)]
 pub fn get_series(series_id: SeriesId) -> Option<Series> {
-    SERIES_STORE.with(|store| return store.borrow().get(&series_id).cloned())
+    SERIES_STORE.with(move |store| store.borrow().get(&series_id).cloned())
 }
 
 /// Returns a paginated page of registered derivative series, optionally filtered.
 #[query]
 #[must_use]
-#[expect(clippy::needless_pass_by_value)]
 pub fn list_series_with(params: ListSeriesParams) -> SeriesPage {
-    SERIES_STORE.with(|store| {
+    SERIES_STORE.with(move |store| {
         let store = store.borrow();
 
         let cursor = params.pagination.as_ref().and_then(|p| p.cursor.as_ref());

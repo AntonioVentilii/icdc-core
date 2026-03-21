@@ -1,7 +1,7 @@
 use core::cell::RefCell;
 use std::collections::BTreeMap;
 
-use ic_cdk::caller;
+use ic_cdk::api::msg_caller;
 use ic_cdk_macros::update;
 use shared::types::BalanceDomain;
 
@@ -33,7 +33,7 @@ use crate::{
 #[update(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn migrate_domain(params: MigrateDomainParams) -> MigrateDomainResult {
-    let user: User = caller().into();
+    let user: User = msg_caller().into();
 
     let result: Result<(), MigrationError> = migrate_domain_impl(user, params);
 

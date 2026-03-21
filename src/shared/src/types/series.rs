@@ -132,19 +132,7 @@ impl Series {
     /// The ID is computed using a SHA-256 hash of all defining parameters,
     /// ensuring that identical series have the same ID while preventing collisions.
     #[must_use]
-    #[expect(clippy::needless_pass_by_value)]
-    pub fn generate_id(params: SeriesIdParams) -> SeriesId {
-        let SeriesIdParams {
-            underlying,
-            expiry_ns,
-            payoff_type,
-            strike,
-            price_precision,
-            payout_unit,
-            outcomes,
-            oracle_source,
-            balance_domain: _,
-        } = params;
+    pub fn generate_id(params: &SeriesIdParams<'_>) -> SeriesId {
         let mut hasher = Sha256::new();
 
         // 🔐 Domain separator (versioned for future upgrades)
@@ -158,16 +146,16 @@ impl Series {
 
         // Explicit field separators to avoid ambiguity
         hasher.update(b"|UNDERLYING|");
-        hasher.update(underlying.as_bytes());
+        hasher.update(params.underlying.as_bytes());
 
         hasher.update(b"|EXPIRY|");
-        hasher.update(expiry_ns.to_be_bytes());
+        hasher.update(params.expiry_ns.to_be_bytes());
 
         hasher.update(b"|PAYOFF|");
-        hasher.update(payoff_type.as_id_bytes());
+        hasher.update(params.payoff_type.as_id_bytes());
 
         hasher.update(b"|STRIKE|");
-        match strike {
+        match params.strike {
             Some(p) => {
                 hasher.update(p.value().to_be_bytes());
                 hasher.update([p.decimals()]);
@@ -176,13 +164,13 @@ impl Series {
         }
 
         hasher.update(b"|PRECISION|");
-        hasher.update([price_precision]);
+        hasher.update([params.price_precision]);
 
         hasher.update(b"|PAYOUT_UNIT|");
-        hasher.update(payout_unit.as_id_bytes());
+        hasher.update(params.payout_unit.as_id_bytes());
 
         hasher.update(b"|OUTCOMES|");
-        match outcomes {
+        match params.outcomes {
             Some(list) => {
                 for outcome in list {
                     hasher.update(outcome.id.as_str().as_bytes());
@@ -193,7 +181,7 @@ impl Series {
         }
 
         hasher.update(b"|ORACLE|");
-        hasher.update(oracle_source.as_bytes());
+        hasher.update(params.oracle_source.as_bytes());
 
         let series_id = encode(hasher.finalize());
 
@@ -455,7 +443,7 @@ mod tests {
         let payout_unit = PayoutUnit::usd();
         let oracle_source = "coingecko";
 
-        let id1 = Series::generate_id(SeriesIdParams {
+        let id1 = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: expiry,
             payoff_type: &payoff_type,
@@ -467,7 +455,7 @@ mod tests {
             balance_domain: BalanceDomain::Settlement,
         });
 
-        let id2 = Series::generate_id(SeriesIdParams {
+        let id2 = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: expiry,
             payoff_type: &payoff_type,
@@ -491,7 +479,7 @@ mod tests {
         let payout_unit = PayoutUnit::usd();
         let oracle_source = "coingecko";
 
-        let id1 = Series::generate_id(SeriesIdParams {
+        let id1 = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: 100,
             payoff_type: &payoff_type,
@@ -503,7 +491,7 @@ mod tests {
             balance_domain: BalanceDomain::Settlement,
         });
 
-        let id2 = Series::generate_id(SeriesIdParams {
+        let id2 = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: 200,
             payoff_type: &payoff_type,
@@ -527,7 +515,7 @@ mod tests {
         let payout_unit = PayoutUnit::usd();
         let oracle_source = "coingecko";
 
-        let id1 = Series::generate_id(SeriesIdParams {
+        let id1 = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: expiry,
             payoff_type: &payoff_type,
@@ -539,7 +527,7 @@ mod tests {
             balance_domain: BalanceDomain::Settlement,
         });
 
-        let id2 = Series::generate_id(SeriesIdParams {
+        let id2 = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: expiry,
             payoff_type: &payoff_type,

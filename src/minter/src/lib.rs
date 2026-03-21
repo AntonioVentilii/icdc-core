@@ -2,7 +2,7 @@ pub mod guards;
 pub mod state;
 pub mod utils;
 
-use ic_cdk::{call, export_candid, storage};
+use ic_cdk::{call::Call, export_candid, storage};
 use ic_cdk_macros::{init, post_upgrade, pre_upgrade, query, update};
 use icrc_ledger_types::icrc1::transfer::{BlockIndex, TransferArg, TransferError};
 use shared::types::minter::{Config, ConfigResult, MintParams, MintResult};
@@ -59,11 +59,21 @@ pub async fn mint(params: MintParams) -> MintResult {
         created_at_time: None,
     };
 
+    let transfer_response = match Call::bounded_wait(config.ledger_canister, "icrc1_transfer")
+        .with_args(&(arg,))
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return MintResult::Err(format!("Ledger call failed: {e}"));
+        }
+    };
+
     let (res,): (Result<BlockIndex, TransferError>,) =
-        match call(config.ledger_canister, "icrc1_transfer", (arg,)).await {
+        match transfer_response.candid_tuple::<(Result<BlockIndex, TransferError>,)>() {
             Ok(v) => v,
-            Err((code, msg)) => {
-                return MintResult::Err(format!("Ledger call failed: {code:?} - {msg}"));
+            Err(e) => {
+                return MintResult::Err(format!("Ledger response decode failed: {e}"));
             }
         };
 

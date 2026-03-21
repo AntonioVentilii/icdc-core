@@ -1,5 +1,5 @@
 use candid::Nat;
-use ic_cdk::caller;
+use ic_cdk::api::msg_caller;
 use ic_cdk_macros::{query, update};
 use shared::{
     constants::{BPS_BASE, USD_DECIMALS},
@@ -39,7 +39,7 @@ use crate::{
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositCollateralResult {
     let result: Result<(), DepositCollateralError> = (async {
-        let user: User = caller().into();
+        let user: User = msg_caller().into();
 
         let DepositCollateralParams {
             amount,
@@ -163,7 +163,7 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCollateralResult {
     let result: Result<(), WithdrawCollateralError> = (async {
-        let user: User = caller().into();
+        let user: User = msg_caller().into();
 
         let WithdrawCollateralParams {
             amount,

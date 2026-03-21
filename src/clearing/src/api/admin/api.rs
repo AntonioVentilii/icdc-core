@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
 
 use candid::{Nat, Principal};
-use ic_cdk::{api::is_controller, call, caller, trap};
+use ic_cdk::{
+    api::{is_controller, msg_caller, trap},
+    call::Call,
+};
 use ic_cdk_macros::{query, update};
 use shared::types::{
     AllowedBalanceDomains, Asset, AssetId, AssetMetrics, BalanceDomain, CollateralAssetConfig,
@@ -79,13 +82,14 @@ pub fn config() -> Config {
 /// Immutable properties like `internal_ledger_id` and `version` are preserved from the existing
 /// state. This method is gated to canister controllers.
 #[update(guard = "caller_is_controller")]
-pub fn update_config(mut config: Config) {
+pub fn update_config(config: Config) {
     CONFIG.with(|c| {
+        let mut new_config = config;
         let current = c.borrow();
-        config.internal_ledger = current.internal_ledger.clone();
-        config.version = current.version;
+        new_config.internal_ledger = current.internal_ledger.clone();
+        new_config.version = current.version;
         drop(current);
-        *c.borrow_mut() = config;
+        *c.borrow_mut() = new_config;
     });
 }
 
@@ -364,7 +368,7 @@ pub async fn update_asset_price(params: UpdateAssetPriceParams) -> UpdateAssetPr
 async fn update_asset_price_impl(
     params: UpdateAssetPriceParams,
 ) -> Result<(), UpdateAssetPriceError> {
-    let caller = caller();
+    let caller = msg_caller();
 
     let asset_config = COLLATERAL_ASSETS
         .with(|assets| assets.borrow().get(&params.asset_id).cloned())
@@ -379,16 +383,18 @@ async fn update_asset_price_impl(
             return Err(UpdateAssetPriceError::Common(CommonError::RegistryNotSet));
         }
 
-        let is_authorized: Result<(bool,), _> = call(
-            registry_canister,
-            "is_oracle_authorized",
-            (oracle_id, caller),
-        )
-        .await;
+        let auth = Call::bounded_wait(registry_canister, "is_oracle_authorized")
+            .with_args(&(oracle_id, caller))
+            .await;
 
-        match is_authorized {
-            Ok((true,)) => {}
-            _ => return Err(UpdateAssetPriceError::Common(CommonError::Unauthorized)),
+        match auth {
+            Ok(response) => match response.candid_tuple::<(bool,)>() {
+                Ok((true,)) => {}
+                Ok((false,)) | Err(_) => {
+                    return Err(UpdateAssetPriceError::Common(CommonError::Unauthorized));
+                }
+            },
+            Err(_) => return Err(UpdateAssetPriceError::Common(CommonError::Unauthorized)),
         }
     }
 

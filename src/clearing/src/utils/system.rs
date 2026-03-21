@@ -1,6 +1,6 @@
 use candid::Principal;
 #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-use ic_cdk::{api::time, id};
+use ic_cdk::api::{canister_self, time};
 
 /// Returns the current time in nanoseconds.
 ///
@@ -20,12 +20,12 @@ pub fn now_ns() -> u64 {
 
 /// Returns the current canister ID.
 ///
-/// On the IC, this uses `ic_cdk::id()`.
+/// On the IC, this uses `ic_cdk::api::canister_self()`.
 /// Off-chain (for tests / host builds), it returns `Principal::anonymous()`.
 pub fn canister_id() -> Principal {
     #[cfg(all(target_family = "wasm", target_os = "unknown"))]
     {
-        id()
+        canister_self()
     }
 
     #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]

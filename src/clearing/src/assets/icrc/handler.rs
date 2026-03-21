@@ -1,5 +1,8 @@
 use candid::Nat;
-use ic_cdk::{call, id};
+use ic_cdk::{
+    api::canister_self,
+    call::{Call, CallFailed},
+};
 use icrc_ledger_types::{
     icrc1::{
         account::Account,
@@ -19,6 +22,21 @@ use crate::{
     types::account::{AssetAccount, ExternalAssetAccount},
 };
 
+fn map_ledger_call_failed(method: &str, err: CallFailed) -> AssetError {
+    match err {
+        CallFailed::CallRejected(r) => AssetError::CallError {
+            method: method.to_owned(),
+            code: i32::try_from(r.raw_reject_code()).unwrap_or(i32::MAX),
+            message: r.reject_message().to_owned(),
+        },
+        e => AssetError::CallError {
+            method: method.to_owned(),
+            code: -1,
+            message: e.to_string(),
+        },
+    }
+}
+
 /// Implementation of [`AssetHandler`] for ICRC-1 and ICRC-2 compatible ledgers.
 pub struct IcrcHandler;
 
@@ -29,12 +47,17 @@ impl IcrcHandler {
 
         let account = resolve_account(&params.account)?;
 
-        let (ledger_balance,): (Nat,) = call(*ledger_id, "icrc1_balance_of", (account,))
+        let response = Call::bounded_wait(*ledger_id, "icrc1_balance_of")
+            .with_args(&(account,))
             .await
-            .map_err(|(code, msg)| AssetError::CallError {
+            .map_err(|e| map_ledger_call_failed("icrc1_balance_of", e))?;
+
+        let (ledger_balance,) = response
+            .candid_tuple::<(Nat,)>()
+            .map_err(|e| AssetError::CallError {
                 method: "icrc1_balance_of".to_owned(),
-                code: code as i32,
-                message: msg,
+                code: -2,
+                message: e.to_string(),
             })?;
 
         ledger_balance.0.to_u128().ok_or(AssetError::MathOverflow)
@@ -44,14 +67,15 @@ impl IcrcHandler {
     pub async fn get_fee(&self, asset: &Asset) -> Result<u128, AssetError> {
         let ledger_id = asset.as_icrc()?;
 
-        let (fee_nat,): (Nat,) =
-            call(*ledger_id, "icrc1_fee", ())
-                .await
-                .map_err(|(code, msg)| AssetError::CallError {
-                    method: "icrc1_fee".to_owned(),
-                    code: code as i32,
-                    message: msg,
-                })?;
+        let response = Call::bounded_wait(*ledger_id, "icrc1_fee")
+            .await
+            .map_err(|e| map_ledger_call_failed("icrc1_fee", e))?;
+
+        let (fee_nat,) = response.candid_tuple::<(Nat,)>().map_err(|e| AssetError::CallError {
+            method: "icrc1_fee".to_owned(),
+            code: -2,
+            message: e.to_string(),
+        })?;
 
         fee_nat.0.to_u128().ok_or(AssetError::MathOverflow)
     }
@@ -60,14 +84,15 @@ impl IcrcHandler {
     pub async fn get_symbol(&self, asset: &Asset) -> Result<String, AssetError> {
         let ledger_id = asset.as_icrc()?;
 
-        let (symbol,): (String,) =
-            call(*ledger_id, "icrc1_symbol", ())
-                .await
-                .map_err(|(code, msg)| AssetError::CallError {
-                    method: "icrc1_symbol".to_owned(),
-                    code: code as i32,
-                    message: msg,
-                })?;
+        let response = Call::bounded_wait(*ledger_id, "icrc1_symbol")
+            .await
+            .map_err(|e| map_ledger_call_failed("icrc1_symbol", e))?;
+
+        let (symbol,) = response.candid_tuple::<(String,)>().map_err(|e| AssetError::CallError {
+            method: "icrc1_symbol".to_owned(),
+            code: -2,
+            message: e.to_string(),
+        })?;
 
         Ok(symbol)
     }
@@ -76,14 +101,15 @@ impl IcrcHandler {
     pub async fn get_decimals(&self, asset: &Asset) -> Result<u8, AssetError> {
         let ledger_id = asset.as_icrc()?;
 
-        let (decimals,): (u8,) =
-            call(*ledger_id, "icrc1_decimals", ())
-                .await
-                .map_err(|(code, msg)| AssetError::CallError {
-                    method: "icrc1_decimals".to_owned(),
-                    code: code as i32,
-                    message: msg,
-                })?;
+        let response = Call::bounded_wait(*ledger_id, "icrc1_decimals")
+            .await
+            .map_err(|e| map_ledger_call_failed("icrc1_decimals", e))?;
+
+        let (decimals,) = response.candid_tuple::<(u8,)>().map_err(|e| AssetError::CallError {
+            method: "icrc1_decimals".to_owned(),
+            code: -2,
+            message: e.to_string(),
+        })?;
 
         Ok(decimals)
     }
@@ -107,14 +133,18 @@ impl IcrcHandler {
             created_at_time: params.created_at_time_ns,
         };
 
-        let (res,): (Result<Nat, TransferError>,) =
-            call(*ledger_id, "icrc1_transfer", (icrc_args,))
-                .await
-                .map_err(|(code, msg)| AssetError::CallError {
-                    method: "icrc1_transfer".to_owned(),
-                    code: code as i32,
-                    message: msg,
-                })?;
+        let response = Call::bounded_wait(*ledger_id, "icrc1_transfer")
+            .with_args(&(icrc_args,))
+            .await
+            .map_err(|e| map_ledger_call_failed("icrc1_transfer", e))?;
+
+        let (res,) = response
+            .candid_tuple::<(Result<Nat, TransferError>,)>()
+            .map_err(|e| AssetError::CallError {
+                method: "icrc1_transfer".to_owned(),
+                code: -2,
+                message: e.to_string(),
+            })?;
 
         match res {
             Ok(block) => block.0.to_u128().ok_or(AssetError::MathOverflow),
@@ -150,14 +180,18 @@ impl IcrcHandler {
             created_at_time: params.created_at_time_ns,
         };
 
-        let (res,): (Result<Nat, TransferFromError>,) =
-            call(*ledger_id, "icrc2_transfer_from", (icrc_args,))
-                .await
-                .map_err(|(code, msg)| AssetError::CallError {
-                    method: "icrc2_transfer_from".to_owned(),
-                    code: code as i32,
-                    message: msg,
-                })?;
+        let response = Call::bounded_wait(*ledger_id, "icrc2_transfer_from")
+            .with_args(&(icrc_args,))
+            .await
+            .map_err(|e| map_ledger_call_failed("icrc2_transfer_from", e))?;
+
+        let (res,) = response
+            .candid_tuple::<(Result<Nat, TransferFromError>,)>()
+            .map_err(|e| AssetError::CallError {
+                method: "icrc2_transfer_from".to_owned(),
+                code: -2,
+                message: e.to_string(),
+            })?;
 
         match res {
             Ok(block) => block.0.to_u128().ok_or(AssetError::MathOverflow),
@@ -193,7 +227,7 @@ fn resolve_account(account: &AssetAccount) -> Result<Account, AssetError> {
     match account {
         AssetAccount::UserClearing(u) => Ok(u.clearing_account()),
         AssetAccount::CanisterMain => Ok(Account {
-            owner: id(),
+            owner: canister_self(),
             subaccount: None,
         }),
         AssetAccount::External(ExternalAssetAccount::Principal(principal)) => Ok(Account {
