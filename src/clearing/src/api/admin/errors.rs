@@ -29,4 +29,5 @@ pub enum UpdateAssetPriceError {
 pub enum RegisterIcrcAssetError {
     Common(CommonError),
     AssetAlreadyExists,
+    VusdCannotBeCollateral,
 }

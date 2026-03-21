@@ -8,10 +8,7 @@ use ic_cdk::{
 };
 use ic_cdk_macros::{query, update};
 use ic_cdk_timers::set_timer;
-use shared::{
-    constants::VUSD_ASSET_ID,
-    types::{BalanceDomain, Series, SeriesId, SettlementInput},
-};
+use shared::types::{BalanceDomain, Series, SeriesId, SettlementInput};
 
 use super::{errors::SettlementError, params::SettleSeriesParams, results::SettleSeriesResult};
 use crate::{
@@ -30,6 +27,7 @@ use crate::{
         },
         user::User,
     },
+    utils::vusd::get_internal_asset_id,
 };
 
 /// Settles a derivative series at a specific price.
@@ -210,16 +208,18 @@ pub(crate) async fn settle_series_inner(params: SettleSeriesParams) -> SettleSer
                 let insurance_fee_total = plan.insurance_fee_usd;
                 let protocol_fee_total = plan.fee_usd;
 
+                let internal_asset_id = get_internal_asset_id();
+
                 TREASURY.with(|t| {
                     let mut t = t.borrow_mut();
-                    let current = t.get(VUSD_ASSET_ID).copied().unwrap_or(0);
-                    t.insert(VUSD_ASSET_ID.to_owned(), current + protocol_fee_total);
+                    let current = t.get(&internal_asset_id).copied().unwrap_or(0);
+                    t.insert(internal_asset_id.clone(), current + protocol_fee_total);
                 });
 
                 INSURANCE_FUND.with(|i| {
                     let mut i = i.borrow_mut();
-                    let current = i.get(VUSD_ASSET_ID).copied().unwrap_or(0);
-                    i.insert(VUSD_ASSET_ID.to_owned(), current + insurance_fee_total);
+                    let current = i.get(&internal_asset_id).copied().unwrap_or(0);
+                    i.insert(internal_asset_id.clone(), current + insurance_fee_total);
                 });
             }
         }

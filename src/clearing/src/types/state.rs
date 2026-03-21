@@ -1,10 +1,9 @@
 use std::collections::BTreeMap;
 
 use candid::{CandidType, Principal};
-use serde::Deserialize;
-use shared::{
-    constants::{DEFAULT_INSURANCE_FEE_RATIO, DEFAULT_PROTOCOL_FEE_RATIO},
-    types::{AssetId, AssetMetrics, CollateralAssetConfig, OutcomeId, Price, Series, SeriesId},
+use serde::{Deserialize, Serialize};
+use shared::types::{
+    AssetId, AssetMetrics, CollateralAssetConfig, OutcomeId, Price, Series, SeriesId,
 };
 
 use crate::types::{
@@ -37,7 +36,7 @@ pub struct PositionProof {
 }
 
 /// Global configuration for the Clearing canister.
-#[derive(CandidType, Deserialize, Clone, Debug)]
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct Config {
     /// The global insurance fund fee ratio in basis points (1 bp = 0.01%).
     pub insurance_fund_fee_ratio: u16,
@@ -47,16 +46,10 @@ pub struct Config {
     pub evm_rpc: Principal,
     /// The principal of the Chain Fusion Signer canister.
     pub signer_canister: Principal,
-}
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            insurance_fund_fee_ratio: DEFAULT_INSURANCE_FEE_RATIO,
-            protocol_fee_ratio: DEFAULT_PROTOCOL_FEE_RATIO,
-            evm_rpc: Principal::anonymous(),
-            signer_canister: Principal::anonymous(),
-        }
-    }
+    /// The comprehensive configuration for the internal accounting ledger (vUSD).
+    pub internal_ledger: CollateralAssetConfig,
+    /// The economic epoch version.
+    pub version: u32,
 }
 
 /// Represents the complete state of the clearing canister for persistence (V2).

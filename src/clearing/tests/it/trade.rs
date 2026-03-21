@@ -21,9 +21,9 @@ use shared::types::{BalanceDomain, Price};
 
 use crate::utils::{
     assertions::{assert_ok_value, assert_unauthorized},
-    pic_canister::PicCanisterTrait as _,
     test_environment::{test_user, TestSetup},
-    trade_helper::TradeHelperTrait as _,
+    trade_helper::TradeHelperTrait,
+    PicCanisterTrait,
 };
 
 #[test]
@@ -191,17 +191,18 @@ fn basic_matched_trade() {
     // 2. Add Series to Registry
     let series_id = env.add_binary_series("BTC", 1_000_000, BalanceDomain::Settlement);
 
-    // 3. Deposits
-    let deposit_amount = Nat::from(1_000_000_000_000_u128); // 10,000 units * 10^8
+    // 3. Deposits (Using ICP for collateral)
+    // Deposit 1000 ICP ($15,000 gross, $14,700 net)
+    let deposit_amount = Nat::from(100_000_000_000_u128);
     env.deposit_collateral(
         user_a,
-        "vUSD",
+        "ICP",
         deposit_amount.clone(),
         Some(BalanceDomain::Settlement),
     );
     env.deposit_collateral(
         user_b,
-        "vUSD",
+        "ICP",
         deposit_amount,
         Some(BalanceDomain::Settlement),
     );
@@ -261,12 +262,12 @@ fn basic_matched_trade() {
         GetAccountStateResult::Ok(resp) => {
             assert_eq!(
                 resp.state.get_cash_balance_usd(BalanceDomain::Settlement),
-                5_000_000_000
+                -5_000_000_000, // Cost of trade
+                "Buyer cash should be negative $5000"
             );
             assert_eq!(
-                resp.state
-                    .get_reserved_margin_usd(BalanceDomain::Settlement),
-                5_000_000_000
+                resp.total_equity_usd, 14_700_000_000,
+                "Equity should match ICP value minus haircut"
             );
         }
         GetAccountStateResult::Err(err) => panic!("Failed to get account state A: {err:?}"),
@@ -287,12 +288,12 @@ fn basic_matched_trade() {
         GetAccountStateResult::Ok(resp) => {
             assert_eq!(
                 resp.state.get_cash_balance_usd(BalanceDomain::Settlement),
-                5_000_000_000
+                -5_000_000_000, // Margin requirement (Full Collateral)
+                "Seller cash should be negative $5000"
             );
             assert_eq!(
-                resp.state
-                    .get_reserved_margin_usd(BalanceDomain::Settlement),
-                5_000_000_000
+                resp.total_equity_usd, 14_700_000_000,
+                "Equity should match ICP value minus haircut"
             );
         }
         GetAccountStateResult::Err(err) => panic!("Failed to get account state B: {err:?}"),
@@ -311,17 +312,17 @@ fn cross_limit_match() {
     // 2. Add Binary Series
     let series_id = env.add_binary_series("BTC-USD", 1_000_000, BalanceDomain::Settlement);
 
-    // 3. Deposits (10,000 USD each)
-    let deposit_amount = Nat::from(1_000_000_000_000_u128); // 10,000 units * 10^8
+    // 3. Deposits (Using ICP)
+    let deposit_amount = Nat::from(100_000_000_000_u128); // 1000 ICP
     env.deposit_collateral(
         user_a,
-        "vUSD",
+        "ICP",
         deposit_amount.clone(),
         Some(BalanceDomain::Settlement),
     );
     env.deposit_collateral(
         user_b,
-        "vUSD",
+        "ICP",
         deposit_amount,
         Some(BalanceDomain::Settlement),
     );
@@ -390,11 +391,11 @@ fn insufficient_margin() {
     // 2. Add Binary Series
     let series_id = env.add_binary_series("MARGIN-TEST", 1_000_000, BalanceDomain::Settlement);
 
-    // 3. User A: Deposit small amount ($1)
-    let deposit_amount = Nat::from(100_000_000_u128); // 1.0 unit * 10^8
+    // 3. User A: Deposit small amount of ICP (1 ICP = $15)
+    let deposit_amount = Nat::from(100_000_000_u128); // 1 ICP
     env.deposit_collateral(
         user_a,
-        "vUSD",
+        "ICP",
         deposit_amount.clone(),
         Some(BalanceDomain::Settlement),
     );
@@ -417,10 +418,10 @@ fn insufficient_margin() {
         other => panic!("Expected InsufficientMargin for huge limit order, got: {other:?}"),
     }
 
-    // 5. User B: Setup small collateral ($1)
+    // 5. User B: Setup small collateral (1 ICP)
     env.deposit_collateral(
         user_b,
-        "vUSD",
+        "ICP",
         deposit_amount,
         Some(BalanceDomain::Settlement),
     );
@@ -438,11 +439,10 @@ fn insufficient_margin() {
     assert!(matches!(res_maker, SubmitMatchedTradeResult::Ok(_)));
 
     // 7. User B: Attempt market sell matching A's 1 unit, but B needs more margin?
-    // Let's give A more money so A can place a larger order that B cannot match.
-    let large_deposit = Nat::from(100_000_000_000_u128); // 1000 units
+    let large_deposit = Nat::from(10_000_000_000_u128); // 100 ICP = $1500
     env.deposit_collateral(
         user_a,
-        "vUSD",
+        "ICP",
         large_deposit,
         Some(BalanceDomain::Settlement),
     );
@@ -491,11 +491,11 @@ fn limit_buy_sell() {
     // 2. Add Binary Series
     let series_id = env.add_binary_series("BUY-SELL-TEST", 1_000_000, BalanceDomain::Settlement);
 
-    // 3. User A: Deposit 100 vUSD
-    let deposit_amount = Nat::from(10_000_000_000_u128); // 100.0 * 10^8
+    // 3. User A: Deposit 10 ICP ($150 gross, $147 net)
+    let deposit_amount = Nat::from(1_000_000_000_u128);
     env.deposit_collateral(
         user_a,
-        "vUSD",
+        "ICP",
         deposit_amount,
         Some(BalanceDomain::Settlement),
     );
@@ -533,17 +533,17 @@ fn limit_market_match() {
     // 2. Add Binary Series
     let series_id = env.add_binary_series("LM-MATCH-TEST", 1_000_000, BalanceDomain::Settlement);
 
-    // 3. User A & B: Deposit 100 vUSD
-    let deposit_amount = Nat::from(10_000_000_000_u128); // 100.0 * 10^8
+    // 3. User A & B: Deposit 100 ICP ($15.0 each gross, $14.7 net)
+    let deposit_amount = Nat::from(10_000_000_000_u128);
     env.deposit_collateral(
         user_a,
-        "vUSD",
+        "ICP",
         deposit_amount.clone(),
         Some(BalanceDomain::Settlement),
     );
     env.deposit_collateral(
         user_b,
-        "vUSD",
+        "ICP",
         deposit_amount,
         Some(BalanceDomain::Settlement),
     );
@@ -595,17 +595,17 @@ fn multi_user_journey() {
     // 2. Add Binary Series
     let series_id = env.add_binary_series("MULTI-USER-TEST", 1_000_000, BalanceDomain::Settlement);
 
-    // 3. User A & B: Deposit 100 vUSD
-    let deposit_amount = Nat::from(10_000_000_000_u128); // 100.0 * 10^8
+    // 3. User A & B: Deposit 100 ICP ($15.0 each gross, $14.7 net)
+    let deposit_amount = Nat::from(10_000_000_000_u128);
     env.deposit_collateral(
         user_a,
-        "vUSD",
+        "ICP",
         deposit_amount.clone(),
         Some(BalanceDomain::Settlement),
     );
     env.deposit_collateral(
         user_b,
-        "vUSD",
+        "ICP",
         deposit_amount,
         Some(BalanceDomain::Settlement),
     );

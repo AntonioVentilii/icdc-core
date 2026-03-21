@@ -1,10 +1,7 @@
-use candid::{CandidType, Principal};
+use candid::CandidType;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    constants::VUSD_LEDGER,
-    types::asset::{errors::AssetError, Asset},
-};
+use crate::types::asset::{errors::AssetError, Asset};
 
 #[derive(
     CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
@@ -34,9 +31,6 @@ impl PayoutUnit {
     pub fn to_asset(&self) -> Result<Asset, AssetError> {
         match self {
             PayoutUnit::Asset(a) => Ok(a.clone()),
-            PayoutUnit::Fiat(FiatUnit::Usd) => Principal::from_text(VUSD_LEDGER)
-                .map(Asset::Icrc)
-                .map_err(|_| AssetError::InvalidAssetId(VUSD_LEDGER.to_owned())),
             _ => Err(AssetError::UnsupportedAsset),
         }
     }

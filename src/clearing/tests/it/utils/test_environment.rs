@@ -1,16 +1,16 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use candid::{encode_one, CandidType, Nat, Principal};
+use clearing::types::state::Config;
 use pocket_ic::{PocketIc, PocketIcBuilder};
 use serde::Deserialize;
-use shared::{
-    constants::{ICP_LEDGER, VUSD_LEDGER},
-    types::minter::Config as MinterConfig,
-};
+use shared::types::{minter::Config as MinterConfig, Asset, CollateralAssetConfig};
 
-use super::{
-    mock::{CONTROLLER, NON_CONTROLLER},
+use crate::utils::{
+    constants::{CKUSDC_LEDGER, ICP_LEDGER, VUSD_ASSET_ID, VUSD_LEDGER},
+    mock::*,
     pic_canister::{PicCanister, PicCanisterBuilder, PicCanisterTrait as _},
+    trade_helper::TradeHelperTrait as _,
 };
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
@@ -96,14 +96,32 @@ impl Default for TestSetup {
             .with_controllers(vec![controller])
             .deploy_to(&pic.clone());
 
+        let internal_ledger_id = Principal::from_text(VUSD_LEDGER).unwrap();
+        let clearing_config = Config {
+            insurance_fund_fee_ratio: 10,
+            protocol_fee_ratio: 5,
+            evm_rpc: Principal::anonymous(),
+            signer_canister: Principal::anonymous(),
+            internal_ledger: CollateralAssetConfig {
+                asset_id: VUSD_ASSET_ID.to_owned(),
+                asset: Asset::Icrc(internal_ledger_id),
+                symbol: VUSD_ASSET_ID.to_owned(),
+                decimals: 8,
+                is_enabled: true,
+                oracle_id: None,
+            },
+            version: 1,
+        };
+
         let clearing = PicCanisterBuilder::new("clearing")
             .with_controllers(vec![controller])
+            .with_arg(encode_one(clearing_config).unwrap())
             .deploy_to(&pic.clone());
 
         // Deploy Ledger (vUSD)
         let ledger_id = Principal::from_text(VUSD_LEDGER).unwrap();
         let ledger_arg = LedgerArg::Init(LedgerInitArg {
-            token_symbol: "vUSD".to_owned(),
+            token_symbol: VUSD_ASSET_ID.to_owned(),
             token_name: "Virtual USD".to_owned(),
             transfer_fee: Nat::from(100_000_u64),
             decimals: Some(8),
@@ -236,8 +254,48 @@ impl Default for TestSetup {
         icp_ledger_builder.canister_id = Some(icp_ledger_id);
         let icp_ledger_can = icp_ledger_builder.deploy_to(&pic.clone());
 
+        // Deploy Ledger (ckUSDC)
+        let ckusdc_ledger_id = Principal::from_text(CKUSDC_LEDGER).unwrap();
+        let ckusdc_ledger_arg = LedgerArg::Init(LedgerInitArg {
+            token_symbol: "ckUSDC".to_owned(),
+            token_name: "Chain-key USDC".to_owned(),
+            transfer_fee: Nat::from(10_u64),
+            decimals: Some(6),
+            metadata: vec![],
+            feature_flags: Some(FeatureFlags { icrc2: true }),
+            minting_account: ICRC1Account {
+                owner: controller,
+                subaccount: None,
+            },
+            initial_balances: vec![(
+                ICRC1Account {
+                    owner: test_user(54),
+                    subaccount: None,
+                },
+                Nat::from(1_000_000_000_u64),
+            )],
+            archive_options: ArchiveOptions {
+                num_blocks_to_archive: 1000,
+                trigger_threshold: 2000,
+                controller_id: controller,
+                cycles_for_archive_creation: None,
+            },
+        });
+
+        let mut ckusdc_ledger_builder = PicCanisterBuilder::new("ckusdc_ledger");
+        ckusdc_ledger_builder.wasm_path = PicCanister::workspace_dir()
+            .join("target/ic/ledger.wasm")
+            .to_string_lossy()
+            .to_string();
+        ckusdc_ledger_builder.arg = encode_one(ckusdc_ledger_arg).unwrap();
+        ckusdc_ledger_builder.controllers = Some(vec![controller]);
+        ckusdc_ledger_builder.canister_id = Some(ckusdc_ledger_id);
+        let ckusdc_ledger_can = ckusdc_ledger_builder.deploy_to(&pic.clone());
+
+        let internal_ledger_id = Principal::from_text(VUSD_LEDGER).unwrap();
+
         let minter_config = MinterConfig {
-            ledger_canister: Principal::from_text(VUSD_LEDGER).unwrap(),
+            ledger_canister: internal_ledger_id,
             authorized_callers: vec![controller, clearing.canister_id()],
         };
 
@@ -256,10 +314,11 @@ impl Default for TestSetup {
             .expect("Failed to link registry");
 
         let mut ledgers = BTreeMap::new();
-        ledgers.insert("vUSD".to_owned(), ledger_can);
+        ledgers.insert(VUSD_ASSET_ID.to_owned(), ledger_can);
         ledgers.insert("ICP".to_owned(), icp_ledger_can);
+        ledgers.insert("ckUSDC".to_owned(), ckusdc_ledger_can);
 
-        Self {
+        let setup = Self {
             pic,
             clearing,
             registry,
@@ -267,7 +326,14 @@ impl Default for TestSetup {
             ledgers,
             user,
             controller,
-        }
+        };
+
+        // Initialize standard assets
+        setup.setup_vusd();
+        setup.setup_icp();
+        setup.setup_ckusdc();
+
+        setup
     }
 }
 

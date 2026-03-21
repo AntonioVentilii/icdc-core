@@ -1,5 +1,5 @@
 pub(crate) mod account;
-pub(crate) mod errors;
+pub mod errors;
 pub mod event;
 pub(crate) mod http;
 pub mod margin;

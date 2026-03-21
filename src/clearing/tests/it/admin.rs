@@ -8,9 +8,9 @@ use shared::types::{evm::NativeEvmAsset, Asset, CollateralAssetConfig, Series};
 use crate::utils::{
     assertions::{assert_ok_value, assert_unauthorized},
     mock::TEST_REGISTRY_CANISTER,
-    pic_canister::PicCanisterTrait as _,
     test_environment::TestSetup,
     trade_helper::TradeHelperTrait,
+    PicCanisterTrait,
 };
 
 #[test]
@@ -60,6 +60,8 @@ fn update_config() {
         protocol_fee_ratio: initial_config.protocol_fee_ratio + 1,
         evm_rpc: Principal::anonymous(),
         signer_canister: Principal::anonymous(),
+        internal_ledger: initial_config.internal_ledger.clone(),
+        version: 0,
     };
 
     env.clearing
@@ -87,6 +89,15 @@ fn update_config_rejects_non_controller() {
         protocol_fee_ratio: 10,
         evm_rpc: Principal::anonymous(),
         signer_canister: Principal::anonymous(),
+        internal_ledger: CollateralAssetConfig {
+            asset_id: "vUSD".to_owned(),
+            asset: Asset::Icrc(Principal::anonymous()),
+            symbol: "vUSD".to_owned(),
+            decimals: 8,
+            is_enabled: true,
+            oracle_id: None,
+        },
+        version: 0,
     };
 
     let random_user = Principal::from_slice(&[42, 1, 1]);
@@ -128,7 +139,7 @@ fn update_collateral_asset() {
             (),
         ));
 
-    assert_eq!(assets.len(), 1);
+    assert_eq!(assets.len(), 3);
     assert_eq!(assets[0].asset_id, "ETH");
     assert_eq!(assets[0].symbol, "ETH");
     assert!(assets[0].is_enabled);

@@ -36,7 +36,10 @@ use crate::{
         plans::{FundWithdrawalPlan, FundWithdrawalPlanParams, PlanStatus},
         state::Config,
     },
-    utils::system::now_ns,
+    utils::{
+        system::now_ns,
+        vusd::{is_internal_asset, is_internal_ledger},
+    },
 };
 
 #[query(guard = "caller_is_controller")]
@@ -64,10 +67,15 @@ pub fn config() -> Config {
 
 /// Updates the global configuration for the Clearing canister.
 ///
-/// This method is gated to canister controllers.
+/// Immutable properties like `internal_ledger_id` and `version` are preserved from the existing
+/// state. This method is gated to canister controllers.
 #[update(guard = "caller_is_controller")]
-pub fn update_config(config: Config) {
+pub fn update_config(mut config: Config) {
     CONFIG.with(|c| {
+        let current = c.borrow();
+        config.internal_ledger = current.internal_ledger.clone();
+        config.version = current.version;
+        drop(current);
         *c.borrow_mut() = config;
     });
 }
@@ -241,8 +249,14 @@ pub async fn register_icrc_asset(params: RegisterIcrcAssetParams) -> RegisterIcr
     let res: Result<(), RegisterIcrcAssetError> = (async {
         let asset = Asset::Icrc(params.ledger_id);
 
-        let exists =
-            COLLATERAL_ASSETS.with(|assets| assets.borrow().contains_key(&params.asset_id));
+        if is_internal_ledger(&params.ledger_id) {
+            return Err(RegisterIcrcAssetError::VusdCannotBeCollateral);
+        }
+
+        let exists = COLLATERAL_ASSETS
+            .with(|assets| assets.borrow().contains_key(&params.asset_id))
+            || is_internal_asset(&params.asset_id);
+
         if exists {
             return Err(RegisterIcrcAssetError::AssetAlreadyExists);
         }

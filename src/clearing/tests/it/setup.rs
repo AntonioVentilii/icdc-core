@@ -1,8 +1,8 @@
 use candid::Principal;
 use ic_cdk::println;
-use shared::{constants::VUSD_LEDGER, types::minter::ConfigResult};
+use shared::types::minter::ConfigResult;
 
-use crate::utils::{pic_canister::PicCanisterTrait as _, test_environment::TestSetup};
+use crate::utils::{constants::VUSD_LEDGER, test_environment::TestSetup, PicCanisterTrait};
 
 #[test]
 fn multi_canister_setup() {

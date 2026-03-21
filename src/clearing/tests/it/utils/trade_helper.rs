@@ -3,10 +3,9 @@ use clearing::{
     api::{
         admin::{
             params::{
-                RegisterIcrcAssetParams, UpdateAssetMetricsParams, UpdateAssetPriceParams,
-                UpdateCollateralAssetParams,
+                RegisterIcrcAssetParams, UpdateAssetMetricsParams, UpdateCollateralAssetParams,
             },
-            results::{RegisterIcrcAssetResult, UpdateAssetPriceResult},
+            results::RegisterIcrcAssetResult,
         },
         collateral::{params::DepositCollateralParams, results::DepositCollateralResult},
         trade::{params::SubmitLimitOrderParams, results::SubmitMatchedTradeResult},
@@ -24,10 +23,15 @@ use shared::types::{
     PayoffType, PayoutUnit, Price, SeriesId,
 };
 
-use super::{pic_canister::PicCanisterTrait as _, test_environment::TestSetup};
+use super::{
+    constants::VUSD_ASSET_ID, pic_canister::PicCanisterTrait as _, test_environment::TestSetup,
+};
+use crate::utils::constants::{CKUSDC_LEDGER, ICP_LEDGER};
 
 pub trait TradeHelperTrait {
     fn setup_vusd(&self);
+    fn setup_icp(&self);
+    fn setup_ckusdc(&self);
     fn deposit_collateral(
         &self,
         user: Principal,
@@ -72,44 +76,48 @@ pub trait TradeHelperTrait {
 
 impl TradeHelperTrait for TestSetup {
     fn setup_vusd(&self) {
-        let vusd_ledger = self
-            .ledgers
-            .get("vUSD")
-            .expect("vUSD ledger not found")
-            .canister_id();
-
-        // 1. Register vUSD in Clearing
-        let res: RegisterIcrcAssetResult = self
-            .clearing
-            .update(
-                self.controller,
-                "register_icrc_asset",
-                (RegisterIcrcAssetParams {
-                    asset_id: "vUSD".to_owned(),
-                    ledger_id: vusd_ledger,
-                    haircut_bps: 0,
-                    oracle_id: Some("vUSD/USD".to_owned()),
-                    is_enabled: true,
-                },),
-            )
-            .unwrap();
-
-        match res {
-            RegisterIcrcAssetResult::Ok => {}
-            RegisterIcrcAssetResult::Err(err) => panic!("vUSD Registration failed: {err:?}"),
-        }
-
-        // 2. Set vUSD Price
+        // vUSD is already initialized in Config. We only need to set its price metrics.
         self.clearing
-            .update::<UpdateAssetPriceResult, _>(
+            .update::<(), _>(
                 self.controller,
-                "update_asset_price",
-                (UpdateAssetPriceParams {
+                "update_asset_metrics",
+                (UpdateAssetMetricsParams {
                     asset_id: "vUSD".to_owned(),
-                    price: Price::new(1_000_000, 6), // $1.00
+                    metrics: AssetMetrics {
+                        price_usd: DecimalValue::new(1_000_000, 6), // $1.00
+                        latest_transfer_fee: Some(0),
+                        haircut_bps: 0,
+                        insurance_fee_ratio: None,
+                        protocol_fee_ratio: None,
+                        last_updated_ns: None,
+                    },
                 },),
             )
             .unwrap();
+    }
+
+    fn setup_icp(&self) {
+        let ledger_id = Principal::from_text(ICP_LEDGER).unwrap();
+        self.setup_icrc_asset(
+            "ICP",
+            ledger_id,
+            15_000_000,
+            6,
+            200, // 2% haircut
+            Some(10_000),
+        );
+    }
+
+    fn setup_ckusdc(&self) {
+        let ledger_id = Principal::from_text(CKUSDC_LEDGER).unwrap();
+        self.setup_icrc_asset(
+            "ckUSDC",
+            ledger_id,
+            1_000_000,
+            6,
+            100, // 1% haircut
+            Some(10),
+        );
     }
 
     fn deposit_collateral(
@@ -119,6 +127,11 @@ impl TradeHelperTrait for TestSetup {
         amount: Nat,
         domain: Option<BalanceDomain>,
     ) {
+        assert!(
+            asset_id != VUSD_ASSET_ID,
+            "Manual vUSD deposits are prohibited by policy. Use other collateral assets in tests."
+        );
+
         let ledger_canister = self
             .ledgers
             .get(asset_id)

@@ -9,9 +9,7 @@ use shared::types::{Asset, AssetId, CollateralAssetConfig};
 
 use crate::{
     guards::caller_is_controller,
-    memory::{
-        ckusdc_ledger, icp_ledger, ACCOUNT_STATES, COLLATERAL_ASSETS, EVENTS, POSITIONS, SERIES,
-    },
+    memory::{ACCOUNT_STATES, COLLATERAL_ASSETS, EVENTS, POSITIONS, SERIES},
     types::{
         event::EventType,
         http::{HeaderField, HttpRequest, HttpResponse},
@@ -136,15 +134,7 @@ pub fn metrics() -> String {
     metrics.push_str("# TYPE clearing_total_margin_balance gauge\n");
     for (asset, balance) in stats.margin_balances {
         let asset_str = match asset {
-            Asset::Icrc(p) => {
-                if p == icp_ledger() {
-                    "ICP".to_owned()
-                } else if p == ckusdc_ledger() {
-                    "ckUSDC".to_owned()
-                } else {
-                    p.to_text()
-                }
-            }
+            Asset::Icrc(p) => p.to_text(),
             Asset::NativeEvm(asset) => asset.to_string(),
             Asset::Erc20(token) => token.to_string(),
         };

@@ -10,9 +10,9 @@ use shared::types::{BalanceDomain, Price};
 
 use crate::utils::{
     assertions::assert_ok_value,
-    pic_canister::PicCanisterTrait as _,
     test_environment::{test_user, TestSetup},
-    trade_helper::TradeHelperTrait as _,
+    trade_helper::TradeHelperTrait,
+    PicCanisterTrait,
 };
 
 #[test]
@@ -24,11 +24,11 @@ fn atomicity_one_sided_insolvency() {
     env.setup_vusd();
     env.pic.tick();
 
-    // 1. Give User A enough money ($100)
+    // 1. Give User A enough money (10 ICP = $150 gross, $147 net)
     env.deposit_collateral(
         user_a,
-        "vUSD",
-        Nat::from(10_000_000_000_u128), // $100 (8 decimals)
+        "ICP",
+        Nat::from(1_000_000_000_u128),
         Some(BalanceDomain::Settlement),
     );
     // User B has $0 on the clearing canister (even if he has more on the ledger,
@@ -79,12 +79,12 @@ fn atomicity_one_sided_insolvency() {
     if let GetAccountStateResult::Ok(resp) = state_a {
         assert_eq!(
             resp.state.get_cash_balance_usd(BalanceDomain::Settlement),
-            100_000_000,
-            "User A cash should NOT be deducted"
+            0,
+            "User A cash should NOT be deducted (it was 0 anyway, since we used ICP)"
         );
         assert_eq!(
-            resp.available_margin_usd, 100_000_000,
-            "User A available margin should NOT change"
+            resp.total_equity_usd, 147_000_000,
+            "User A equity should NOT change"
         );
     } else {
         panic!("Failed to get account state for User A");
@@ -110,8 +110,8 @@ fn atomicity_self_trading() {
 
     env.deposit_collateral(
         user_a,
-        "vUSD",
-        Nat::from(10_000_000_000_u128), // $100
+        "ICP",
+        Nat::from(1_000_000_000_u128), // 10 ICP = $150 ($147 net)
         Some(BalanceDomain::Settlement),
     );
     env.pic.tick();

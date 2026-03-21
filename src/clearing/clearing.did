@@ -78,7 +78,9 @@ type CommonError = variant {
 };
 type Config = record {
 	insurance_fund_fee_ratio : nat16;
+	internal_ledger : CollateralAssetConfig;
 	signer_canister : principal;
+	version : nat32;
 	evm_rpc : principal;
 	protocol_fee_ratio : nat16
 };
@@ -197,6 +199,7 @@ type Price = record {
 };
 type RegisterIcrcAssetError = variant {
 	AssetAlreadyExists;
+	VusdCannotBeCollateral;
 	Common : CommonError
 };
 type RegisterIcrcAssetParams = record {
@@ -359,7 +362,7 @@ type WithdrawFundParams = record {
 	amount : nat
 };
 type WithdrawFundResult = variant { Ok : nat; Err : WithdrawFundError };
-service : {
+service : (Config) -> {
 	// Accepts a position transfer from another clearing canister.
 	//
 	// This method validates the series and increases the target user's position based on the provided
@@ -502,7 +505,8 @@ service : {
 	update_collateral_asset : (UpdateCollateralAssetParams) -> ();
 	// Updates the global configuration for the Clearing canister.
 	//
-	// This method is gated to canister controllers.
+	// Immutable properties like `internal_ledger_id` and `version` are preserved from the existing
+	// state. This method is gated to canister controllers.
 	update_config : (Config) -> ();
 	// Withdraws collateral from the user's account state to an external address.
 	//

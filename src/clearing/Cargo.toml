@@ -21,6 +21,7 @@ shared = { workspace = true }
 
 [dev-dependencies]
 pocket-ic = { workspace = true }
+shared = { workspace = true }
 
 [lints]
 workspace = true

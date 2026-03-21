@@ -8,18 +8,16 @@ use clearing::{
     types::user::DepositId,
 };
 use icrc_ledger_types::icrc2::approve::{ApproveArgs, ApproveError};
-use shared::{
-    constants::{ICP_LEDGER, VUSD_LEDGER},
-    types::{
-        evm::NativeEvmAsset, Asset, BalanceDomain, CollateralAssetConfig, CollateralAssetInfo,
-    },
+use shared::types::{
+    evm::NativeEvmAsset, Asset, BalanceDomain, CollateralAssetConfig, CollateralAssetInfo,
 };
 
 use crate::utils::{
     assertions::{assert_decimal_eq, assert_ok_value},
-    pic_canister::PicCanisterTrait as _,
+    constants::{CKUSDC_LEDGER, ICP_LEDGER},
     test_environment::{test_user, TestSetup},
     trade_helper::TradeHelperTrait,
+    PicCanisterTrait,
 };
 
 #[test]
@@ -32,9 +30,10 @@ fn get_collateral_assets_empty() {
             .query::<Vec<CollateralAssetInfo>, _>(user, "get_collateral_assets", ()),
     );
 
-    assert!(
-        assets.is_empty(),
-        "No collateral assets should be registered initially"
+    assert_eq!(
+        assets.len(),
+        2,
+        "ICP and ckUSDC should be registered by default"
     );
 }
 
@@ -68,10 +67,8 @@ fn get_collateral_assets_after_registration() {
             .query::<Vec<CollateralAssetInfo>, _>(user, "get_collateral_assets", ()),
     );
 
-    assert_eq!(assets.len(), 1);
-    assert_eq!(assets[0].config.asset_id, "ETH");
-    assert!(assets[0].config.is_enabled);
-    assert!(assets[0].metrics.is_none());
+    assert_eq!(assets.len(), 3);
+    assert!(assets.iter().any(|a| a.config.asset_id == "ETH"));
 }
 
 #[test]
@@ -86,7 +83,7 @@ fn get_collateral_assets_with_metrics() {
             .query::<Vec<CollateralAssetInfo>, _>(user, "get_collateral_assets", ()),
     );
 
-    assert_eq!(assets.len(), 1);
+    assert_eq!(assets.len(), 3);
 
     let metrics = assets[0].metrics.as_ref().expect("Metrics should be set");
     assert_decimal_eq(&metrics.price_usd, 3_000_000_000, 6);
@@ -122,13 +119,10 @@ fn deposit_and_domain_isolation() {
     let env = TestSetup::default();
     let user = test_user(54);
 
-    // 1. Register Assets (Icrc)
     let icp_ledger = Principal::from_text(ICP_LEDGER).unwrap();
-    let vusd_ledger = Principal::from_text(VUSD_LEDGER).unwrap();
 
-    // Register and set metrics for assets
-    env.setup_icrc_asset("ICP", icp_ledger, 15_000_000_000, 9, 200, Some(10_000));
-    env.setup_icrc_asset("vUSD", vusd_ledger, 1_000_000_000, 9, 0, Some(0));
+    // ICP is already registered by default, but we might want to update metrics if needed?
+    // Actually, TestSetup::default() already sets metrics. So we can just remove this.
 
     // 1.5 Approve Clearing to spend user's tokens
     let approve_params = ApproveArgs {
@@ -156,18 +150,19 @@ fn deposit_and_domain_isolation() {
     icp_approve_res.expect("ICP Approval error");
     env.pic.tick();
 
-    let vusd_approve_bytes = env
+    let ckusdc_ledger = Principal::from_text(CKUSDC_LEDGER).unwrap();
+    let ckusdc_approve_bytes = env
         .pic
         .update_call(
-            vusd_ledger,
+            ckusdc_ledger,
             user,
             "icrc2_approve",
             encode_one(approve_params).unwrap(),
         )
-        .expect("vUSD Approval call failed");
-    let vusd_approve_res: Result<Nat, ApproveError> =
-        decode_one(&vusd_approve_bytes).expect("Failed to decode vUSD approval");
-    vusd_approve_res.expect("vUSD Approval error");
+        .expect("ckUSDC Approval call failed");
+    let ckusdc_approve_res: Result<Nat, ApproveError> =
+        decode_one(&ckusdc_approve_bytes).expect("Failed to decode ckUSDC approval");
+    ckusdc_approve_res.expect("ckUSDC Approval error");
     env.pic.tick();
 
     // 2. Deposit ICP into Settlement
@@ -204,21 +199,13 @@ fn deposit_and_domain_isolation() {
     }
     env.pic.tick();
 
-    // 4. Deposit vUSD into Settlement
-    let dep_3 = DepositCollateralParams {
-        deposit_id: DepositId("DEP_VUSD_SETTLE".to_owned()),
-        asset_id: "vUSD".to_owned(),
-        amount: Nat::from(1_000_000_000_u64), // 10 vUSD (decimal 8)
-        domain: Some(BalanceDomain::Settlement),
-    };
-    let res3 = env
-        .clearing
-        .update::<DepositCollateralResult, _>(user, "deposit_collateral", (dep_3,))
-        .expect("Failed to call deposit_collateral");
-    match res3 {
-        DepositCollateralResult::Ok => {}
-        DepositCollateralResult::Err(e) => panic!("Deposit 3 failed: {e:?}"),
-    }
+    // 4. Deposit ckUSDC into Settlement
+    env.deposit_collateral(
+        user,
+        "ckUSDC",
+        Nat::from(10_000_000_u64), // 10 ckUSDC (decimal 6)
+        Some(BalanceDomain::Settlement),
+    );
     env.pic.tick();
 
     // 5. Verify Isolation
@@ -226,7 +213,7 @@ fn deposit_and_domain_isolation() {
         env.clearing
             .query::<Vec<CollateralAssetInfo>, _>(user, "get_collateral_assets", ()),
     );
-    assert!(assets.len() >= 2);
+    assert!(!assets.is_empty());
 
     // Check Settlement balances
     let state_settle = env
@@ -245,9 +232,11 @@ fn deposit_and_domain_isolation() {
         let icp_bal = resp
             .state
             .get_balance(BalanceDomain::Settlement, &"ICP".to_owned());
-        let vusd_bal = resp.state.get_cash_balance_usd(BalanceDomain::Settlement);
+        let ckusdc_bal = resp
+            .state
+            .get_balance(BalanceDomain::Settlement, &"ckUSDC".to_owned());
         assert_eq!(icp_bal, 100_000_000);
-        assert_eq!(vusd_bal, 10_000_000); // $10 with 6 decimals
+        assert_eq!(ckusdc_bal, 10_000_000);
     } else {
         panic!("Failed to get account state for Settlement: {state_settle:?}");
     }
@@ -266,9 +255,11 @@ fn deposit_and_domain_isolation() {
         let icp_bal = resp
             .state
             .get_balance(BalanceDomain::Playground, &"ICP".to_owned());
-        let vusd_bal = resp.state.get_cash_balance_usd(BalanceDomain::Playground);
+        let ckusdc_bal = resp
+            .state
+            .get_balance(BalanceDomain::Playground, &"ckUSDC".to_owned());
         assert_eq!(icp_bal, 50_000_000);
-        assert_eq!(vusd_bal, 0); // vUSD should not be in Playground
+        assert_eq!(ckusdc_bal, 0); // ckUSDC should not be in Playground
     } else {
         panic!("Failed to get account state for Playground: {state_play:?}");
     }

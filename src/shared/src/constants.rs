@@ -16,32 +16,6 @@ pub const DAY_NS: u64 = 24 * HOUR_NS;
 /// Number of nanoseconds in 30 days
 pub const MONTH_NS: u64 = 30 * DAY_NS;
 
-/// Principal ID of the ICP Ledger canister
-pub const ICP_LEDGER: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
-/// Principal ID of the ckUSDC Ledger canister
-pub const CKUSDC_LEDGER: &str = "yfumr-cyaaa-aaaar-qaela-cai";
-/// Principal ID of the ckUSDT Ledger canister
-pub const CKUSDT_LEDGER: &str = "6rdls-viaaa-aaaar-qaelq-cai";
-/// The identifier for the virtual USD (vUSD) asset.
-pub const VUSD_ASSET_ID: &str = "vUSD";
-/// Principal ID of the virtual USD (vUSD) Ledger canister (Internal ghost token)
-pub const VUSD_LEDGER: &str = "ap6gq-taaaa-aaaae-acsaq-cai";
-/// Principal ID of the virtual USD (vUSD) Index canister
-pub const VUSD_INDEX: &str = "x3qir-tyaaa-aaaae-acr6a-cai";
-
-/// Principal ID of the TESTICP Ledger canister
-pub const TESTICP_LEDGER: &str = "xafvr-biaaa-aaaai-aql5q-cai";
-/// Principal ID of the TESTICP Index canister
-pub const TESTICP_INDEX: &str = "qcuy6-bqaaa-aaaai-aqmqq-cai";
-
-/// Principal ID of the TICRC1 Ledger canister
-pub const TICRC1_LEDGER: &str = "3jkp5-oyaaa-aaaaj-azwqa-cai";
-/// Principal ID of the TICRC1 Index canister
-pub const TICRC1_INDEX: &str = "qzre3-3iaaa-aaaai-aqmsa-cai";
-
-/// The common minting account principal for test tokens
-pub const TEST_MINTING_ACCOUNT: &str = "bnuz2-zaaaa-aaaal-arrba-cai";
-
 /// The canonical number of decimals for internal USD accounting.
 pub const USD_DECIMALS: u8 = 6;
 

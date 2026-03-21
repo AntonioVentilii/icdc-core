@@ -3,10 +3,7 @@ use std::collections::BTreeMap;
 
 use candid::Principal;
 use ic_cdk::{storage, trap};
-use shared::{
-    constants::{CKUSDC_LEDGER, ICP_LEDGER},
-    types::{AssetId, AssetMetrics, CollateralAssetConfig, Series, SeriesId},
-};
+use shared::types::{Asset, AssetId, AssetMetrics, CollateralAssetConfig, Series, SeriesId};
 
 use crate::{
     types::{
@@ -21,7 +18,21 @@ use crate::{
 };
 
 thread_local! {
-    pub static CONFIG: RefCell<Config> = const { RefCell::new(Config { insurance_fund_fee_ratio: 10, protocol_fee_ratio: 5, evm_rpc: Principal::anonymous(), signer_canister: Principal::anonymous() }) };
+    pub static CONFIG: RefCell<Config> = const { RefCell::new(Config {
+        insurance_fund_fee_ratio: 10,
+        protocol_fee_ratio: 5,
+        evm_rpc: Principal::anonymous(),
+        signer_canister: Principal::anonymous(),
+        internal_ledger: CollateralAssetConfig {
+            asset_id: String::new(),
+            asset: Asset::Icrc(Principal::anonymous()),
+            symbol: String::new(),
+            decimals: 0,
+            is_enabled: false,
+            oracle_id: None,
+        },
+        version: 0
+    }) };
     pub static POSITIONS: RefCell<PositionsMap> = const { RefCell::new(BTreeMap::new()) };
     pub static ACCOUNT_STATES: RefCell<BTreeMap<User, AccountState>> = const { RefCell::new(BTreeMap::new()) };
     pub static SERIES: RefCell<BTreeMap<SeriesId, Series>> = const { RefCell::new(BTreeMap::new()) };
@@ -71,7 +82,6 @@ pub fn save_state() {
         COLLATERAL_ASSETS.with(|f| f.borrow().clone());
     let evm_addresses: BTreeMap<Principal, String> = EVM_ADDRESSES.with(|f| f.borrow().clone());
     let asset_metrics: BTreeMap<AssetId, AssetMetrics> = ASSET_METRICS.with(|f| f.borrow().clone());
-
     let state = StableState {
         config,
         positions,
@@ -160,16 +170,4 @@ pub fn restore_state() {
     COLLATERAL_ASSETS.with(|f| *f.borrow_mut() = collateral_assets);
     EVM_ADDRESSES.with(|f| *f.borrow_mut() = evm_addresses);
     ASSET_METRICS.with(|f| *f.borrow_mut() = asset_metrics);
-}
-
-/// Returns the principal of the ICP ledger.
-#[must_use]
-pub fn icp_ledger() -> Principal {
-    Principal::from_text(ICP_LEDGER).expect("invalid ICP_LEDGER")
-}
-
-/// Returns the principal of the ckUSDC ledger.
-#[must_use]
-pub fn ckusdc_ledger() -> Principal {
-    Principal::from_text(CKUSDC_LEDGER).expect("invalid CKUSDC_LEDGER")
 }

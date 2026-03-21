@@ -1,6 +1,10 @@
+extern crate candid;
+
+use core::cell::RefCell;
+
 use candid::Principal;
 use ic_cdk::export_candid;
-use ic_cdk_macros::{post_upgrade, pre_upgrade};
+use ic_cdk_macros::{init, post_upgrade, pre_upgrade};
 use shared::types::{
     AssetId, AssetMetrics, CollateralAssetConfig, CollateralAssetInfo, Series, SeriesId,
 };
@@ -35,6 +39,7 @@ use crate::{
             results::{AcceptPositionTransferResult, SubmitMatchedTradeResult},
         },
     },
+    memory::CONFIG,
     types::{
         event::Event,
         http::{HttpRequest, HttpResponse},
@@ -56,6 +61,13 @@ pub mod trade;
 pub mod traits;
 pub mod types;
 pub mod utils;
+
+#[init]
+fn init(config: Config) {
+    CONFIG.with(|c: &RefCell<Config>| {
+        *c.borrow_mut() = config;
+    });
+}
 
 #[pre_upgrade]
 fn pre_upgrade() {
