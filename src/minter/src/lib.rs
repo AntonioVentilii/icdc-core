@@ -45,10 +45,14 @@ pub fn update_config(config: Config) {
 
 #[update(guard = "caller_is_authorized")]
 pub async fn mint(params: MintParams) -> MintResult {
-    let config = match read_config() {
-        Ok(config) => config,
-        Err(err) => return MintResult::Err(err.clone()),
-    };
+    match mint_impl(params).await {
+        Ok(outcome) => outcome,
+        Err(msg) => MintResult::Err(msg),
+    }
+}
+
+async fn mint_impl(params: MintParams) -> Result<MintResult, String> {
+    let config = read_config()?;
 
     let arg = TransferArg {
         from_subaccount: None,
@@ -59,25 +63,16 @@ pub async fn mint(params: MintParams) -> MintResult {
         created_at_time: None,
     };
 
-    let transfer_response = match Call::bounded_wait(config.ledger_canister, "icrc1_transfer")
+    let response = Call::bounded_wait(config.ledger_canister, "icrc1_transfer")
         .with_args(&(arg,))
         .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            return MintResult::Err(format!("Ledger call failed: {e}"));
-        }
-    };
+        .map_err(|e| format!("Ledger call failed: {e}"))?;
 
-    let (res,): (Result<BlockIndex, TransferError>,) =
-        match transfer_response.candid_tuple::<(Result<BlockIndex, TransferError>,)>() {
-            Ok(v) => v,
-            Err(e) => {
-                return MintResult::Err(format!("Ledger response decode failed: {e}"));
-            }
-        };
+    let (res,) = response
+        .candid_tuple::<(Result<BlockIndex, TransferError>,)>()
+        .map_err(|e| format!("Ledger response decode failed: {e}"))?;
 
-    res.into()
+    Ok(res.into())
 }
 
 export_candid!();

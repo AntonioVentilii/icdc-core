@@ -2,10 +2,7 @@ use core::{cell::RefCell, time::Duration};
 use std::collections::{BTreeMap, HashMap};
 
 use candid::Principal;
-use ic_cdk::{
-    api::{instruction_counter, is_controller, msg_caller},
-    call::Call,
-};
+use ic_cdk::api::{instruction_counter, is_controller, msg_caller};
 use ic_cdk_macros::{query, update};
 use ic_cdk_timers::set_timer;
 use shared::types::{BalanceDomain, Series, SeriesId, SettlementInput};
@@ -27,7 +24,7 @@ use crate::{
         },
         user::User,
     },
-    utils::vusd::get_internal_asset_id,
+    utils::{registry, vusd::get_internal_asset_id},
 };
 
 /// Settles a derivative series at a specific price.
@@ -84,29 +81,12 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             return SettleSeriesResult::Err(SettlementError::Common(CommonError::RegistryNotSet));
         }
 
-        let auth = Call::bounded_wait(registry_canister, "is_oracle_authorized")
-            .with_args(&(oracle_source, caller))
-            .await;
-
-        match auth {
-            Ok(response) => match response.candid_tuple::<(bool,)>() {
-                Ok((true,)) => {} // authorized
-                Ok((false,)) => {
-                    return SettleSeriesResult::Err(SettlementError::Common(
-                        CommonError::Unauthorized,
-                    ));
-                }
-                Err(e) => {
-                    return SettleSeriesResult::Err(SettlementError::Common(
-                        CommonError::Internal(format!("Registry response decode failed: {e}")),
-                    ));
-                }
-            },
-            Err(e) => {
-                return SettleSeriesResult::Err(SettlementError::Common(CommonError::Internal(
-                    format!("Registry call failed: {e}"),
-                )));
+        match registry::is_oracle_authorized(registry_canister, oracle_source, caller).await {
+            Ok(true) => {}
+            Ok(false) => {
+                return SettleSeriesResult::Err(SettlementError::Common(CommonError::Unauthorized));
             }
+            Err(e) => return SettleSeriesResult::Err(SettlementError::Common(e)),
         }
     }
 

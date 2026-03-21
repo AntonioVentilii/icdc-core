@@ -1,10 +1,7 @@
 use std::collections::BTreeMap;
 
 use candid::{Nat, Principal};
-use ic_cdk::{
-    api::{is_controller, msg_caller, trap},
-    call::Call,
-};
+use ic_cdk::api::{is_controller, msg_caller, trap};
 use ic_cdk_macros::{query, update};
 use shared::types::{
     AllowedBalanceDomains, Asset, AssetId, AssetMetrics, BalanceDomain, CollateralAssetConfig,
@@ -47,6 +44,7 @@ use crate::{
         state::Config,
     },
     utils::{
+        registry,
         system::now_ns,
         vusd::{is_internal_asset, is_internal_ledger},
     },
@@ -383,18 +381,11 @@ async fn update_asset_price_impl(
             return Err(UpdateAssetPriceError::Common(CommonError::RegistryNotSet));
         }
 
-        let auth = Call::bounded_wait(registry_canister, "is_oracle_authorized")
-            .with_args(&(oracle_id, caller))
-            .await;
-
-        match auth {
-            Ok(response) => match response.candid_tuple::<(bool,)>() {
-                Ok((true,)) => {}
-                Ok((false,)) | Err(_) => {
-                    return Err(UpdateAssetPriceError::Common(CommonError::Unauthorized));
-                }
-            },
-            Err(_) => return Err(UpdateAssetPriceError::Common(CommonError::Unauthorized)),
+        if !matches!(
+            registry::is_oracle_authorized(registry_canister, oracle_id, caller).await,
+            Ok(true)
+        ) {
+            return Err(UpdateAssetPriceError::Common(CommonError::Unauthorized));
         }
     }
 
