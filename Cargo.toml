@@ -23,7 +23,7 @@ serde_bytes = "0.11"
 hex = "0.4"
 ic-cdk = "0.17"
 num-traits = "0.2.19"
-ic-cdk-macros = "0.17"
+ic-cdk-macros = "0.19"
 ic-cdk-timers = "0.11"
 pocket-ic = "12.0.0"
 
