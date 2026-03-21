@@ -4,11 +4,14 @@
 			"type": "rust",
 			"package": "clearing",
 			"candid": "src/clearing/clearing.did",
+			"dependencies": ["ledger"],
 			"metadata": [
 				{
 					"name": "candid:service"
 				}
-			]
+			],
+			"init_arg_file": "out/build.clearing.args.did",
+			"pre_install": "scripts/build.clearing.args.sh"
 		},
 		"registry": {
 			"type": "rust",
