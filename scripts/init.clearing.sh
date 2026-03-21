@@ -51,14 +51,18 @@ dfx canister call clearing update_domain_policy "(record {
   };
 })" --network "$NETWORK"
 
-# 2. Register Collateral Asset ($TESTICP_SYMBOL)
-echo "Registering $TESTICP_SYMBOL collateral asset..."
+# 2. Register collateral (ICRC): allowed_balance_domains enforced on deposit/withdraw.
+#    Test tokens → Playground only. Tune CLEARING_DOMAINS_* in init.common.sh if needed.
+
+# 2a. TESTICP (playground-only)
+echo "Registering $TESTICP_SYMBOL collateral asset (domains: Playground)..."
 dfx canister call clearing register_icrc_asset "(record { 
     asset_id = \"$TESTICP_SYMBOL\"; 
     ledger_id = principal \"$TESTICP_LEDGER\";
     haircut_bps = $TESTICP_HAIRCUT_BPS : nat16;
     oracle_id = null;
     is_enabled = true;
+    allowed_balance_domains = $CLEARING_DOMAINS_PLAYGROUND;
 })" --network "$NETWORK"
 
 # 3. Update Asset Price ($TESTICP_SYMBOL)
@@ -68,14 +72,15 @@ dfx canister call clearing update_asset_price "(record {
     price = record { decimal = record { value = $TESTICP_PRICE_E6 : nat; decimals = $USD_DECIMALS : nat8 }; oracle_id = null; timestamp = null };
 })" --network "$NETWORK"
 
-# 4. Register Collateral Asset ($TICRC1_SYMBOL)
-echo "Registering $TICRC1_SYMBOL collateral asset..."
+# 4. TICRC1 (playground-only)
+echo "Registering $TICRC1_SYMBOL collateral asset (domains: Playground)..."
 dfx canister call clearing register_icrc_asset "(record { 
     asset_id = \"$TICRC1_SYMBOL\"; 
     ledger_id = principal \"$TICRC1_LEDGER\";
     haircut_bps = $TICRC1_HAIRCUT_BPS : nat16;
     oracle_id = null;
     is_enabled = true;
+    allowed_balance_domains = $CLEARING_DOMAINS_PLAYGROUND;
 })" --network "$NETWORK"
 
 # 5. Update Asset Price ($TICRC1_SYMBOL)
@@ -85,23 +90,11 @@ dfx canister call clearing update_asset_price "(record {
     price = record { decimal = record { value = $TICRC1_PRICE_E6 : nat; decimals = $USD_DECIMALS : nat8 }; oracle_id = null; timestamp = null };
 })" --network "$NETWORK"
 
-# 6. Register Collateral Asset ($VUSD_SYMBOL)
+# 6. vUSD — internal ledger only (Config.internal_ledger in clearing install args).
+#    Not collateral; no register_icrc_asset. Equity uses cash_balances_usd (USD), not vUSD metrics,
+#    and user vUSD token balances are not in the collateral map — so seeding ASSET_METRICS for vUSD
+#    here is unnecessary. Call update_asset_metrics yourself only if ops tooling wants a row.
 if [[ -n "$VUSD_LEDGER" ]]; then
-  echo "Registering $VUSD_SYMBOL collateral asset..."
-  dfx canister call clearing register_icrc_asset "(record { 
-      asset_id = \"$VUSD_SYMBOL\"; 
-      ledger_id = principal \"$VUSD_LEDGER\";
-      haircut_bps = $VUSD_HAIRCUT_BPS : nat16;
-      oracle_id = null;
-      is_enabled = true;
-  })" --network "$NETWORK"
-
-  echo "Setting price for $VUSD_SYMBOL (\$$(echo "scale=2; $VUSD_PRICE_E6 / 1000000" | bc))..."
-  dfx canister call clearing update_asset_price "(record { 
-      asset_id = \"$VUSD_SYMBOL\"; 
-      price = record { decimal = record { value = $VUSD_PRICE_E6 : nat; decimals = $USD_DECIMALS : nat8 }; oracle_id = null; timestamp = null };
-  })" --network "$NETWORK"
-
   # 7. Add Clearing as controller of vUSD Ledger
   echo "Guaranteeing Clearing canister as controller of $VUSD_SYMBOL Ledger..."
   # Fetch current controllers and add clearing if not already present

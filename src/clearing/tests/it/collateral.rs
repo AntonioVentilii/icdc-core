@@ -2,8 +2,14 @@ use candid::{decode_one, encode_one, Nat, Principal};
 use clearing::{
     api::{
         account::{params::GetAccountStateParams, results::GetAccountStateResult},
-        admin::params::UpdateCollateralAssetParams,
-        collateral::{params::DepositCollateralParams, results::DepositCollateralResult},
+        admin::{
+            params::{UpdateCollateralAllowedDomainsParams, UpdateCollateralAssetParams},
+            results::UpdateCollateralAllowedDomainsResult,
+        },
+        collateral::{
+            errors::DepositCollateralError, params::DepositCollateralParams,
+            results::DepositCollateralResult,
+        },
     },
     types::user::DepositId,
 };
@@ -53,6 +59,7 @@ fn get_collateral_assets_after_registration() {
             decimals: 18,
             is_enabled: true,
             oracle_id: None,
+            allowed_balance_domains: vec![BalanceDomain::Settlement, BalanceDomain::Playground],
         },
     };
 
@@ -111,6 +118,74 @@ fn deposit_collateral_unsupported_asset() {
     match result {
         DepositCollateralResult::Err(_) => {}
         DepositCollateralResult::Ok => panic!("Expected error for unsupported asset"),
+    }
+}
+
+#[test]
+fn deposit_collateral_rejects_disallowed_domain() {
+    let env = TestSetup::default();
+    let user = test_user(54);
+
+    let domains_upd: UpdateCollateralAllowedDomainsResult = env
+        .clearing
+        .update(
+            env.controller,
+            "update_collateral_allowed_domains",
+            (UpdateCollateralAllowedDomainsParams {
+                asset_id: "ICP".to_owned(),
+                allowed_balance_domains: vec![BalanceDomain::Playground],
+            },),
+        )
+        .unwrap();
+    assert!(
+        matches!(domains_upd, UpdateCollateralAllowedDomainsResult::Ok),
+        "expected Ok, got {domains_upd:?}"
+    );
+
+    let icp_ledger = Principal::from_text(ICP_LEDGER).unwrap();
+    let approve_params = ApproveArgs {
+        from_subaccount: None,
+        spender: env.clearing.canister_id().into(),
+        amount: Nat::from(200_000_000_u64),
+        expected_allowance: None,
+        expires_at: None,
+        fee: None,
+        memo: None,
+        created_at_time: None,
+    };
+    let approve_bytes = env
+        .pic
+        .update_call(
+            icp_ledger,
+            user,
+            "icrc2_approve",
+            encode_one(approve_params).unwrap(),
+        )
+        .expect("ICP approve failed");
+    let approve_res: Result<Nat, ApproveError> = decode_one(&approve_bytes).unwrap();
+    approve_res.expect("approve error");
+    env.pic.tick();
+
+    let params = DepositCollateralParams {
+        deposit_id: DepositId("dep_bad_domain".to_owned()),
+        domain: Some(BalanceDomain::Settlement),
+        asset_id: "ICP".to_owned(),
+        amount: Nat::from(1_000_000_u64),
+    };
+    let result: DepositCollateralResult = env
+        .clearing
+        .update::<DepositCollateralResult, _>(user, "deposit_collateral", (params,))
+        .unwrap();
+
+    match result {
+        DepositCollateralResult::Err(DepositCollateralError::DomainNotAllowed {
+            domain,
+            asset_id,
+        }) => {
+            assert_eq!(domain, BalanceDomain::Settlement);
+            assert_eq!(asset_id, "ICP");
+        }
+        other => panic!("Expected DomainNotAllowed, got {other:?}"),
     }
 }
 

@@ -20,12 +20,12 @@ use crate::{
         admin::{
             params::{
                 CancelFundWithdrawalParams, RegisterIcrcAssetParams, UpdateAssetMetricsParams,
-                UpdateAssetPriceParams, UpdateCollateralAssetParams, UpdateDomainPolicyParams,
-                WithdrawFundParams,
+                UpdateAssetPriceParams, UpdateCollateralAllowedDomainsParams,
+                UpdateCollateralAssetParams, UpdateDomainPolicyParams, WithdrawFundParams,
             },
             results::{
                 CancelFundWithdrawalResult, GetFundsResult, RegisterIcrcAssetResult,
-                UpdateAssetPriceResult, WithdrawFundResult,
+                UpdateAssetPriceResult, UpdateCollateralAllowedDomainsResult, WithdrawFundResult,
             },
         },
         collateral::{

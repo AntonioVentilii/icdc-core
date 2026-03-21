@@ -23,8 +23,8 @@ use crate::{
     PositionProof,
 };
 
-thread_local! {
-    pub static CONFIG: RefCell<Config> = const { RefCell::new(Config {
+fn default_config() -> Config {
+    Config {
         insurance_fund_fee_ratio: 10,
         protocol_fee_ratio: 5,
         evm_rpc: Principal::anonymous(),
@@ -36,9 +36,14 @@ thread_local! {
             decimals: 0,
             is_enabled: false,
             oracle_id: None,
+            allowed_balance_domains: vec![BalanceDomain::Settlement, BalanceDomain::Playground],
         },
-        version: 0
-    }) };
+        version: 0,
+    }
+}
+
+thread_local! {
+    pub static CONFIG: RefCell<Config> = RefCell::new(default_config());
     pub static POSITIONS: RefCell<PositionsMap> = const { RefCell::new(BTreeMap::new()) };
     pub static ACCOUNT_STATES: RefCell<BTreeMap<User, AccountState>> = const { RefCell::new(BTreeMap::new()) };
     pub static SERIES: RefCell<BTreeMap<SeriesId, Series>> = const { RefCell::new(BTreeMap::new()) };

@@ -4,7 +4,7 @@ use candid::{encode_one, CandidType, Nat, Principal};
 use clearing::types::state::Config;
 use pocket_ic::{PocketIc, PocketIcBuilder};
 use serde::Deserialize;
-use shared::types::{minter::Config as MinterConfig, Asset, CollateralAssetConfig};
+use shared::types::{minter::Config as MinterConfig, Asset, BalanceDomain, CollateralAssetConfig};
 
 use crate::utils::{
     constants::{CKUSDC_LEDGER, ICP_LEDGER, VUSD_ASSET_ID, VUSD_LEDGER},
@@ -109,6 +109,7 @@ impl Default for TestSetup {
                 decimals: 8,
                 is_enabled: true,
                 oracle_id: None,
+                allowed_balance_domains: vec![BalanceDomain::Settlement, BalanceDomain::Playground],
             },
             version: 1,
         };

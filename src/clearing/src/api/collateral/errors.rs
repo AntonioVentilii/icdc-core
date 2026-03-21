@@ -1,6 +1,6 @@
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
-use shared::types::asset::errors::AssetError;
+use shared::types::{asset::errors::AssetError, AssetId, BalanceDomain};
 
 /// Errors occurring during collateral deposit.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -9,6 +9,11 @@ pub enum DepositCollateralError {
     Asset(AssetError),
     /// Overflow during collateral calculation.
     MathOverflow,
+    /// The asset is not permitted in this balance domain.
+    DomainNotAllowed {
+        domain: BalanceDomain,
+        asset_id: AssetId,
+    },
 }
 
 /// Errors occurring during collateral withdrawal.
@@ -25,6 +30,11 @@ pub enum WithdrawCollateralError {
     },
     /// Overflow during collateral calculation.
     MathOverflow,
+    /// The asset is not permitted in this balance domain.
+    DomainNotAllowed {
+        domain: BalanceDomain,
+        asset_id: AssetId,
+    },
 }
 
 /// Errors occurring during collateral blocking or unblocking.

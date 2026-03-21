@@ -1,7 +1,13 @@
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
 
-use crate::types::{asset::Asset, decimal::DecimalValue};
+use crate::types::{
+    asset::Asset, decimal::DecimalValue, domain::AllowedBalanceDomains, BalanceDomain,
+};
+
+fn default_allowed_balance_domains() -> Vec<BalanceDomain> {
+    AllowedBalanceDomains::default().into()
+}
 
 /// Unique identifier for a collateral asset.
 ///
@@ -30,6 +36,11 @@ pub struct CollateralAssetConfig {
     pub is_enabled: bool,
     /// Identifier of the oracle responsible for updating this asset's metrics.
     pub oracle_id: Option<String>,
+    /// Balance domains where this asset may be deposited or withdrawn.
+    ///
+    /// Defaults to both domains when deserializing legacy state.
+    #[serde(default = "default_allowed_balance_domains")]
+    pub allowed_balance_domains: Vec<BalanceDomain>,
 }
 
 /// Dynamic metrics and risk parameters for a collateral asset.

@@ -147,6 +147,7 @@ fn vusd_registration_checks() {
                 haircut_bps: 100, // Non-zero haircut
                 oracle_id: None,
                 is_enabled: true,
+                allowed_balance_domains: vec![BalanceDomain::Settlement],
             },),
         )
         .unwrap();

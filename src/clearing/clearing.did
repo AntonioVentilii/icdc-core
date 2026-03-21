@@ -61,6 +61,7 @@ type CollateralAssetConfig = record {
 	decimals : nat8;
 	asset : Asset;
 	is_enabled : bool;
+	allowed_balance_domains : vec BalanceDomain;
 	oracle_id : opt text;
 	asset_id : text;
 	symbol : text
@@ -85,7 +86,11 @@ type Config = record {
 	protocol_fee_ratio : nat16
 };
 type DecimalValue = record { decimals : nat8; value : nat };
-type DepositCollateralError = variant { MathOverflow; Asset : AssetError };
+type DepositCollateralError = variant {
+	DomainNotAllowed : record { domain : BalanceDomain; asset_id : text };
+	MathOverflow;
+	Asset : AssetError
+};
 type DepositCollateralParams = record {
 	deposit_id : text;
 	domain : opt BalanceDomain;
@@ -217,6 +222,7 @@ type Price = record {
 	decimal : DecimalValue
 };
 type RegisterIcrcAssetError = variant {
+	InvalidAllowedBalanceDomains;
 	AssetAlreadyExists;
 	VusdCannotBeCollateral;
 	Common : CommonError
@@ -224,6 +230,7 @@ type RegisterIcrcAssetError = variant {
 type RegisterIcrcAssetParams = record {
 	haircut_bps : nat16;
 	is_enabled : bool;
+	allowed_balance_domains : vec BalanceDomain;
 	ledger_id : principal;
 	oracle_id : opt text;
 	asset_id : text
@@ -355,6 +362,18 @@ type UpdateAssetPriceError = variant {
 };
 type UpdateAssetPriceParams = record { price : Price; asset_id : text };
 type UpdateAssetPriceResult = variant { Ok; Err : UpdateAssetPriceError };
+type UpdateCollateralAllowedDomainsError = variant {
+	AssetNotFound;
+	InvalidAllowedBalanceDomains
+};
+type UpdateCollateralAllowedDomainsParams = record {
+	allowed_balance_domains : vec BalanceDomain;
+	asset_id : text
+};
+type UpdateCollateralAllowedDomainsResult = variant {
+	Ok;
+	Err : UpdateCollateralAllowedDomainsError
+};
 type UpdateCollateralAssetParams = record { config : CollateralAssetConfig };
 type UpdateDomainPolicyParams = record {
 	domain : BalanceDomain;
@@ -362,6 +381,7 @@ type UpdateDomainPolicyParams = record {
 };
 type WithdrawCollateralError = variant {
 	InsufficientExcessMargin : record { requested : nat; available : nat };
+	DomainNotAllowed : record { domain : BalanceDomain; asset_id : text };
 	MathOverflow;
 	Asset : AssetError
 };
@@ -539,6 +559,12 @@ service : (Config) -> {
 	//
 	// This method can be called by canister controllers or authorized oracles.
 	update_asset_price : (UpdateAssetPriceParams) -> (UpdateAssetPriceResult);
+	// Updates which balance domains may hold this collateral asset (deposits and withdrawals).
+	//
+	// This method is gated to canister controllers.
+	update_collateral_allowed_domains : (
+		UpdateCollateralAllowedDomainsParams
+	) -> (UpdateCollateralAllowedDomainsResult);
 	// Adds or updates a collateral asset configuration.
 	//
 	// This method is gated to canister controllers.

@@ -4,21 +4,23 @@ use candid::{Nat, Principal};
 use ic_cdk::{api::is_controller, call, caller, trap};
 use ic_cdk_macros::{query, update};
 use shared::types::{
-    Asset, AssetId, AssetMetrics, BalanceDomain, CollateralAssetConfig, DomainPolicy,
+    AllowedBalanceDomains, Asset, AssetId, AssetMetrics, BalanceDomain, CollateralAssetConfig,
+    DomainPolicy,
 };
 
 use super::{
     errors::{
-        CancelFundWithdrawalError, RegisterIcrcAssetError, UpdateAssetPriceError, WithdrawFundError,
+        CancelFundWithdrawalError, RegisterIcrcAssetError, UpdateAssetPriceError,
+        UpdateCollateralAllowedDomainsError, WithdrawFundError,
     },
     params::{
         CancelFundWithdrawalParams, FundType, RegisterIcrcAssetParams, UpdateAssetMetricsParams,
-        UpdateAssetPriceParams, UpdateCollateralAssetParams, UpdateDomainPolicyParams,
-        WithdrawFundParams,
+        UpdateAssetPriceParams, UpdateCollateralAllowedDomainsParams, UpdateCollateralAssetParams,
+        UpdateDomainPolicyParams, WithdrawFundParams,
     },
     results::{
         CancelFundWithdrawalResult, GetFundsResult, RegisterIcrcAssetResult,
-        UpdateAssetPriceResult, WithdrawFundResult,
+        UpdateAssetPriceResult, UpdateCollateralAllowedDomainsResult, WithdrawFundResult,
     },
 };
 use crate::{
@@ -252,15 +254,28 @@ pub fn update_asset_metrics(params: UpdateAssetMetricsParams) {
 #[update(guard = "caller_is_controller")]
 pub async fn register_icrc_asset(params: RegisterIcrcAssetParams) -> RegisterIcrcAssetResult {
     let res: Result<(), RegisterIcrcAssetError> = (async {
-        let asset = Asset::Icrc(params.ledger_id);
+        let RegisterIcrcAssetParams {
+            asset_id,
+            ledger_id,
+            haircut_bps,
+            oracle_id,
+            is_enabled,
+            allowed_balance_domains,
+        } = params;
 
-        if is_internal_ledger(&params.ledger_id) {
+        let allowed_balance_domains = Vec::from(
+            AllowedBalanceDomains::try_from(allowed_balance_domains)
+                .map_err(|_| RegisterIcrcAssetError::InvalidAllowedBalanceDomains)?,
+        );
+
+        let asset = Asset::Icrc(ledger_id);
+
+        if is_internal_ledger(&ledger_id) {
             return Err(RegisterIcrcAssetError::VusdCannotBeCollateral);
         }
 
-        let exists = COLLATERAL_ASSETS
-            .with(|assets| assets.borrow().contains_key(&params.asset_id))
-            || is_internal_asset(&params.asset_id);
+        let exists = COLLATERAL_ASSETS.with(|assets| assets.borrow().contains_key(&asset_id))
+            || is_internal_asset(&asset_id);
 
         if exists {
             return Err(RegisterIcrcAssetError::AssetAlreadyExists);
@@ -281,18 +296,19 @@ pub async fn register_icrc_asset(params: RegisterIcrcAssetParams) -> RegisterIcr
             .map_err(|e| RegisterIcrcAssetError::Common(CommonError::Internal(format!("{e:?}"))))?;
 
         let config = CollateralAssetConfig {
-            asset_id: params.asset_id.clone(),
+            asset_id: asset_id.clone(),
             asset,
             symbol: metadata.symbol,
             decimals: metadata.decimals,
-            is_enabled: params.is_enabled,
-            oracle_id: params.oracle_id,
+            is_enabled,
+            oracle_id,
+            allowed_balance_domains,
         };
 
         // If it exists, preserve the current price; otherwise start at 0
         let current_price = ASSET_METRICS.with(|m| {
             m.borrow()
-                .get(&params.asset_id)
+                .get(&asset_id)
                 .map(|metrics| metrics.price_usd.clone())
                 .unwrap_or_default()
         });
@@ -300,7 +316,7 @@ pub async fn register_icrc_asset(params: RegisterIcrcAssetParams) -> RegisterIcr
         let metrics = AssetMetrics {
             price_usd: current_price,
             latest_transfer_fee: Some(metadata.fee),
-            haircut_bps: params.haircut_bps,
+            haircut_bps,
             insurance_fee_ratio: None,
             protocol_fee_ratio: None,
             last_updated_ns: Some(now_ns()),
@@ -423,6 +439,33 @@ pub fn update_domain_policy(params: UpdateDomainPolicyParams) {
     DOMAIN_POLICIES.with(|p| {
         p.borrow_mut().insert(params.domain, params.policy);
     });
+}
+
+/// Updates which balance domains may hold this collateral asset (deposits and withdrawals).
+///
+/// This method is gated to canister controllers.
+#[update(guard = "caller_is_controller")]
+#[must_use]
+pub fn update_collateral_allowed_domains(
+    params: UpdateCollateralAllowedDomainsParams,
+) -> UpdateCollateralAllowedDomainsResult {
+    let res: Result<(), UpdateCollateralAllowedDomainsError> = (|| {
+        let allowed_balance_domains = Vec::from(
+            AllowedBalanceDomains::try_from(params.allowed_balance_domains)
+                .map_err(|_| UpdateCollateralAllowedDomainsError::InvalidAllowedBalanceDomains)?,
+        );
+
+        COLLATERAL_ASSETS.with(|assets| {
+            let mut assets = assets.borrow_mut();
+            let config = assets
+                .get_mut(&params.asset_id)
+                .ok_or(UpdateCollateralAllowedDomainsError::AssetNotFound)?;
+            config.allowed_balance_domains = allowed_balance_domains;
+            Ok(())
+        })
+    })();
+
+    res.into()
 }
 
 pub(crate) fn deduct_fund_balance_impl(

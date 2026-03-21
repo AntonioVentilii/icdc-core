@@ -28,6 +28,17 @@ use super::{
 };
 use crate::utils::constants::{CKUSDC_LEDGER, ICP_LEDGER};
 
+/// Arguments for [`TradeHelperTrait::setup_icrc_asset`] (keeps call sites readable for clippy).
+pub struct SetupIcrcAsset<'a> {
+    pub asset_id: &'a str,
+    pub ledger_id: Principal,
+    pub price_usd_value: u128,
+    pub price_decimals: u8,
+    pub haircut_bps: u16,
+    pub latest_transfer_fee: Option<u128>,
+    pub allowed_balance_domains: Vec<BalanceDomain>,
+}
+
 pub trait TradeHelperTrait {
     fn setup_vusd(&self);
     fn setup_icp(&self);
@@ -45,15 +56,7 @@ pub trait TradeHelperTrait {
         strike_value: u128,
         balance_domain: BalanceDomain,
     ) -> SeriesId;
-    fn setup_icrc_asset(
-        &self,
-        asset_id: &str,
-        ledger_id: Principal,
-        price_usd_value: u128,
-        price_decimals: u8,
-        haircut_bps: u16,
-        latest_transfer_fee: Option<u128>,
-    );
+    fn setup_icrc_asset(&self, args: SetupIcrcAsset<'_>);
     fn setup_evm_asset(
         &self,
         asset_id: &str,
@@ -97,27 +100,27 @@ impl TradeHelperTrait for TestSetup {
     }
 
     fn setup_icp(&self) {
-        let ledger_id = Principal::from_text(ICP_LEDGER).unwrap();
-        self.setup_icrc_asset(
-            "ICP",
-            ledger_id,
-            15_000_000,
-            6,
-            200, // 2% haircut
-            Some(10_000),
-        );
+        self.setup_icrc_asset(SetupIcrcAsset {
+            asset_id: "ICP",
+            ledger_id: Principal::from_text(ICP_LEDGER).unwrap(),
+            price_usd_value: 15_000_000,
+            price_decimals: 6,
+            haircut_bps: 200, // 2% haircut
+            latest_transfer_fee: Some(10_000),
+            allowed_balance_domains: vec![BalanceDomain::Settlement, BalanceDomain::Playground],
+        });
     }
 
     fn setup_ckusdc(&self) {
-        let ledger_id = Principal::from_text(CKUSDC_LEDGER).unwrap();
-        self.setup_icrc_asset(
-            "ckUSDC",
-            ledger_id,
-            1_000_000,
-            6,
-            100, // 1% haircut
-            Some(10),
-        );
+        self.setup_icrc_asset(SetupIcrcAsset {
+            asset_id: "ckUSDC",
+            ledger_id: Principal::from_text(CKUSDC_LEDGER).unwrap(),
+            price_usd_value: 1_000_000,
+            price_decimals: 6,
+            haircut_bps: 100, // 1% haircut
+            latest_transfer_fee: Some(10),
+            allowed_balance_domains: vec![BalanceDomain::Settlement, BalanceDomain::Playground],
+        });
     }
 
     fn deposit_collateral(
@@ -228,15 +231,17 @@ impl TradeHelperTrait for TestSetup {
         series_id
     }
 
-    fn setup_icrc_asset(
-        &self,
-        asset_id: &str,
-        ledger_id: Principal,
-        price_usd_value: u128,
-        price_decimals: u8,
-        haircut_bps: u16,
-        latest_transfer_fee: Option<u128>,
-    ) {
+    fn setup_icrc_asset(&self, args: SetupIcrcAsset<'_>) {
+        let SetupIcrcAsset {
+            asset_id,
+            ledger_id,
+            price_usd_value,
+            price_decimals,
+            haircut_bps,
+            latest_transfer_fee,
+            allowed_balance_domains,
+        } = args;
+
         let res: RegisterIcrcAssetResult = self
             .clearing
             .update(
@@ -248,6 +253,7 @@ impl TradeHelperTrait for TestSetup {
                     haircut_bps,
                     oracle_id: None,
                     is_enabled: true,
+                    allowed_balance_domains,
                 },),
             )
             .unwrap();
@@ -300,6 +306,7 @@ impl TradeHelperTrait for TestSetup {
                 decimals,
                 is_enabled: true,
                 oracle_id: None,
+                allowed_balance_domains: vec![BalanceDomain::Settlement, BalanceDomain::Playground],
             },
         };
 

@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use shared::types::AssetId;
 
 use super::errors::{
-    CancelFundWithdrawalError, RegisterIcrcAssetError, UpdateAssetPriceError, WithdrawFundError,
+    CancelFundWithdrawalError, RegisterIcrcAssetError, UpdateAssetPriceError,
+    UpdateCollateralAllowedDomainsError, WithdrawFundError,
 };
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -63,6 +64,22 @@ pub enum RegisterIcrcAssetResult {
 }
 impl From<Result<(), RegisterIcrcAssetError>> for RegisterIcrcAssetResult {
     fn from(res: Result<(), RegisterIcrcAssetError>) -> Self {
+        match res {
+            Ok(()) => Self::Ok,
+            Err(e) => Self::Err(e),
+        }
+    }
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub enum UpdateCollateralAllowedDomainsResult {
+    Ok,
+    Err(UpdateCollateralAllowedDomainsError),
+}
+impl From<Result<(), UpdateCollateralAllowedDomainsError>>
+    for UpdateCollateralAllowedDomainsResult
+{
+    fn from(res: Result<(), UpdateCollateralAllowedDomainsError>) -> Self {
         match res {
             Ok(()) => Self::Ok,
             Err(e) => Self::Err(e),

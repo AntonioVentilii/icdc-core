@@ -30,4 +30,12 @@ pub enum RegisterIcrcAssetError {
     Common(CommonError),
     AssetAlreadyExists,
     VusdCannotBeCollateral,
+    /// `allowed_balance_domains` was empty or could not be normalized.
+    InvalidAllowedBalanceDomains,
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub enum UpdateCollateralAllowedDomainsError {
+    AssetNotFound,
+    InvalidAllowedBalanceDomains,
 }

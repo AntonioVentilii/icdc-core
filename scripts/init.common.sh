@@ -20,7 +20,15 @@ export CLEARING_CANISTER
 # USD Configuration
 export USD_DECIMALS=6
 
-#TODO: do i need to register this as collateral for the clearing canister? Is it not used only as ledger?
+# --- Balance domains for register_icrc_asset.allowed_balance_domains (Candid) ---
+# Production-like collateral: Settlement only. Play/test tokens: Playground only.
+# Both: assets you explicitly allow in both Settlement and Playground (not vUSD — that is internal_ledger only).
+export CLEARING_DOMAINS_SETTLEMENT='vec { variant { Settlement } }'
+export CLEARING_DOMAINS_PLAYGROUND='vec { variant { Playground } }'
+export CLEARING_DOMAINS_SETTLEMENT_AND_PLAYGROUND='vec { variant { Settlement }; variant { Playground } }'
+
+# vUSD: configured on the clearing canister via install/init `Config.internal_ledger` (build args).
+# Do not use register_icrc_asset for vUSD — it is internal accounting, not user collateral.
 # vUSD Configuration
 VUSD_LEDGER_ID=$(dfx canister id ledger --network "$NETWORK" 2>/dev/null)
 if [[ -n "$VUSD_LEDGER_ID" ]]; then

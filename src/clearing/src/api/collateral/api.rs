@@ -64,6 +64,14 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
             return Err(DepositCollateralError::Asset(AssetError::UnsupportedAsset));
         }
 
+        let balance_domain = domain.unwrap_or(BalanceDomain::Settlement);
+        if !config.allowed_balance_domains.contains(&balance_domain) {
+            return Err(DepositCollateralError::DomainNotAllowed {
+                domain: balance_domain,
+                asset_id: asset_id.clone(),
+            });
+        }
+
         // ---------- Phase A: Build plan (no awaits) ----------
         let mut plan = DepositPlan::get_or_create(DepositPlanParams {
             deposit_id: deposit_id.clone(),
@@ -131,10 +139,8 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
                     .entry(user)
                     .or_insert_with(|| AccountState::new(user));
 
-                let domain = domain.unwrap_or(BalanceDomain::Settlement);
-
-                let current = state.get_balance(domain, &asset_id);
-                state.set_balance(domain, asset_id.clone(), current + amount_u128);
+                let current = state.get_balance(balance_domain, &asset_id);
+                state.set_balance(balance_domain, asset_id.clone(), current + amount_u128);
             });
 
             plan.status = PlanStatus::Finalised;
@@ -186,6 +192,14 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                 .cloned()
                 .ok_or(WithdrawCollateralError::Asset(AssetError::UnsupportedAsset))
         })?;
+
+        let balance_domain = domain.unwrap_or(BalanceDomain::Settlement);
+        if !config.allowed_balance_domains.contains(&balance_domain) {
+            return Err(WithdrawCollateralError::DomainNotAllowed {
+                domain: balance_domain,
+                asset_id: asset_id.clone(),
+            });
+        }
 
         // ---------- Phase A: Build plan (durable, no awaits) ----------
         let mut plan = WithdrawalPlan::get_or_create(WithdrawalPlanParams {
@@ -250,22 +264,21 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                     let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
                     let metrics = ASSET_METRICS.with(|m| m.borrow().clone());
 
-                    let domain = domain.unwrap_or(BalanceDomain::Settlement);
-
-                    let pre_equity = state.calculate_equity_usd(domain, &configs, &metrics);
+                    let pre_equity = state.calculate_equity_usd(balance_domain, &configs, &metrics);
 
                     let mut temp_state = state.clone();
-                    let current = temp_state.get_balance(domain, &asset_id);
+                    let current = temp_state.get_balance(balance_domain, &asset_id);
                     temp_state.set_balance(
-                        domain,
+                        balance_domain,
                         asset_id.clone(),
                         current.saturating_sub(amount_u128),
                     );
 
-                    let post_equity = temp_state.calculate_equity_usd(domain, &configs, &metrics);
+                    let post_equity =
+                        temp_state.calculate_equity_usd(balance_domain, &configs, &metrics);
                     Ok::<(u128, u128, u128), WithdrawCollateralError>((
                         post_equity,
-                        temp_state.get_reserved_margin_usd(domain),
+                        temp_state.get_reserved_margin_usd(balance_domain),
                         pre_equity,
                     ))
                 })?;
@@ -283,10 +296,9 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             ACCOUNT_STATES.with(|accounts| {
                 let mut accounts = accounts.borrow_mut();
                 if let Some(state) = accounts.get_mut(&user) {
-                    let domain = domain.unwrap_or(BalanceDomain::Settlement);
-                    let current = state.get_balance(domain, &asset_id);
+                    let current = state.get_balance(balance_domain, &asset_id);
                     state.set_balance(
-                        domain,
+                        balance_domain,
                         asset_id.clone(),
                         current.saturating_sub(amount_u128),
                     );
@@ -328,9 +340,12 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
                         ACCOUNT_STATES.with(|accounts| {
                             let mut accounts = accounts.borrow_mut();
                             if let Some(state) = accounts.get_mut(&user) {
-                                let domain = domain.unwrap_or(BalanceDomain::Settlement);
-                                let current = state.get_balance(domain, &asset_id);
-                                state.set_balance(domain, asset_id.clone(), current + tokens);
+                                let current = state.get_balance(balance_domain, &asset_id);
+                                state.set_balance(
+                                    balance_domain,
+                                    asset_id.clone(),
+                                    current + tokens,
+                                );
                             }
                         });
                     }

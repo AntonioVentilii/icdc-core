@@ -48,6 +48,14 @@ pub struct RegisterIcrcAssetParams {
     pub haircut_bps: u16,
     pub oracle_id: Option<String>,
     pub is_enabled: bool,
+    /// Non-empty. Duplicates are removed. Order is normalized for stable storage.
+    pub allowed_balance_domains: Vec<BalanceDomain>,
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct UpdateCollateralAllowedDomainsParams {
+    pub asset_id: AssetId,
+    pub allowed_balance_domains: Vec<BalanceDomain>,
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]

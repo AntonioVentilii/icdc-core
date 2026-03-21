@@ -3,7 +3,7 @@ use clearing::{
     api::admin::{params::UpdateCollateralAssetParams, results::GetFundsResult},
     types::state::Config,
 };
-use shared::types::{evm::NativeEvmAsset, Asset, CollateralAssetConfig, Series};
+use shared::types::{evm::NativeEvmAsset, Asset, BalanceDomain, CollateralAssetConfig, Series};
 
 use crate::utils::{
     assertions::{assert_ok_value, assert_unauthorized},
@@ -96,6 +96,7 @@ fn update_config_rejects_non_controller() {
             decimals: 8,
             is_enabled: true,
             oracle_id: None,
+            allowed_balance_domains: vec![BalanceDomain::Settlement, BalanceDomain::Playground],
         },
         version: 0,
     };
@@ -123,6 +124,7 @@ fn update_collateral_asset() {
             decimals: 18,
             is_enabled: true,
             oracle_id: Some("eth_oracle".to_owned()),
+            allowed_balance_domains: vec![BalanceDomain::Settlement, BalanceDomain::Playground],
         },
     };
 

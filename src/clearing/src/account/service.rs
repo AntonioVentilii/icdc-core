@@ -98,6 +98,10 @@ mod tests {
         CollateralAssetConfig,
     };
 
+    fn both_domains() -> Vec<BalanceDomain> {
+        vec![BalanceDomain::Settlement, BalanceDomain::Playground]
+    }
+
     use crate::{
         account::service::AccountService,
         types::{margin::AccountState, user::User},
@@ -119,6 +123,7 @@ mod tests {
                 decimals: 8,
                 is_enabled: true,
                 oracle_id: None,
+                allowed_balance_domains: both_domains(),
             },
         );
 
@@ -175,6 +180,7 @@ mod tests {
                 decimals: 18,
                 is_enabled: true,
                 oracle_id: None,
+                allowed_balance_domains: both_domains(),
             },
         );
 
@@ -222,6 +228,7 @@ mod tests {
                 decimals: 6,
                 is_enabled: true,
                 oracle_id: None,
+                allowed_balance_domains: both_domains(),
             },
         );
 
@@ -270,6 +277,7 @@ mod tests {
                 decimals: 8,
                 is_enabled: true,
                 oracle_id: None,
+                allowed_balance_domains: both_domains(),
             },
         );
 
