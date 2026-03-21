@@ -9,7 +9,8 @@ MIN_CANDID_EXTRACTOR_PATCH=5
 require_candid_extractor() {
   if ! command -v candid-extractor >/dev/null 2>&1; then
     echo "error: candid-extractor not found in PATH." >&2
-    echo "  Install: cargo install candid-extractor --version 0.1.6 --locked" >&2
+    echo "  From the repository root, run: ./scripts/setup candid-extractor" >&2
+    echo "  (installs the version pinned in dev-tools.json; ensure ~/.cargo/bin is on PATH)" >&2
     exit 1
   fi
 
@@ -25,7 +26,7 @@ require_candid_extractor() {
 
   if ((major == 0 && minor == 1 && patch < MIN_CANDID_EXTRACTOR_PATCH)); then
     echo "error: candid-extractor ${raw} is too old (need >= 0.1.${MIN_CANDID_EXTRACTOR_PATCH} for current ic-cdk)." >&2
-    echo "  Upgrade: cargo install candid-extractor --version 0.1.6 --locked" >&2
+    echo "  From the repository root, run: ./scripts/setup candid-extractor" >&2
     exit 1
   fi
 }
