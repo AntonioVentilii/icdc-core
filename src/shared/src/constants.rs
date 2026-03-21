@@ -17,7 +17,7 @@ pub const DAY_NS: u64 = 24 * HOUR_NS;
 pub const MONTH_NS: u64 = 30 * DAY_NS;
 
 /// The canonical number of decimals for internal USD accounting.
-pub const USD_DECIMALS: u8 = 6;
+pub const USD_DECIMALS: u8 = 4;
 
 /// Maximum length of a series title in characters.
 pub const MAX_SERIES_TITLE_LEN: usize = 128;

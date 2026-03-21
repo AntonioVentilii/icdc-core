@@ -76,7 +76,7 @@ fn categorical_arbitrage_validation() {
                 side: Side::Buy,
                 qty: 10,
                 price: params_yes.price,
-                blocked_margin_usd: 6_000_000,
+                blocked_margin_usd: 60_000,
                 balance_domain: BalanceDomain::Settlement,
             },
         );
@@ -105,8 +105,8 @@ fn categorical_arbitrage_validation() {
     let result = validate_no_arbitrage(&series, &params_no_high);
     assert!(result.is_err());
     if let Err(TradeError::ArbitrageLimitExceeded { sum_usd, limit_usd }) = result {
-        assert_eq!(sum_usd, 1_100_000);
-        assert_eq!(limit_usd, 1_000_000);
+        assert_eq!(sum_usd, 11_000);
+        assert_eq!(limit_usd, 10_000);
     } else {
         panic!("Expected ArbitrageLimitExceeded error");
     }

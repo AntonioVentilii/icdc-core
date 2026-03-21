@@ -379,7 +379,7 @@ mod tests {
 
             // Buyer has enough margin ($2000)
             let mut b_acc = AccountState::new(buyer);
-            b_acc.set_cash_balance_usd(BalanceDomain::Settlement, 2_000_000_000);
+            b_acc.set_cash_balance_usd(BalanceDomain::Settlement, 20_000_000);
             accounts.insert(buyer, b_acc);
 
             // Seller has NO margin
@@ -416,7 +416,7 @@ mod tests {
             let b_acc = accounts.get(&buyer).unwrap();
             assert_eq!(
                 b_acc.get_cash_balance_usd(BalanceDomain::Settlement),
-                2_000_000_000,
+                20_000_000,
                 "Buyer's cash should NOT be debited on seller failure"
             );
         });

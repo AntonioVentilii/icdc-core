@@ -52,15 +52,15 @@ fn categorical_mint_redeem_complete_set() {
         balance_domain: BalanceDomain::Settlement,
     };
 
-    setup_test_state(vec![(user, 10_000_000)]);
+    setup_test_state(vec![(user, 100_000)]);
 
     mint_complete_set_logic(user, &series_id.clone(), &series.clone(), 5).expect("mint failed");
-    verify_cash_balance(user, 5_000_000);
+    verify_cash_balance(user, 50_000);
     verify_position_qty(user, &series_id, Some(&outcome_a.clone()), 5);
     verify_position_qty(user, &series_id, Some(&outcome_b.clone()), 5);
 
     redeem_complete_set_logic(user, &series_id.clone(), &series, 2).expect("redeem failed");
-    verify_cash_balance(user, 7_000_000);
+    verify_cash_balance(user, 70_000);
     verify_position_qty(user, &series_id, Some(&outcome_a.clone()), 3);
     verify_position_qty(user, &series_id, Some(&outcome_b.clone()), 3);
 }
@@ -112,10 +112,10 @@ fn categorical_lifecycle_scenario() {
         balance_domain: BalanceDomain::Settlement,
     };
 
-    setup_test_state(vec![(seller, 20_000_000), (buyer, 10_000_000)]);
+    setup_test_state(vec![(seller, 200_000), (buyer, 100_000)]);
 
     mint_complete_set_logic(seller, &series_id.clone(), &series.clone(), 10).expect("mint failed");
-    verify_cash_balance(seller, 10_000_000);
+    verify_cash_balance(seller, 100_000);
 
     execute_trade_checked(
         &series.clone(),
@@ -132,8 +132,8 @@ fn categorical_lifecycle_scenario() {
         },
     );
 
-    verify_cash_balance(seller, 14_000_000);
-    verify_cash_balance(buyer, 6_000_000);
+    verify_cash_balance(seller, 140_000);
+    verify_cash_balance(buyer, 60_000);
 
     verify_position_qty(seller, &series_id, Some(&outcome_a.clone()), 0);
     verify_position_qty(seller, &series_id, Some(&outcome_b.clone()), 10);
@@ -142,8 +142,8 @@ fn categorical_lifecycle_scenario() {
 
     settle_series_checked(&series, &SettlementInput::Outcome(outcome_a.clone()));
 
-    verify_cash_balance(buyer, 16_000_000);
-    verify_cash_balance(seller, 14_000_000);
+    verify_cash_balance(buyer, 160_000);
+    verify_cash_balance(seller, 140_000);
 
     verify_position_qty(buyer, &series_id, Some(&outcome_a.clone()), 0);
     verify_position_qty(seller, &series_id, Some(&outcome_b.clone()), 0);
@@ -190,7 +190,7 @@ fn categorical_short_settlement() {
         balance_domain: BalanceDomain::Settlement,
     };
 
-    setup_test_state(vec![(seller, 10_000_000), (buyer, 10_000_000)]);
+    setup_test_state(vec![(seller, 100_000), (buyer, 100_000)]);
 
     execute_trade_checked(
         &series.clone(),
@@ -210,8 +210,8 @@ fn categorical_short_settlement() {
     // After trade:
     // Buyer: 10 - 4 (margin/price) = 6
     // Seller: 10 - 6 (margin = 1 - 0.4) = 4
-    verify_cash_balance(buyer, 6_000_000);
-    verify_cash_balance(seller, 4_000_000);
+    verify_cash_balance(buyer, 60_000);
+    verify_cash_balance(seller, 40_000);
 
     // Settle with Outcome B winning (so A loses)
     settle_series_checked(&series, &SettlementInput::Outcome(outcome_b.clone()));
@@ -219,8 +219,8 @@ fn categorical_short_settlement() {
     // Results:
     // Buyer (Long A): receives 0. Final = 6 + 0 = 6.
     // Seller (Short A): receives 1.0 (collateral return). Final = 4 + 10 = 14.
-    verify_cash_balance(buyer, 6_000_000);
-    verify_cash_balance(seller, 14_000_000);
+    verify_cash_balance(buyer, 60_000);
+    verify_cash_balance(seller, 140_000);
 }
 
 #[test]
@@ -263,7 +263,7 @@ fn categorical_short_loss() {
         balance_domain: BalanceDomain::Settlement,
     };
 
-    setup_test_state(vec![(seller, 10_000_000), (buyer, 10_000_000)]);
+    setup_test_state(vec![(seller, 100_000), (buyer, 100_000)]);
 
     execute_trade_checked(
         &series.clone(),
@@ -286,6 +286,6 @@ fn categorical_short_loss() {
     // Results:
     // Buyer (Long A): receives 1.0. Final = 6 + 10 = 16.
     // Seller (Short A): receives 0. Final = 4 + 0 = 4.
-    verify_cash_balance(buyer, 16_000_000);
-    verify_cash_balance(seller, 4_000_000);
+    verify_cash_balance(buyer, 160_000);
+    verify_cash_balance(seller, 40_000);
 }

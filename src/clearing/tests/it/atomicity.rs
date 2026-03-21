@@ -83,7 +83,7 @@ fn atomicity_one_sided_insolvency() {
             "User A cash should NOT be deducted (it was 0 anyway, since we used ICP)"
         );
         assert_eq!(
-            resp.total_equity_usd, 147_000_000,
+            resp.total_equity_usd, 1_470_000,
             "User A equity should NOT change"
         );
     } else {

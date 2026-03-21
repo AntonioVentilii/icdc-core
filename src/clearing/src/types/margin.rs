@@ -112,7 +112,7 @@ impl AccountState {
     ///
     /// Formula (all integer):
     /// `value_usd` = (balance * `price_value` * (10000 - `haircut_bps`)) / (10000 * 10^(decimals +
-    /// `price_decimals` - 6))
+    /// `price_decimals` - `USD_DECIMALS`))
     #[must_use]
     pub fn calculate_equity_usd(
         &self,

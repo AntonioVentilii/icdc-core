@@ -514,7 +514,7 @@ mod tests {
             let mut acc = acc.borrow_mut();
             acc.clear();
             let mut a = AccountState::new(user);
-            a.set_cash_balance_usd(BalanceDomain::Settlement, -10_000_000); // -10 USD
+            a.set_cash_balance_usd(BalanceDomain::Settlement, -100_000); // -10 USD
             acc.insert(user, a);
         });
 
@@ -534,8 +534,8 @@ mod tests {
             total_collateral_usd,
         }) = result
         {
-            assert_eq!(total_net_payoff, 100_000_000); // 100 USD
-            assert_eq!(total_collateral_usd, 90_000_000); // 90 USD post-settlement
+            assert_eq!(total_net_payoff, 1_000_000); // 100 USD
+            assert_eq!(total_collateral_usd, 900_000); // 90 USD post-settlement
         } else {
             panic!("Expected SolvencyViolation, got {result:?}");
         }
@@ -593,7 +593,7 @@ mod tests {
             let mut acc = acc.borrow_mut();
             acc.clear();
             let mut a = AccountState::new(user);
-            a.set_cash_balance_usd(BalanceDomain::Settlement, 1_000_000_000);
+            a.set_cash_balance_usd(BalanceDomain::Settlement, 10_000_000);
             acc.insert(user, a);
         });
 
@@ -609,11 +609,10 @@ mod tests {
         let plan = result.unwrap();
 
         // payoff = 50. i_fee = 50 * 0.001 = 0.05. p_fee = 50 * 0.0005 = 0.025
-        // fees are in USD units (6 decimals).
-        // 50 USD = 50_000_000. i_fee = 50_000. p_fee = 25_000.
-        assert_eq!(plan.insurance_fee_usd, 50_000);
-        assert_eq!(plan.fee_usd, 25_000);
-        assert_eq!(plan.positions[0].cashflow_usd, 50_000_000 - 50_000 - 25_000);
+        // fees are in USD base units (`USD_DECIMALS`).
+        assert_eq!(plan.insurance_fee_usd, 500);
+        assert_eq!(plan.fee_usd, 250);
+        assert_eq!(plan.positions[0].cashflow_usd, 500_000 - 500 - 250);
 
         // Verify position WAS REMOVED
         POSITIONS.with(|pos: &RefCell<BTreeMap<_, _>>| {
@@ -674,8 +673,8 @@ mod tests {
             let mut acc = acc.borrow_mut();
             for user in &users {
                 let mut a = AccountState::new(*user);
-                a.set_cash_balance_usd(BalanceDomain::Settlement, 1_000_000); // 1 USD
-                a.set_reserved_margin_usd(BalanceDomain::Settlement, 500_000); // 0.5 USD
+                a.set_cash_balance_usd(BalanceDomain::Settlement, 10_000); // 1 USD
+                a.set_reserved_margin_usd(BalanceDomain::Settlement, 5_000); // 0.5 USD
                 acc.insert(*user, a);
             }
         });
@@ -687,8 +686,8 @@ mod tests {
                 user: *u,
                 outcome_id: None,
                 net_qty: 1,
-                reserved_margin_usd: 500_000,
-                cashflow_usd: 100_000, // +0.1 USD each
+                reserved_margin_usd: 5_000,
+                cashflow_usd: 1_000, // +0.1 USD each
             })
             .collect();
 
@@ -744,14 +743,14 @@ mod tests {
             let first_user = &users[0];
             let state = acc.get(first_user).unwrap();
             let domain = BalanceDomain::Settlement;
-            assert_eq!(state.get_cash_balance_usd(domain), 1_100_000); // 1.0 + 0.1
+            assert_eq!(state.get_cash_balance_usd(domain), 11_000); // 1.0 + 0.1
             assert_eq!(state.get_reserved_margin_usd(domain), 0); // released
 
             // User 100 should NOT be updated yet
             let user_100 = &users[100];
             let state_100 = acc.get(user_100).unwrap();
-            assert_eq!(state_100.get_cash_balance_usd(domain), 1_000_000); // unchanged
-            assert_eq!(state_100.get_reserved_margin_usd(domain), 500_000); // unchanged
+            assert_eq!(state_100.get_cash_balance_usd(domain), 10_000); // unchanged
+            assert_eq!(state_100.get_reserved_margin_usd(domain), 5_000); // unchanged
         });
 
         // --- Simulate Phase B: second chunk (should process remaining 50) ---
@@ -791,7 +790,7 @@ mod tests {
             let user_100 = &users[100];
             let state = acc.get(user_100).unwrap();
             let domain = BalanceDomain::Settlement;
-            assert_eq!(state.get_cash_balance_usd(domain), 1_100_000); // now updated
+            assert_eq!(state.get_cash_balance_usd(domain), 11_000); // now updated
             assert_eq!(state.get_reserved_margin_usd(domain), 0); // released
         });
 
@@ -876,7 +875,7 @@ mod tests {
             balance_domain: BalanceDomain::Settlement,
         };
 
-        // Settlement price 200 → gross payoff = 200 - 100 = 100 USD = 100_000_000
+        // Settlement price 200 → gross payoff = 200 - 100 = 100 USD (4-decimal units)
         let settlement_price = Price::new(200, 0);
 
         POSITIONS.with(|pos| {
@@ -894,20 +893,20 @@ mod tests {
             );
         });
 
-        // System equity = 99.9 USD = 99_900_000 (less than 100 gross, more than 98 net)
+        // System equity = 99.9 USD (less than 100 gross, more than 98 net)
         ACCOUNT_STATES.with(|acc| {
             let mut acc = acc.borrow_mut();
             acc.clear();
             let mut a = AccountState::new(user);
-            a.set_cash_balance_usd(BalanceDomain::Settlement, 99_900_000);
+            a.set_cash_balance_usd(BalanceDomain::Settlement, 999_000);
             acc.insert(user, a);
         });
 
         COLLATERAL_ASSETS.with(|c| c.borrow_mut().clear());
 
         // Fee ratios: insurance 100 bps (1%) + protocol 100 bps (1%) = 2% total
-        // Gross payoff = 100_000_000. Fees = 2_000_000. Net = 98_000_000.
-        // 98_000_000 < 99_900_000 → solvency check passes.
+        // Gross payoff = 1_000_000. Fees = 20_000. Net = 980_000.
+        // 980_000 < 999_000 → solvency check passes.
         let result = prepare_settlement_impl(
             &series,
             &series_id,
@@ -923,11 +922,11 @@ mod tests {
 
         let plan = result.unwrap();
         // Verify fees and net cashflow
-        assert_eq!(plan.insurance_fee_usd, 1_000_000); // 1% of 100_000_000
-        assert_eq!(plan.fee_usd, 1_000_000); // 1% of 100_000_000
+        assert_eq!(plan.insurance_fee_usd, 10_000); // 1% of 1_000_000
+        assert_eq!(plan.fee_usd, 10_000); // 1% of 1_000_000
         assert_eq!(
             plan.positions[0].cashflow_usd,
-            100_000_000 - 1_000_000 - 1_000_000 // 98_000_000
+            1_000_000 - 10_000 - 10_000 // 980_000
         );
 
         // Cleanup
@@ -958,10 +957,10 @@ mod tests {
             let mut acc = acc.borrow_mut();
             acc.clear();
             let mut w = AccountState::new(winner);
-            w.set_cash_balance_usd(BalanceDomain::Settlement, 10_000_000); // 10 USD
+            w.set_cash_balance_usd(BalanceDomain::Settlement, 100_000); // 10 USD
             acc.insert(winner, w);
             let mut l = AccountState::new(loser);
-            l.set_cash_balance_usd(BalanceDomain::Settlement, 100_000_000); // 100 USD
+            l.set_cash_balance_usd(BalanceDomain::Settlement, 1_000_000); // 100 USD
             acc.insert(loser, l);
         });
 
@@ -975,22 +974,22 @@ mod tests {
                 user: winner,
                 outcome_id: None,
                 net_qty: 1,
-                reserved_margin_usd: 5_000_000,
-                cashflow_usd: 95_000_000, // +95 USD
+                reserved_margin_usd: 50_000,
+                cashflow_usd: 950_000, // +95 USD
             },
             SettlementPosition {
                 user: loser,
                 outcome_id: None,
                 net_qty: -1,
-                reserved_margin_usd: 50_000_000,
-                cashflow_usd: -200_000_000, // -200 USD
+                reserved_margin_usd: 500_000,
+                cashflow_usd: -2_000_000, // -200 USD
             },
         ];
 
         // Net payoff = 106 USD (only positive cashflows count, but we test the
         // solvency threshold directly).
         // 106 > 105 (post-settlement) but 106 < 110 (pre-settlement).
-        let result = check_settlement_solvency(BalanceDomain::Settlement, 106_000_000, &positions);
+        let result = check_settlement_solvency(BalanceDomain::Settlement, 1_060_000, &positions);
 
         assert!(
             result.is_err(),
@@ -1001,15 +1000,15 @@ mod tests {
             total_collateral_usd,
         }) = result
         {
-            assert_eq!(total_net_payoff, 106_000_000);
-            assert_eq!(total_collateral_usd, 105_000_000); // post-settlement clamped equity
+            assert_eq!(total_net_payoff, 1_060_000);
+            assert_eq!(total_collateral_usd, 1_050_000); // post-settlement clamped equity
         } else {
             panic!("Expected SolvencyViolation");
         }
 
         // Also verify that a payoff within post-settlement equity passes.
         let result_ok =
-            check_settlement_solvency(BalanceDomain::Settlement, 105_000_000, &positions);
+            check_settlement_solvency(BalanceDomain::Settlement, 1_050_000, &positions);
         assert!(
             result_ok.is_ok(),
             "Expected success when net payoff equals post-settlement equity"

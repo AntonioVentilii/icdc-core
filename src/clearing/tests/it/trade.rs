@@ -262,11 +262,11 @@ fn basic_matched_trade() {
         GetAccountStateResult::Ok(resp) => {
             assert_eq!(
                 resp.state.get_cash_balance_usd(BalanceDomain::Settlement),
-                -5_000_000_000, // Cost of trade
+                -50_000_000, // Cost of trade
                 "Buyer cash should be negative $5000"
             );
             assert_eq!(
-                resp.total_equity_usd, 14_700_000_000,
+                resp.total_equity_usd, 147_000_000,
                 "Equity should match ICP value minus haircut"
             );
         }
@@ -288,11 +288,11 @@ fn basic_matched_trade() {
         GetAccountStateResult::Ok(resp) => {
             assert_eq!(
                 resp.state.get_cash_balance_usd(BalanceDomain::Settlement),
-                -5_000_000_000, // Margin requirement (Full Collateral)
+                -50_000_000, // Margin requirement (Full Collateral)
                 "Seller cash should be negative $5000"
             );
             assert_eq!(
-                resp.total_equity_usd, 14_700_000_000,
+                resp.total_equity_usd, 147_000_000,
                 "Equity should match ICP value minus haircut"
             );
         }

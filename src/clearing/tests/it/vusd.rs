@@ -115,16 +115,16 @@ fn complex_available_margin_check() {
     if let GetAccountStateResult::Ok(resp) = state_final {
         assert_eq!(
             resp.state.get_cash_balance_usd(BalanceDomain::Settlement),
-            -50_000_000,
+            -500_000,
             "Cash balance should be negative $50"
         );
         assert_eq!(
-            resp.total_equity_usd, 220_500_000,
+            resp.total_equity_usd, 2_205_000,
             "Total equity should match ICP value minus haircut"
         );
         // Available margin: 220.5 (equity) - 50 (reserved) = 170.5
         assert_eq!(
-            resp.available_margin_usd, 170_500_000,
+            resp.available_margin_usd, 1_705_000,
             "Available margin calculation mismatch"
         );
     }

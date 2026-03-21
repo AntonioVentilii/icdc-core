@@ -338,14 +338,14 @@ mod tests {
             reserved_margin_usd: 0,
         };
 
-        // Price 0.60 (60M). Max 1.0 (1M because USD_DECIMALS=6).
+        // Price 0.60 (60M, 8 dp). Max 1.0 in USD base units (10^USD_DECIMALS).
         assert_eq!(
             get_settlement_value(&series, &pos_long, &settlement).unwrap(),
-            6_000_000
+            60_000
         );
         assert_eq!(
             get_settlement_value(&series, &pos_short, &settlement).unwrap(),
-            4_000_000
+            40_000
         );
     }
 
@@ -368,10 +368,10 @@ mod tests {
             net_qty: 1,
             reserved_margin_usd: 0,
         };
-        // USD: (150 - 100) = 50.00 -> 50_000_000
+        // USD: (150 - 100) = 50.00 in 4-decimal units
         assert_eq!(
             get_settlement_value(&series_usd, &pos, &settlement).unwrap(),
-            50_000_000
+            500_000
         );
     }
 
@@ -394,10 +394,10 @@ mod tests {
             net_qty: 1,
             reserved_margin_usd: 0,
         };
-        // USD: (100 - 80) = 20.00 -> 20_000_000
+        // USD: (100 - 80) = 20.00 in 4-decimal units
         assert_eq!(
             get_settlement_value(&series_usd, &pos, &settlement).unwrap(),
-            20_000_000
+            200_000
         );
     }
 
@@ -405,15 +405,15 @@ mod tests {
     fn margin_logic() {
         let price = Price::new(60_000_000, 8); // 0.60 (8 decimals)
         let series_usd = mock_series(PayoffType::Binary, None, 8, PayoutUnit::usd());
-        // Long Binary (6 decimals): 0.60 -> 600,000
+        // Long Binary: 0.60 -> 6_000 (4-decimal USD)
         assert_eq!(
             get_required_margin(&series_usd, &price, 1, &None).unwrap(),
-            600_000
+            6_000
         );
-        // Short Binary (6 decimals): (1.0 - 0.6) = 0.40 -> 400,000
+        // Short Binary: (1.0 - 0.6) = 0.40 -> 4_000
         assert_eq!(
             get_required_margin(&series_usd, &price, -1, &None).unwrap(),
-            400_000
+            4_000
         );
 
         // Call Margin
@@ -426,12 +426,12 @@ mod tests {
         // Long Call: premium (0.60)
         assert_eq!(
             get_required_margin(&call_series, &price, 10, &None).unwrap(),
-            6_000_000
+            60_000
         );
         // Short Call: premium (0.60)
         assert_eq!(
             get_required_margin(&call_series, &price, -10, &None).unwrap(),
-            6_000_000
+            60_000
         );
 
         // Put Margin
@@ -440,28 +440,27 @@ mod tests {
         // Long Put: premium (0.60)
         assert_eq!(
             get_required_margin(&put_series, &price, 10, &None).unwrap(),
-            6_000_000
+            60_000
         );
         // Short Put: strike price ($1.00)
         assert_eq!(
             get_required_margin(&put_series, &price, -10, &None).unwrap(),
-            10_000_000
+            100_000
         );
     }
 
     #[test]
     fn rounding_precision() {
-        // USD: 6 decimals
+        // USD: canonical `USD_DECIMALS`
         let series_usd = mock_series(PayoffType::Binary, None, 8, PayoutUnit::usd());
 
-        // Use an unaligned price to verify proper rounding (conversion between 8 and 6 decimals).
-        // 35,555,555 / 100 = 355,555.55...
+        // Use an unaligned price to verify proper rounding (conversion between 8 and 4 decimals).
         let unaligned_price = Price::new(35_555_555, 8);
 
-        // Margin (Ceil): (35,555,555 + 99) / 100 = 355,556
+        // Margin (Ceil): div_ceil(35_555_555, 10_000)
         assert_eq!(
             get_required_margin(&series_usd, &unaligned_price, 1, &None).unwrap(),
-            355_556
+            3556
         );
 
         let settlement = SettlementInput::Price(unaligned_price);
@@ -472,10 +471,10 @@ mod tests {
             net_qty: 1,
             reserved_margin_usd: 0,
         };
-        // Settlement (Floor): 35,555,555 / 100 = 355,555
+        // Settlement (Floor): 35_555_555 / 10_000
         assert_eq!(
             get_settlement_value(&series_usd, &pos, &settlement).unwrap(),
-            355_555
+            3555
         );
     }
 
@@ -499,7 +498,7 @@ mod tests {
         // 10 units of A pays 10.0 USD if A wins
         assert_eq!(
             get_settlement_value(&series, &pos_a, &settle_a).unwrap(),
-            10_000_000
+            100_000
         );
         // 10 units of A pays 0 if B wins
         assert_eq!(get_settlement_value(&series, &pos_a, &settle_b).unwrap(), 0);
@@ -519,7 +518,7 @@ mod tests {
         // Short A pays 10.0 if B wins (collateral return)
         assert_eq!(
             get_settlement_value(&series, &pos_short_a, &settle_b).unwrap(),
-            10_000_000
+            100_000
         );
     }
 
@@ -532,12 +531,12 @@ mod tests {
         // Long requires paying the price: 10 * 0.40 = 4.0 USD
         assert_eq!(
             get_required_margin(&series, &price, 10, &Some(outcome_a.clone())).unwrap(),
-            4_000_000
+            40_000
         );
         // Short requires 1 - price: 10 * (1.0 - 0.40) = 6.0 USD
         assert_eq!(
             get_required_margin(&series, &price, -10, &Some(outcome_a)).unwrap(),
-            6_000_000
+            60_000
         );
     }
 

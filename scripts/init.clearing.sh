@@ -66,7 +66,7 @@ dfx canister call clearing register_icrc_asset "(record {
 })" --network "$NETWORK"
 
 # 3. Update Asset Price ($TESTICP_SYMBOL)
-echo "Setting price for $TESTICP_SYMBOL (\$$(echo "scale=2; $TESTICP_PRICE_E6 / 1000000" | bc))..."
+echo "Setting price for $TESTICP_SYMBOL (\$$(echo "scale=6; $TESTICP_PRICE_E6 / (10^$USD_DECIMALS)" | bc))..."
 dfx canister call clearing update_asset_price "(record { 
     asset_id = \"$TESTICP_SYMBOL\"; 
     price = record { decimal = record { value = $TESTICP_PRICE_E6 : nat; decimals = $USD_DECIMALS : nat8 }; oracle_id = null; timestamp = null };
@@ -84,7 +84,7 @@ dfx canister call clearing register_icrc_asset "(record {
 })" --network "$NETWORK"
 
 # 5. Update Asset Price ($TICRC1_SYMBOL)
-echo "Setting price for $TICRC1_SYMBOL (\$$(echo "scale=2; $TICRC1_PRICE_E6 / 1000000" | bc))..."
+echo "Setting price for $TICRC1_SYMBOL (\$$(echo "scale=6; $TICRC1_PRICE_E6 / (10^$USD_DECIMALS)" | bc))..."
 dfx canister call clearing update_asset_price "(record { 
     asset_id = \"$TICRC1_SYMBOL\"; 
     price = record { decimal = record { value = $TICRC1_PRICE_E6 : nat; decimals = $USD_DECIMALS : nat8 }; oracle_id = null; timestamp = null };

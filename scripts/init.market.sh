@@ -33,8 +33,8 @@ ALL_SERIES=$(dfx canister call registry list_series "(record { limit = opt 100 :
 place_outcome_orders() {
   local SID=$1
   local OID=$2
-  local MID_VAL=$3    # in 6-decimal USD (e.g. 500000 for 0.5)
-  local SPREAD_VAL=$4 # in 6-decimal USD
+  local MID_VAL=$3    # in USD_DECIMALS minor units (e.g. 5000 for 0.5 with 4 decimals)
+  local SPREAD_VAL=$4 # same units as MID_VAL
 
   echo "    Placing orders for Outcome: ${OID:-Binary} (Mid: $MID_VAL, Spread: $SPREAD_VAL)"
 
@@ -43,9 +43,11 @@ place_outcome_orders() {
     local BID_VAL=$((MID_VAL - OFFSET))
     local ASK_VAL=$((MID_VAL + OFFSET))
 
-    # Keep within [0.01, 0.99] range
-    [[ "$BID_VAL" -lt 10000 ]] && BID_VAL=10000
-    [[ "$ASK_VAL" -gt 990000 ]] && ASK_VAL=990000
+    # Keep within [0.01, 0.99] range (in USD_DECIMALS minor units)
+    local MIN_TICK=$((10 ** (USD_DECIMALS - 2)))
+    local MAX_TICK=$((99 * (10 ** (USD_DECIMALS - 2))))
+    [[ "$BID_VAL" -lt "$MIN_TICK" ]] && BID_VAL=$MIN_TICK
+    [[ "$ASK_VAL" -gt "$MAX_TICK" ]] && ASK_VAL=$MAX_TICK
 
     local OBID
     OBID=$(openssl rand -hex 8)
@@ -57,8 +59,8 @@ place_outcome_orders() {
     if [[ "$OID" != "null" ]]; then OARG="opt \"$OID\""; fi
 
     echo "      Level $i: Buy @ $BID_VAL, Sell @ $ASK_VAL"
-    dfx canister call clearing submit_limit_order "(record { qty = $QTY : int; outcome_id = $OARG; series_id = \"$SID\"; side = variant { Buy }; order_id = \"$OBID\"; price = record { decimal = record { value = $BID_VAL : nat; decimals = 6 : nat8 }; oracle_id = null; timestamp = null }; })" --network "$NETWORK"
-    dfx canister call clearing submit_limit_order "(record { qty = $QTY : int; outcome_id = $OARG; series_id = \"$SID\"; side = variant { Sell }; order_id = \"$OASK\"; price = record { decimal = record { value = $ASK_VAL : nat; decimals = 6 : nat8 }; oracle_id = null; timestamp = null }; })" --network "$NETWORK"
+    dfx canister call clearing submit_limit_order "(record { qty = $QTY : int; outcome_id = $OARG; series_id = \"$SID\"; side = variant { Buy }; order_id = \"$OBID\"; price = record { decimal = record { value = $BID_VAL : nat; decimals = $USD_DECIMALS : nat8 }; oracle_id = null; timestamp = null }; })" --network "$NETWORK"
+    dfx canister call clearing submit_limit_order "(record { qty = $QTY : int; outcome_id = $OARG; series_id = \"$SID\"; side = variant { Sell }; order_id = \"$OASK\"; price = record { decimal = record { value = $ASK_VAL : nat; decimals = $USD_DECIMALS : nat8 }; oracle_id = null; timestamp = null }; })" --network "$NETWORK"
   done
 }
 
@@ -225,7 +227,7 @@ for SID in $SCALAR_MARKETS; do
   echo "Processing Scalar Market: $TITLE ($SID)"
   # Pick a random mid and spread
   MID_VAL=$(((RANDOM % (MID_MAX - MID_MIN + 1) + MID_MIN) * 10000))
-  SPREAD_VAL=$(((RANDOM % (SPREAD_MAX - SPREAD_MIN + 1) + SPREAD_MIN) * 10000))
+  SPREAD_VAL=$(((RANDOM % (SPREAD_MAX - SPREAD_MIN + 1) + SPREAD_MIN) * (10 ** (USD_DECIMALS - 2))))
   place_outcome_orders "$SID" "null" "$MID_VAL" "$SPREAD_VAL"
 done
 
@@ -263,7 +265,7 @@ for SID in $CAT_SERIES_IDS; do
   MID_VALS[NUM_OUTCOMES - 1]=$((MID_VALS[NUM_OUTCOMES - 1] + ADJUSTMENT))
 
   # Pick a common spread range for all outcomes in this series
-  SPREAD_VAL=$(((RANDOM % (SPREAD_MAX - SPREAD_MIN + 1) + SPREAD_MIN) * 10000))
+  SPREAD_VAL=$(((RANDOM % (SPREAD_MAX - SPREAD_MIN + 1) + SPREAD_MIN) * (10 ** (USD_DECIMALS - 2))))
 
   idx=0
   for OID in $OUTCOMES; do

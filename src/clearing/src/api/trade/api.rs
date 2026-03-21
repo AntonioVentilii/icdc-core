@@ -977,7 +977,7 @@ mod tests {
         let buy_margin = get_required_margin(&binary_series, &price, qty, &None);
         let sell_margin = get_required_margin(&binary_series, &price, -qty, &None);
 
-        assert_eq!(buy_margin, Ok(3_000_000));
-        assert_eq!(sell_margin, Ok(7_000_000));
+        assert_eq!(buy_margin, Ok(30_000));
+        assert_eq!(sell_margin, Ok(70_000));
     }
 }

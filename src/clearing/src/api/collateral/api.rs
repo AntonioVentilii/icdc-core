@@ -388,7 +388,10 @@ pub fn get_collateral_assets() -> Vec<CollateralAssetInfo> {
 #[cfg(test)]
 mod tests {
     use candid::{Nat, Principal};
-    use shared::{constants::BPS_BASE, types::BalanceDomain};
+    use shared::{
+        constants::{BPS_BASE, USD_DECIMALS},
+        types::BalanceDomain,
+    };
 
     use crate::types::{margin::AccountState, user::User};
 
@@ -398,21 +401,16 @@ mod tests {
         let price_value = 10_000_000_u128; // $10 (6 decimals)
         let price_decimals = 6_u32;
         let asset_decimals = 8_u32;
-        let target_decimals = 6_u32;
+        let target_decimals = u32::from(USD_DECIMALS);
         let haircut_bps = 1000_u16; // 10% haircut
 
         // Manual calculation:
         // Market value = (1e8 * 10e6) / 10^(8+6-6) = 1e14 / 1e8 = 1e6 ($1 USD, wait)
         // No, 1 ICP * $10 = $10 USD.
         // numerator = 1e8 * 10e6 = 1e15.
-        // divisor = 10^(8+6-6) = 10^8.
-        // 1e15 / 1e8 = 1e7 = 10 USD (with 6 decimals). Correct.
+        // divisor = 10^(8+6-target) with target = `USD_DECIMALS`.
 
-        // With 10% haircut:
-        // multiplier = 10000 - 1000 = 9000
-        // numerator = 1e8 * 10e6 * 9000 = 9e18
-        // divisor = 10000 * 10^(8+6-6) = 1e4 * 1e8 = 1e12
-        // value = 9e18 / 1e12 = 9e6 = 9 USD. Correct.
+        // With 10% haircut, value is 9 USD in `USD_DECIMALS` base units.
 
         let haircut_multiplier = u128::from(BPS_BASE).saturating_sub(u128::from(haircut_bps));
 
@@ -431,7 +429,7 @@ mod tests {
         };
 
         let value_usd: u128 = value_usd_nat.0.try_into().unwrap();
-        assert_eq!(value_usd, 9_000_000); // $9 USD
+        assert_eq!(value_usd, 90_000); // $9 USD
     }
 
     #[test]

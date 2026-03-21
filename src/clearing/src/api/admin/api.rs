@@ -500,13 +500,13 @@ mod tests {
     #[test]
     fn withdraw_fund_resilience_on_transfer_failure() {
         let asset_id = AssetId::from("vUSD".to_owned());
-        let amount = 1_000_000; // $1
+        let amount = 10_000; // $1
 
         // Initialize insurance fund with $10
         INSURANCE_FUND.with(|f| {
             let mut f = f.borrow_mut();
             f.clear();
-            f.insert(asset_id.clone(), 10_000_000);
+            f.insert(asset_id.clone(), 100_000);
         });
 
         // Step 1: Deduct
@@ -514,27 +514,27 @@ mod tests {
         assert!(deduct_res.is_ok());
 
         INSURANCE_FUND.with(|f| {
-            assert_eq!(f.borrow().get(&asset_id).copied().unwrap(), 9_000_000);
+            assert_eq!(f.borrow().get(&asset_id).copied().unwrap(), 90_000);
         });
 
         // Step 2: In the new implementation we deliberately DO NOT rollback
         // upon transfer error. The internal fund deduction stands and Phase B
         // is not retried.
         INSURANCE_FUND.with(|f| {
-            assert_eq!(f.borrow().get(&asset_id).copied().unwrap(), 9_000_000);
+            assert_eq!(f.borrow().get(&asset_id).copied().unwrap(), 90_000);
         });
     }
 
     #[test]
     fn withdraw_fund_insufficient_funds() {
         let asset_id = AssetId::from("vUSD".to_owned());
-        let amount = 100_000_000; // $100
+        let amount = 1_000_000; // $100
 
         // Initialize treasury with $10
         TREASURY.with(|f| {
             let mut f = f.borrow_mut();
             f.clear();
-            f.insert(asset_id.clone(), 10_000_000);
+            f.insert(asset_id.clone(), 100_000);
         });
 
         // Try to deduct $100
@@ -546,7 +546,7 @@ mod tests {
 
         // Internal balance should remain untouched
         TREASURY.with(|f| {
-            assert_eq!(f.borrow().get(&asset_id).copied().unwrap(), 10_000_000);
+            assert_eq!(f.borrow().get(&asset_id).copied().unwrap(), 100_000);
         });
     }
 }

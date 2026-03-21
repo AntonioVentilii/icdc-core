@@ -58,7 +58,7 @@ pub struct LimitOrder {
     pub qty: i128,
     /// Limit price in the precision defined by the associated series (`series.price_precision`).
     pub price: Price,
-    /// Amount blocked in collateral (denominated in USD units, 6 decimals).
+    /// Amount blocked in collateral (denominated in USD base units, see `USD_DECIMALS`).
     pub blocked_margin_usd: u128,
     /// The balance domain this order belongs to.
     pub balance_domain: BalanceDomain,

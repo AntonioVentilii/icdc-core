@@ -234,10 +234,10 @@ fn migrate_domain_idempotent() {
 
     match state_pg {
         GetAccountStateResult::Ok(resp) => {
-            // 100 ICP at $15, 2% haircut = $1,470 (6-decimal USD)
+            // 100 ICP at $15, 2% haircut = $1,470 (4-decimal USD)
             assert_eq!(
                 resp.total_equity_usd,
-                Nat::from(1_470_000_000_u128),
+                Nat::from(14_700_000_u128),
                 "Equity should equal original deposit value (not doubled)"
             );
         }

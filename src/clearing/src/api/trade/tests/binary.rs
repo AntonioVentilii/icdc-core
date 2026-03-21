@@ -31,8 +31,8 @@ fn binary_lifecycle_scenario() {
     };
 
     setup_test_state(vec![
-        (seller, 20_000_000), // $20.00
-        (buyer, 10_000_000),  // $10.00
+        (seller, 200_000), // $20.00
+        (buyer, 100_000),  // $10.00
     ]);
 
     let price = Price::new(30_000_000, 8); // $0.30
@@ -56,8 +56,8 @@ fn binary_lifecycle_scenario() {
     // Verify State after Trade
     // Long (Buyer) cost: 10 * 0.30 = $3.00
     // Short (Seller) cost: 10 * (1.00 - 0.30) = $7.00
-    verify_cash_balance(buyer, 7_000_000); // 10 - 3 = 7
-    verify_cash_balance(seller, 13_000_000); // 20 - 7 = 13
+    verify_cash_balance(buyer, 70_000); // 10 - 3 = 7
+    verify_cash_balance(seller, 130_000); // 20 - 7 = 13
     verify_position_qty(buyer, &series_id, None, 10);
     verify_position_qty(seller, &series_id, None, -10);
 
@@ -68,8 +68,8 @@ fn binary_lifecycle_scenario() {
     // Final Balances:
     // Buyer: $7 (cash) + 10 * $1.00 (payoff) = $17.00 = 17,000,000
     // Seller: $13 (cash) + 10 * $0 (payoff) = $13.00 = 13,000,000
-    verify_cash_balance(buyer, 17_000_000);
-    verify_cash_balance(seller, 13_000_000);
+    verify_cash_balance(buyer, 170_000);
+    verify_cash_balance(seller, 130_000);
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn binary_settle_no() {
         balance_domain: BalanceDomain::Settlement,
     };
 
-    setup_test_state(vec![(seller, 20_000_000), (buyer, 10_000_000)]);
+    setup_test_state(vec![(seller, 200_000), (buyer, 100_000)]);
 
     let price = Price::new(30_000_000, 8);
     let qty = 10;
@@ -123,6 +123,6 @@ fn binary_settle_no() {
     // Final Balances:
     // Buyer: $7 (cash) + 10 * $0 (payoff) = $7.00 = 7,000,000
     // Seller: $13 (cash) + 10 * $1.00 (payoff for short on loss) = $23.00 = 23,000,000
-    verify_cash_balance(buyer, 7_000_000);
-    verify_cash_balance(seller, 23_000_000);
+    verify_cash_balance(buyer, 70_000);
+    verify_cash_balance(seller, 230_000);
 }

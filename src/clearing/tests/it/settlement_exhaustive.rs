@@ -123,9 +123,9 @@ fn exhaustive_settlement_journey() {
     };
 
     // A: PnL +25.00 USD. Fees -0.06. Final Cash = 24.94
-    assert_eq!(get_cash(user_a), 24_940_000);
+    assert_eq!(get_cash(user_a), 249_400);
     // B: PnL -20.00 USD. Fees -0.015. Final Cash = -20.015
-    assert_eq!(get_cash(user_b), -20_015_000);
+    assert_eq!(get_cash(user_b), -200_150);
 
     // 7. Settle Series 2 at 0.2
     let res2: SettleSeriesResult = env
@@ -143,12 +143,12 @@ fn exhaustive_settlement_journey() {
     env.pic.tick();
 
     // Final Cash Check (PnL - Fees)
-    assert_eq!(get_cash(user_c), -50_075_000);
-    assert_eq!(get_cash(user_d), 29_880_000);
-    assert_eq!(get_cash(user_e), 14_820_000);
+    assert_eq!(get_cash(user_c), -500_750);
+    assert_eq!(get_cash(user_d), 298_800);
+    assert_eq!(get_cash(user_e), 148_200);
 
     // Sum of all PnL should be 0 minus total fees
     let total_final_cash: i128 = users.iter().map(|u| get_cash(*u)).sum();
     // Total fees: 0.45 USD
-    assert_eq!(total_final_cash, -450_000);
+    assert_eq!(total_final_cash, -4_500);
 }

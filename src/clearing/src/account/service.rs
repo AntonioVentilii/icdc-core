@@ -154,10 +154,10 @@ mod tests {
         let worth = &response.assets[0];
         assert_eq!(worth.asset_id, "ICP");
         assert_eq!(worth.balance, 100_000_000);
-        assert_eq!(worth.pre_haircut_value_usd, 10_000_000); // $10
-        assert_eq!(worth.value_usd, 9_000_000); // $9
+        assert_eq!(worth.pre_haircut_value_usd, 100_000); // $10
+        assert_eq!(worth.value_usd, 90_000); // $9
         assert_eq!(worth.haircut_bps, 1000);
-        assert_eq!(response.total_equity_usd, 9_000_000);
+        assert_eq!(response.total_equity_usd, 90_000);
     }
 
     #[test]
@@ -208,8 +208,8 @@ mod tests {
         );
 
         let worth = &response.assets[0];
-        assert_eq!(worth.pre_haircut_value_usd, 3_000_000_000); // $3000
-        assert_eq!(worth.value_usd, 2_400_000_000); // $2400 (3000 * 0.8)
+        assert_eq!(worth.pre_haircut_value_usd, 30_000_000); // $3000
+        assert_eq!(worth.value_usd, 24_000_000); // $2400 (3000 * 0.8)
     }
 
     #[test]
@@ -256,8 +256,8 @@ mod tests {
         );
 
         let worth = &response.assets[0];
-        assert_eq!(worth.pre_haircut_value_usd, 1_000_000); // $1
-        assert_eq!(worth.value_usd, 1_000_000); // $1
+        assert_eq!(worth.pre_haircut_value_usd, 10_000); // $1
+        assert_eq!(worth.value_usd, 10_000); // $1
     }
 
     #[test]
@@ -305,10 +305,10 @@ mod tests {
         );
 
         let worth = &response.assets[0];
-        // 1 ICP * $3.00 = $3.00 = 3_000_000 (scaled to 6 USD decimals)
-        assert_eq!(worth.pre_haircut_value_usd, 3_000_000);
-        // After 90% haircut (10% value remaining): $3.00 * 0.1 = $0.30 = 300_000
-        assert_eq!(worth.value_usd, 300_000);
+        // 1 ICP * $3.00 = $3.00 = 30_000 (scaled to 4 USD decimals)
+        assert_eq!(worth.pre_haircut_value_usd, 30_000);
+        // After 90% haircut (10% value remaining): $3.00 * 0.1 = $0.30 = 3_000
+        assert_eq!(worth.value_usd, 3_000);
         assert_eq!(worth.haircut_bps, 9_000);
     }
 }

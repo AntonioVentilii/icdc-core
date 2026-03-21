@@ -18,7 +18,7 @@ fi
 export CLEARING_CANISTER
 
 # USD Configuration
-export USD_DECIMALS=6
+export USD_DECIMALS=4
 
 # --- Balance domains for register_icrc_asset.allowed_balance_domains (Candid) ---
 # Production-like collateral: Settlement only. Play/test tokens: Playground only.
@@ -36,7 +36,7 @@ if [[ -n "$VUSD_LEDGER_ID" ]]; then
   export VUSD_LEDGER="$VUSD_LEDGER_ID"
   export VUSD_DECIMALS=8
   export VUSD_HAIRCUT_BPS=0    # 0% haircut for USD stable
-  export VUSD_PRICE_E6=1000000 # 1 USD (6 decimals)
+  export VUSD_PRICE_E6=10000 # 1 USD (4 decimals)
 fi
 
 # TESTICP Token Configuration
@@ -45,7 +45,7 @@ export TESTICP_LEDGER="xafvr-biaaa-aaaai-aql5q-cai"
 export TESTICP_INDEX="qcuy6-bqaaa-aaaai-aqmqq-cai"
 export TESTICP_DECIMALS=8
 export TESTICP_HAIRCUT_BPS=1000 # 10%
-export TESTICP_PRICE_E6=3000000 # 3 USD (6 decimals)
+export TESTICP_PRICE_E6=30000 # 3 USD (4 decimals)
 
 # TICRC1 Token Configuration
 export TICRC1_SYMBOL="TICRC1"
@@ -53,7 +53,7 @@ export TICRC1_LEDGER="3jkp5-oyaaa-aaaaj-azwqa-cai"
 export TICRC1_INDEX="qzre3-3iaaa-aaaai-aqmsa-cai"
 export TICRC1_DECIMALS=8
 export TICRC1_HAIRCUT_BPS=2500 # 25%
-export TICRC1_PRICE_E6=500000  # 0.5 USD (6 decimals)
+export TICRC1_PRICE_E6=5000 # 0.5 USD (4 decimals)
 
 # Shared Minting Account
 export TEST_MINTING_ACCOUNT="bnuz2-zaaaa-aaaal-arrba-cai"
