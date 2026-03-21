@@ -3,7 +3,7 @@ use serde::Serialize;
 
 use crate::api::trade::errors::TradeError;
 
-/// Result of a matched trade submission.
+/// Outcome of a matched trade submission.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum SubmitMatchedTradeResult {
     /// Returns `true` if the trade was successfully processed.
@@ -20,7 +20,7 @@ impl From<Result<bool, TradeError>> for SubmitMatchedTradeResult {
     }
 }
 
-/// Result of a position transfer acceptance.
+/// Outcome of a position transfer acceptance.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum AcceptPositionTransferResult {
     /// Returns `true` if the transfer was successfully accepted and processed.

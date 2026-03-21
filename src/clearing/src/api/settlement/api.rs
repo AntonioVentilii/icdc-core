@@ -2,10 +2,7 @@ use core::{cell::RefCell, time::Duration};
 use std::collections::{BTreeMap, HashMap};
 
 use candid::Principal;
-use ic_cdk::{
-    api::{instruction_counter, is_controller},
-    call, caller, spawn,
-};
+use ic_cdk::api::{instruction_counter, is_controller, msg_caller};
 use ic_cdk_macros::{query, update};
 use ic_cdk_timers::set_timer;
 use shared::types::{BalanceDomain, Series, SeriesId, SettlementInput};
@@ -27,7 +24,7 @@ use crate::{
         },
         user::User,
     },
-    utils::vusd::get_internal_asset_id,
+    utils::{registry, vusd::get_internal_asset_id},
 };
 
 /// Settles a derivative series at a specific price.
@@ -47,7 +44,7 @@ use crate::{
 /// the series. Unauthorized callers are rejected even if a plan already exists.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
-    let caller = caller();
+    let caller = msg_caller();
 
     // ---------- Full authorization on EVERY call ----------
     // Controllers are always authorized.
@@ -84,23 +81,12 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             return SettleSeriesResult::Err(SettlementError::Common(CommonError::RegistryNotSet));
         }
 
-        let is_authorized: Result<(bool,), _> = call(
-            registry_canister,
-            "is_oracle_authorized",
-            (oracle_source, caller),
-        )
-        .await;
-
-        match is_authorized {
-            Ok((true,)) => {} // authorized
-            Ok((false,)) => {
+        match registry::is_oracle_authorized(registry_canister, oracle_source, caller).await {
+            Ok(true) => {}
+            Ok(false) => {
                 return SettleSeriesResult::Err(SettlementError::Common(CommonError::Unauthorized));
             }
-            Err((code, msg)) => {
-                return SettleSeriesResult::Err(SettlementError::Common(CommonError::Internal(
-                    format!("Registry call failed: {code:?} - {msg}"),
-                )));
-            }
+            Err(e) => return SettleSeriesResult::Err(SettlementError::Common(e)),
         }
     }
 
@@ -110,17 +96,15 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 /// Returns the full settlement plan including per-position accounting details (admin only).
 #[query(guard = "caller_is_controller")]
 #[must_use]
-#[expect(clippy::needless_pass_by_value)]
 pub fn get_settlement_plan(series_id: SeriesId) -> Option<SettlementPlan> {
-    SETTLEMENT_PLANS.with(|m| m.borrow().get(&series_id).cloned())
+    SETTLEMENT_PLANS.with(move |m| m.borrow().get(&series_id).cloned())
 }
 
 /// Returns the public settlement progress for a derivative series without exposing user positions.
 #[query(guard = "caller_is_not_anonymous")]
 #[must_use]
-#[expect(clippy::needless_pass_by_value)]
 pub fn get_settlement_status(series_id: SeriesId) -> Option<SettlementStatusView> {
-    SETTLEMENT_PLANS.with(|m| m.borrow().get(&series_id).map(SettlementStatusView::from))
+    SETTLEMENT_PLANS.with(move |m| m.borrow().get(&series_id).map(SettlementStatusView::from))
 }
 
 /// Admin function to manually resume a stuck settlement plan, e.g., if the timer was dropped during
@@ -242,10 +226,8 @@ pub(crate) async fn settle_series_inner(params: SettleSeriesParams) -> SettleSer
                 settlement: settlement.clone(),
             };
 
-            set_timer(Duration::from_millis(50), move || {
-                spawn(async move {
-                    let _ = settle_series_inner(params_clone).await;
-                });
+            set_timer(Duration::from_millis(50), async move {
+                let _ = settle_series_inner(params_clone).await;
             });
 
             Ok(SettleSeriesResult::processing())

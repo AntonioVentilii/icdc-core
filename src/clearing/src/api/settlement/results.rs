@@ -3,7 +3,7 @@ use serde::Serialize;
 
 use super::errors::SettlementError;
 
-/// Result of a derivative series settlement request.
+/// Outcome of a derivative series settlement request.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum SettleSeriesResult {
     /// Settlement plan was successfully created and all processing is complete.

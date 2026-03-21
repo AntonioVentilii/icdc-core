@@ -2,7 +2,7 @@ use core::cell::RefCell;
 use std::collections::BTreeMap;
 
 use candid::Nat;
-use ic_cdk::{api::is_controller, caller};
+use ic_cdk::api::{is_controller, msg_caller};
 use ic_cdk_macros::query;
 use serde_bytes::ByteBuf;
 use shared::types::{Asset, AssetId, CollateralAssetConfig};
@@ -170,9 +170,8 @@ pub fn metrics() -> String {
 /// This endpoint is restricted to canister controllers and serves metrics at `/metrics`.
 #[query]
 #[must_use]
-#[expect(clippy::needless_pass_by_value)]
-pub fn http_request(req: HttpRequest) -> HttpResponse {
-    if req.method != "GET" || req.url != "/metrics" {
+pub fn http_request(HttpRequest { method, url, .. }: HttpRequest) -> HttpResponse {
+    if method != "GET" || url != "/metrics" {
         return HttpResponse {
             status_code: 404,
             headers: vec![],
@@ -180,7 +179,7 @@ pub fn http_request(req: HttpRequest) -> HttpResponse {
         };
     }
 
-    if !is_controller(&caller()) {
+    if !is_controller(&msg_caller()) {
         return HttpResponse {
             status_code: 403,
             headers: vec![],

@@ -1,10 +1,10 @@
 use candid::Principal;
-use ic_cdk::id;
+use ic_cdk::api::canister_self;
 use sha2::{Digest as _, Sha256};
 
 /// Derives the subaccount for a user in the current canister.
 pub(crate) fn derive_user_subaccount(user: Principal) -> [u8; 32] {
-    derive_user_subaccount_for_canister(id(), user)
+    derive_user_subaccount_for_canister(canister_self(), user)
 }
 
 /// Derives a consistent subaccount for a user in a target canister using a salt.

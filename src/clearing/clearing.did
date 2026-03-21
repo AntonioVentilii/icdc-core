@@ -1,51 +1,114 @@
-type AcceptPositionTransferResult = variant { Ok : bool; Err : TradeError };
+// Outcome of a position transfer acceptance.
+type AcceptPositionTransferResult = variant {
+	// Returns `true` if the transfer was successfully accepted and processed.
+	Ok : bool;
+	// Failed to accept the position transfer.
+	Err : TradeError
+};
+// Represents a user's account state in the clearing system.
 type AccountState = record {
+	// The owner of the account.
 	user : principal;
+	// The total required margin reserved for current activity, scoped by domain.
 	reserved_margins_usd : vec record { BalanceDomain; nat };
+	// Internal realised `PnL` / debt / credits, scoped by domain.
 	cash_balances_usd : vec record { BalanceDomain; int };
+	// Real deposited collateral assets and their balances, scoped by domain.
 	balances : vec record { BalanceDomain; vec record { text; nat } }
 };
+// Errors related to account state retrieval or state.
 type AccountStateError = variant {
+	// Overflow during account state calculation.
 	MathOverflow;
+	// An error occurred while interacting with the asset.
 	Asset : AssetError;
+	// No account state exists for the specified user.
 	NoAccountStateFound
 };
+// Enhanced response for account state with calculated USD values.
 type AccountStateResponse = record {
+	// Detailed worth of each collateral asset.
 	assets : vec AssetWorth;
+	// The raw account state.
 	state : AccountState;
+	// Total equity in USD (cash balance + sum of collateral values).
 	total_equity_usd : nat;
+	// Available equity in USD (total equity - reserved margin).
 	available_margin_usd : int
 };
+// Represents a supported asset in the ICDC ecosystem.
 type Asset = variant {
+	// An ERC-20 token on an EVM-compatible chain.
 	Erc20 : ErcToken;
+	// An ICRC-compliant token identified by its canister [`Principal`].
 	Icrc : principal;
+	// A native asset on an EVM-compatible chain.
 	NativeEvm : NativeEvmAsset
 };
+// Errors related to Asset interactions.
 type AssetError = variant {
+	// Failed to transfer tokens/assets.
 	TransferError : text;
-	InsufficientBalance : record { balance : nat; required : nat };
+	// The account has insufficient funds for the operation.
+	InsufficientBalance : record {
+		// The current balance of the account.
+		balance : nat;
+		// The amount required for the operation.
+		required : nat
+	};
+	// Overflow during internal balance calculations.
 	MathOverflow;
+	// The asset identifier is invalid or incorrectly formatted.
 	InvalidAssetId : text;
-	CallError : record { method : text; code : int32; message : text };
+	// A cross-canister or RPC call failed.
+	CallError : record {
+		// The name of the method that failed.
+		method : text;
+		// The rejection code from the IC or error code from RPC.
+		code : int32;
+		// The rejection/error message.
+		message : text
+	};
+	// The asset variant is incompatible with the current handler.
 	InvalidAssetForHandler;
+	// The specified asset is not supported.
 	UnsupportedAsset
 };
+// Dynamic metrics and risk parameters for a collateral asset.
 type AssetMetrics = record {
+	// Haircut in basis points (e.g., 1000 = 10% haircut, 90% value).
 	haircut_bps : nat16;
+	// Latest known transfer fee for the asset.
 	latest_transfer_fee : opt nat;
+	// Optional asset-specific insurance fund fee ratio in basis points.
 	insurance_fee_ratio : opt nat16;
+	// Last time the asset metrics were updated (in nanoseconds).
 	last_updated_ns : opt nat64;
+	// Optional asset-specific protocol fee ratio in basis points.
 	protocol_fee_ratio : opt nat16;
+	// Oracle-updated price in USD (canonical accounting unit).
 	price_usd : DecimalValue
 };
+// Represents the worth of a specific asset in the user's account.
 type AssetWorth = record {
+	// The USD value of the balance (before haircut).
 	pre_haircut_value_usd : nat;
+	// The applied haircut in basis points.
 	haircut_bps : nat16;
+	// The raw balance of the asset.
 	balance : nat;
+	// The USD value of the balance (including haircut).
 	value_usd : nat;
+	// The unique identifier of the asset.
 	asset_id : text
 };
-type BalanceDomain = variant { Playground; Settlement };
+// Represents a distinct domain for balances and trading logic.
+type BalanceDomain = variant {
+	// Non-collateralized trading (e.g., using VICI).
+	Playground;
+	// Real collateralized trading (e.g., using ckUSDC, ICP).
+	Settlement
+};
 type CancelFundWithdrawalError = variant {
 	PlanNotFound;
 	InvalidPlanStatus;
@@ -56,121 +119,248 @@ type CancelFundWithdrawalResult = variant {
 	Ok;
 	Err : CancelFundWithdrawalError
 };
-type CancelLimitOrderParams = record { order_id : text };
+// Input parameters for cancelling a limit order.
+type CancelLimitOrderParams = record {
+	// Unique identifier for the order to cancel.
+	order_id : text
+};
+// Configuration for a supported collateral asset.
 type CollateralAssetConfig = record {
+	// The number of decimal places defined by the underlying ledger.
 	decimals : nat8;
+	// The underlying configuration required to interact with the asset's ledger.
 	asset : Asset;
+	// Whether the asset is currently enabled for deposits.
 	is_enabled : bool;
+	// Balance domains where this asset may be deposited or withdrawn.
+	//
+	// Defaults to both domains when deserializing legacy state.
 	allowed_balance_domains : vec BalanceDomain;
+	// Identifier of the oracle responsible for updating this asset's metrics.
 	oracle_id : opt text;
+	// The canonical identifier for this asset within the clearing protocol.
 	asset_id : text;
+	// The ticker symbol used for display purposes.
 	symbol : text
 };
+// Combined structure for public consumption of asset information.
 type CollateralAssetInfo = record {
 	metrics : opt AssetMetrics;
 	config : CollateralAssetConfig
 };
+// Generic errors that can occur across multiple modules.
 type CommonError = variant {
+	// An unexpected internal error occurred.
 	Internal : text;
+	// The input provided for the request is invalid.
 	InvalidInput : text;
+	// A mathematical calculation resulted in an overflow or underflow.
 	MathOverflow;
+	// The caller does not have permission to perform this action.
 	Unauthorized;
+	// The registry canister principal has not been configured.
 	RegistryNotSet
 };
+// Global configuration for the Clearing canister.
 type Config = record {
+	// The global insurance fund fee ratio in basis points (1 bp = 0.01%).
 	insurance_fund_fee_ratio : nat16;
+	// The comprehensive configuration for the internal accounting ledger (vUSD).
 	internal_ledger : CollateralAssetConfig;
+	// The principal of the Chain Fusion Signer canister.
 	signer_canister : principal;
+	// The economic epoch version.
 	version : nat32;
+	// The principal of the EVM RPC canister.
 	evm_rpc : principal;
+	// The global protocol fee ratio (Treasury) in basis points.
 	protocol_fee_ratio : nat16
 };
-type DecimalValue = record { decimals : nat8; value : nat };
+// A generic representation of a decimal value with fixed precision.
+// This decouples numeric logic from domain-specific types like Price or Quantity.
+type DecimalValue = record {
+	// The number of decimal places (exponent).
+	decimals : nat8;
+	// The numeric value (mantissa).
+	value : nat
+};
+// Errors occurring during collateral deposit.
 type DepositCollateralError = variant {
+	// The asset is not permitted in this balance domain.
 	DomainNotAllowed : record { domain : BalanceDomain; asset_id : text };
+	// Overflow during collateral calculation.
 	MathOverflow;
+	// An error occurred while interacting with the asset.
 	Asset : AssetError
 };
+// Input parameters for depositing collateral.
 type DepositCollateralParams = record {
+	// Unique identifier for the deposit operation.
 	deposit_id : text;
+	// The specific balance domain to deposit into (defaults to Settlement).
 	domain : opt BalanceDomain;
+	// The unique identifier of the asset to deposit.
 	asset_id : text;
+	// The amount of the asset to deposit.
 	amount : nat
 };
-type DepositCollateralResult = variant { Ok; Err : DepositCollateralError };
+// Outcome of a collateral deposit operation.
+type DepositCollateralResult = variant {
+	// Deposit was successfully planned or executed.
+	Ok;
+	// Failed to process deposit.
+	Err : DepositCollateralError
+};
+// A multiformat description.
+// Provides multiple versions of the same content for different rendering environments.
 type Description = record {
+	// Optional HTML version of the description.
 	html : opt text;
+	// Optional markdown version of the description.
 	markdown : opt text;
+	// The mandatory plain text description.
 	plain : text
 };
+// Configurable policy for a balance domain.
+//
+// Controls domain-specific behavior such as fee ratios and feature flags.
+// Both domains default to identical policies so risk enforcement is uniform.
 type DomainPolicy = record {
+	// Whether deposits of real collateral assets are accepted in this domain.
 	deposits_enabled : bool;
+	// Optional override for the protocol fee ratio (bps).
+	// When `None`, the global `Config` value is used.
 	protocol_fee_ratio_override : opt nat16;
+	// Human-readable label for this domain.
 	label : text;
+	// Whether withdrawals of real collateral assets are allowed from this domain.
 	withdrawals_enabled : bool;
+	// Optional override for the insurance fund fee ratio (bps).
+	// When `None`, the global `Config` value is used.
 	insurance_fund_fee_ratio_override : opt nat16
 };
+// Represents an ERC-20 token on a specific EVM chain.
 type ErcToken = record {
+	// The number of decimals the token uses (e.g., 18 for ETH, 6 for USDC).
 	decimals : nat8;
+	// The contract address of the token.
 	token_address : text;
+	// The ID of the EVM chain where the token is deployed.
 	chain_id : nat64
 };
+// A recorded event in the clearing system.
 type Event = record {
+	// The quantity involved in the event.
 	qty : int;
+	// The series ID associated with the event.
 	series_id : text;
+	// The user associated with the event.
 	user : principal;
+	// Timestamp in nanoseconds since UNIX epoch.
 	timestamp : nat64;
+	// Unique identifier for the event.
 	event_id : nat64;
+	// The price at which the event occurred (if applicable).
 	price : Price;
+	// The type of the event.
 	event_type : EventType;
+	// The principal of the clearing canister.
 	clearing_id : principal
 };
-type EventType = variant { OrderPlaced; Executed; Liquidated; Settled };
+// Categories of significant events in the clearing system.
+type EventType = variant {
+	// A new order was recorded.
+	OrderPlaced;
+	// A trade was matched and executed.
+	Executed;
+	// A position was liquidated due to insufficient margin.
+	Liquidated;
+	// A series was settled.
+	Settled
+};
 type FiatUnit = variant { Chf; Eur; Gbp; Usd };
+// Input parameters for freezing a position to prepare for a cross-canister transfer.
 type FreezePositionForTransferParams = record {
+	// The specific outcome for categorical markets.
 	outcome_id : opt text;
+	// The derivative series identifier.
 	series_id : text;
+	// The user whose position is being frozen.
 	user : principal;
+	// Unique identifier for the transfer operation.
 	transfer_id : text;
+	// Optional valuation price to include in the proof.
 	valuation_price : opt Price
 };
 type FundType = variant { Insurance; Treasury };
+// Input parameters for retrieving an account state.
 type GetAccountStateParams = record {
+	// The specific balance domain to query (defaults to Settlement if not provided).
 	domain : opt BalanceDomain;
+	// Whether to force a recalculation of the margin status (e.g. refresh from ledgers).
 	refresh : opt bool
 };
+// Outcome of an account state retrieval request.
 type GetAccountStateResult = variant {
+	// Successfully retrieved the account state details.
 	Ok : AccountStateResponse;
+	// Failed to retrieve the account state.
 	Err : AccountStateError
 };
 type GetFundsResult = record {
 	insurance_fund : vec record { text; nat };
 	treasury : vec record { text; nat }
 };
-type GetPositionParams = record { outcome_id : opt text; series_id : text };
+// Input parameters for retrieving a user's position in a series.
+type GetPositionParams = record {
+	// Optional outcome identifier for categorical markets.
+	outcome_id : opt text;
+	// The derivative series identifier.
+	series_id : text
+};
+// Represents an incoming HTTP request to the canister.
 type HttpRequest = record {
+	// The URL of the request.
 	url : text;
+	// The HTTP method (e.g., "GET", "POST").
 	method : text;
+	// The request body.
 	body : blob;
+	// The request headers.
 	headers : vec record { text; text }
 };
+// Represents an HTTP response from the canister.
 type HttpResponse = record {
+	// The response body.
 	body : blob;
+	// The response headers.
 	headers : vec record { text; text };
+	// The HTTP status code.
 	status_code : nat16
 };
+// Represents a limit order stored in the clearing canister.
 type LimitOrder = record {
+	// Number of Series Units (contracts), where 1 unit represents exposure to 1.0 of the
+	// underlying asset. This value must always be positive; the direction (buy/long vs
+	// sell/short) is determined by the `side` field.
 	qty : int;
 	creator : principal;
 	outcome_id : opt text;
+	// Amount blocked in collateral (denominated in USD base units, see `USD_DECIMALS`).
 	blocked_margin_usd : nat;
 	series_id : text;
 	side : Side;
 	order_id : text;
+	// Limit price in the precision defined by the associated series (`series.price_precision`).
 	price : Price;
+	// The balance domain this order belongs to.
 	balance_domain : BalanceDomain
 };
-type ListOrdersParams = record { series_id : opt text };
+// Input parameters for listing active limit orders.
+type ListOrdersParams = record {
+	// Optional series identifier to filter orders.
+	series_id : opt text
+};
 type MigrateDomainParams = record {
 	from_domain : BalanceDomain;
 	migration_id : text;
@@ -183,45 +373,101 @@ type MigrationError = variant {
 	InFlightPlansExist;
 	Common : CommonError
 };
-type NativeEvmAsset = record { decimals : nat8; chain_id : nat64 };
+// Represents a native asset on an EVM-compatible chain
+// (for example ETH on Ethereum/Base, POL on Polygon, or BNB on BSC).
+type NativeEvmAsset = record {
+	// The number of decimals the native asset uses.
+	decimals : nat8;
+	// The EVM chain where this native asset is used.
+	chain_id : nat64
+};
 type NonMonetaryUnit = variant { Points };
+// Metadata for a specific outcome in a categorical market.
 type Outcome = record {
+	// The unique identifier of the outcome.
 	id : text;
+	// A short title for the outcome (e.g., "Yes", "No", "Team A").
 	title : text;
+	// An optional detailed description of the outcome.
 	description : opt Description;
+	// An optional icon URL for the outcome.
 	icon_url : opt text
 };
-type PaymentIdempotency = variant { IcrcCreatedAtTimeNs : nat64 };
-type PayoffType = variant { Put; Binary; Call; Categorical };
+// Mechanism for ensuring idempotency in ledger payments.
+type PaymentIdempotency = variant {
+	// Uses the ICRC `created_at_time` field to prevent duplicate transfers.
+	IcrcCreatedAtTimeNs : nat64
+};
+// Defines the payoff structure for a derivative contract.
+type PayoffType = variant {
+	// Payoff based on the positive difference between strike and underlying price.
+	Put;
+	// A fixed payoff if the condition is met (all-or-nothing).
+	Binary;
+	// Payoff based on the positive difference between underlying price and strike.
+	Call;
+	// A categorical market with multiple mutually exclusive outcomes.
+	Categorical
+};
 type PayoutUnit = variant {
 	Fiat : FiatUnit;
 	Asset : Asset;
 	NonMonetary : NonMonetaryUnit
 };
-type PlanStatus = variant { Finalised; Planned; Executing };
+// The execution status of a background operation plan.
+type PlanStatus = variant {
+	// The plan has been successfully completed.
+	Finalised;
+	// The plan is created but execution has not started.
+	Planned;
+	// The plan is currently being executed.
+	Executing
+};
+// Represents an open position in a derivative series for a specific user.
 type Position = record {
+	// The specific outcome for categorical markets.
 	outcome_id : opt text;
+	// The unique identifier of the derivative series.
 	series_id : text;
+	// The net quantity of the position (positive for Long, negative for Short).
 	net_qty : int;
+	// The user who owns the position.
 	user : principal;
+	// The amount of margin reserved for this specific position in USD.
 	reserved_margin_usd : nat
 };
+// A cryptographically signed proof of an open position, used for cross-canister transfers.
 type PositionProof = record {
+	// The quantity of the position.
 	qty : int;
+	// The cryptographic signature of the proof data.
 	signature : blob;
+	// The specific outcome for categorical markets.
 	outcome_id : opt text;
+	// The unique identifier of the derivative series.
 	series_id : text;
+	// The user whose position is being proven.
 	user : principal;
+	// Unique identifier for the transfer operation.
 	transfer_id : text;
+	// Optional valuation price for the position.
 	valuation_price : opt Price;
+	// The principal of the clearing canister that issued the proof.
 	clearing_id : principal
 };
+// Encapsulates a price with its numerical value and domain-specific metadata.
+// Decouples the mathematical representation (`DecimalValue`) from the
+// reporting context (timestamp, oracle Source).
 type Price = record {
+	// Optional timestamp when this price was generated/observed.
 	timestamp : opt nat64;
+	// Optional identifier for the oracle source.
 	oracle_id : opt text;
+	// The numeric component of the price.
 	decimal : DecimalValue
 };
 type RegisterIcrcAssetError = variant {
+	// `allowed_balance_domains` was empty or could not be normalized.
 	InvalidAllowedBalanceDomains;
 	AssetAlreadyExists;
 	VusdCannotBeCollateral;
@@ -230,59 +476,114 @@ type RegisterIcrcAssetError = variant {
 type RegisterIcrcAssetParams = record {
 	haircut_bps : nat16;
 	is_enabled : bool;
+	// Non-empty. Duplicates are removed. Order is normalized for stable storage.
 	allowed_balance_domains : vec BalanceDomain;
 	ledger_id : principal;
 	oracle_id : opt text;
 	asset_id : text
 };
 type RegisterIcrcAssetResult = variant { Ok; Err : RegisterIcrcAssetError };
+// Defines a specific derivative series (contract).
 type Series = record {
+	// A short, descriptive title for the series.
 	title : text;
+	// Target price for options, if applicable.
 	strike : opt Price;
+	// The principal identifier of the series creator.
 	creator : principal;
+	// The mathematical payoff model used for this series.
 	payoff_type : PayoffType;
+	// The unit in which the contract payoff is expressed.
 	payout_unit : PayoutUnit;
+	// Expiry timestamp in nanoseconds since UNIX epoch.
 	expiry_ns : nat64;
+	// An optional banner URL for the market.
 	banner_url : opt text;
+	// Unique identifier computed from series parameters.
 	series_id : text;
+	// The underlying asset ticker or identifier (e.g., "ICP/USD").
 	underlying : text;
+	// A detailed description of the series.
 	description : Description;
+	// The defined outcomes for categorical markets (ordered).
 	outcomes : opt vec Outcome;
+	// Timestamp of series creation in nanoseconds since UNIX epoch.
 	created_at_ns : nat64;
+	// An optional icon URL for the market.
 	icon_url : opt text;
+	// The canonical number of decimals used for prices and strikes in this series.
 	price_precision : nat8;
+	// The domain this market belongs to (e.g. Playground, Settlement).
 	balance_domain : BalanceDomain;
+	// The identifier of the oracle providing the settlement data.
 	oracle_source : text
 };
+// Input parameters for initiating a series settlement.
 type SettleSeriesParams = record {
+	// The derivative series identifier.
 	series_id : text;
+	// The final settlement data from the oracle.
 	settlement : SettlementInput
 };
-type SettleSeriesResult = variant { Ok; Err : SettlementError; Processing };
+// Outcome of a derivative series settlement request.
+type SettleSeriesResult = variant {
+	// Settlement plan was successfully created and all processing is complete.
+	Ok;
+	// Failed to initiate settlement.
+	Err : SettlementError;
+	// The settlement is in progress but incomplete due to processing limits.
+	// The caller should call `settle_series` again to continue.
+	Processing
+};
+// Errors occurring during derivative series settlement.
 type SettlementError = variant {
+	// Settlement price inconsistent with already executing plan.
 	InconsistentSettlementPrice : record { requested : Price; existing : Price };
+	// Overflow during settlement calculation.
 	MathOverflow;
+	// Total net payoffs (post-fee) exceed global system equity (system insolvency).
 	SolvencyViolation : record {
 		total_net_payoff : nat;
 		total_collateral_usd : nat
 	};
+	// An error occurred while interacting with the asset.
 	Asset : AssetError;
+	// A common error occurred.
 	Common : CommonError
 };
-type SettlementInput = variant { Price : Price; Outcome : text };
+// Input data for settling a series.
+type SettlementInput = variant {
+	// Final price for scalar markets (Binary, Call, Put).
+	Price : Price;
+	// Resolved winner for categorical markets.
+	Outcome : text
+};
+// A plan for processing a derivative series settlement in the background.
 type SettlementPlan = record {
+	// Current execution status of the plan.
 	status : PlanStatus;
+	// Base idempotency key in nanoseconds.
 	idempotency_ns : PaymentIdempotency;
+	// The unique identifier of the derivative series.
 	series_id : text;
+	// The protocol fee (in USD units).
 	fee_usd : nat;
+	// Tracks progress through accounting updates.
 	accounting_cursor : nat64;
+	// The insurance fee (in USD units).
 	insurance_fee_usd : nat;
+	// Detailed position snapshots and accounting updates.
 	positions : vec SettlementPosition;
+	// Whether all accounting updates have been applied to account states.
 	accounting_applied : bool;
+	// The domain of the series being settled.
 	balance_domain : BalanceDomain;
+	// The oracle source identifier for authorization.
 	oracle_source : text;
+	// The final settlement data.
 	settlement : SettlementInput
 };
+// Snapshot of a single user's position and its settlement accounting.
 type SettlementPosition = record {
 	outcome_id : opt text;
 	net_qty : int;
@@ -290,6 +591,7 @@ type SettlementPosition = record {
 	reserved_margin_usd : nat;
 	cashflow_usd : int
 };
+// Public settlement progress for a derivative series.
 type SettlementStatusView = record {
 	status : PlanStatus;
 	series_id : text;
@@ -302,52 +604,104 @@ type SettlementStatusView = record {
 	total_positions : nat64;
 	settlement : SettlementInput
 };
+// Represents the side of an order or trade.
 type Side = variant { Buy; Sell };
+// Represents structured statistics for the clearing system.
 type Stats = record {
+	// Total number of unique margin accounts.
 	total_users : nat64;
+	// Total collateral balance in margin accounts per asset.
 	margin_balances : vec record { Asset; nat };
+	// Total collateral locked across all positions.
 	total_collateral_locked : nat;
+	// Total number of executed trades.
 	total_trades : nat64;
+	// Total number of derivative series.
 	total_series : nat64;
+	// Total absolute open interest across all series.
 	open_interest : nat;
+	// Total number of events per type.
 	event_counts : vec record { text; nat64 }
 };
+// Input parameters for submitting a limit order.
 type SubmitLimitOrderParams = record {
+	// The quantity of the order. Must be positive.
 	qty : int;
+	// The specific outcome for categorical markets.
 	outcome_id : opt text;
+	// The derivative series identifier.
 	series_id : text;
+	// The side of the order (Buy or Sell).
 	side : Side;
+	// Unique identifier for the order.
 	order_id : text;
+	// The limit price of the order.
 	price : Price
 };
+// Input parameters for submitting a market order (taking an existing limit order).
 type SubmitMarketOrderParams = record {
+	// Unique identifier for the trade resulting from this match.
 	trade_id : text;
+	// The identifier of the limit order to be matched.
 	matching_order_id : text
 };
+// Input parameters for submitting a matched trade from an exchange.
 type SubmitMatchedTradeParams = record {
+	// The quantity of the trade. Must be positive.
 	qty : int;
+	// Unique identifier for the trade provided by the exchange.
 	trade_id : text;
+	// The specific outcome for categorical markets.
 	outcome_id : opt text;
+	// The derivative series identifier.
 	series_id : text;
+	// The user opening or increasing a Short position (seller).
 	seller : principal;
+	// Optional amount to atomically unblock for the buyer.
 	buyer_unblock_amount : opt nat;
+	// The user opening or increasing a Long position (buyer).
 	buyer : principal;
+	// The execution price of the trade.
 	price : Price;
+	// Optional amount to atomically unblock for the seller.
 	seller_unblock_amount : opt nat
 };
-type SubmitMatchedTradeResult = variant { Ok : bool; Err : TradeError };
+// Outcome of a matched trade submission.
+type SubmitMatchedTradeResult = variant {
+	// Returns `true` if the trade was successfully processed.
+	Ok : bool;
+	// Failed to submit or match the trade.
+	Err : TradeError
+};
+// Errors occurring during trade submission or matching.
 type TradeError = variant {
+	// A user tried to trade with themselves.
 	SelfTradingNotAllowed;
+	// The specified order was not found.
 	OrderNotFound : text;
-	ArbitrageLimitExceeded : record { limit_usd : nat; sum_usd : nat };
+	// The trade would violate the no-arbitrage principle (e.g., sum of outcome prices > 1.0).
+	ArbitrageLimitExceeded : record {
+		// The hard limit (usually 1.0 USD).
+		limit_usd : nat;
+		// The current sum of best bids across all outcomes.
+		sum_usd : nat
+	};
+	// Failed to communicate with the registry canister.
 	RegistryError : text;
+	// The user has insufficient margin to open or maintain the position.
 	InsufficientMargin : record {
+		// Current margin balance.
 		balance : nat;
+		// The user whose margin is insufficient.
 		user : principal;
+		// Required margin for the trade.
 		required : nat
 	};
+	// The caller is not the creator of the order.
 	NotOrderCreator;
+	// The specified series was not found in the registry.
 	SeriesNotFound : text;
+	// A common error occurred.
 	Common : CommonError
 };
 type UpdateAssetMetricsParams = record {
@@ -379,19 +733,40 @@ type UpdateDomainPolicyParams = record {
 	domain : BalanceDomain;
 	policy : DomainPolicy
 };
+// Errors occurring during collateral withdrawal.
 type WithdrawCollateralError = variant {
-	InsufficientExcessMargin : record { requested : nat; available : nat };
+	// The user does not have enough excess margin to withdraw the requested amount.
+	InsufficientExcessMargin : record {
+		// The amount requested to be withdrawn.
+		requested : nat;
+		// Current excess margin available for withdrawal.
+		available : nat
+	};
+	// The asset is not permitted in this balance domain.
 	DomainNotAllowed : record { domain : BalanceDomain; asset_id : text };
+	// Overflow during collateral calculation.
 	MathOverflow;
+	// An error occurred while interacting with the asset.
 	Asset : AssetError
 };
+// Input parameters for withdrawing collateral.
 type WithdrawCollateralParams = record {
+	// The specific balance domain to withdraw from (defaults to Settlement).
 	domain : opt BalanceDomain;
+	// Unique identifier for the withdrawal operation.
 	withdrawal_id : text;
+	// The unique identifier of the asset to withdraw.
 	asset_id : text;
+	// The amount of the asset to withdraw.
 	amount : nat
 };
-type WithdrawCollateralResult = variant { Ok; Err : WithdrawCollateralError };
+// Outcome of a collateral withdrawal operation.
+type WithdrawCollateralResult = variant {
+	// Withdrawal was successfully planned or executed.
+	Ok;
+	// Failed to process withdrawal.
+	Err : WithdrawCollateralError
+};
 type WithdrawFundError = variant {
 	TransferFailed : text;
 	InsufficientFunds;

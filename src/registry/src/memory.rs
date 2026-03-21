@@ -22,7 +22,7 @@ pub fn save_state() {
     );
 
     storage::stable_save(state)
-        .unwrap_or_else(|e| trap(&format!("Failed to save to stable storage: {e:?}",)));
+        .unwrap_or_else(|e| trap(format!("Failed to save to stable storage: {e:?}")));
 }
 
 pub fn restore_state() {
@@ -31,7 +31,7 @@ pub fn restore_state() {
         BTreeMap<String, Oracle>,
         BTreeMap<Principal, bool>,
     ) = storage::stable_restore()
-        .unwrap_or_else(|e| trap(&format!("Failed to restore from stable storage: {e:?}")));
+        .unwrap_or_else(|e| trap(format!("Failed to restore from stable storage: {e:?}")));
 
     SERIES_STORE.with(|w| *w.borrow_mut() = series);
     ORACLE_STORE.with(|w| *w.borrow_mut() = oracles);

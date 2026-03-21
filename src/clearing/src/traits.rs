@@ -1,4 +1,4 @@
-use ic_cdk::id;
+use ic_cdk::api::canister_self;
 use icrc_ledger_types::icrc1::account::{Account, Subaccount};
 
 use crate::{types::user::User, utils::account::derive_user_subaccount};
@@ -19,7 +19,7 @@ impl ClearingAccountExt for User {
     fn clearing_account(&self) -> Account {
         // Delegate to custody_subaccount (single canonical derivation)
         Account {
-            owner: id(),
+            owner: canister_self(),
             subaccount: Some(self.clearing_subaccount()),
         }
     }

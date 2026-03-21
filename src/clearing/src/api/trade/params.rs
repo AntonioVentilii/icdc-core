@@ -46,7 +46,6 @@ pub struct SubmitMatchedTradeParams {
     pub buyer: User,
     /// The user opening or increasing a Short position (seller).
     pub seller: User,
-    /// The quantity of the trade.
     /// The quantity of the trade. Must be positive.
     pub qty: i128,
     /// The execution price of the trade.

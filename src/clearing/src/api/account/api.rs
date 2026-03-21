@@ -1,6 +1,6 @@
 use core::cell::RefCell;
 
-use ic_cdk::caller;
+use ic_cdk::api::msg_caller;
 use ic_cdk_macros::{query, update};
 use shared::types::BalanceDomain;
 
@@ -27,7 +27,7 @@ use crate::{
 #[query(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn get_account_state_query() -> GetAccountStateResult {
-    let user: User = caller().into();
+    let user: User = msg_caller().into();
 
     ACCOUNT_STATES
         .with(|accounts| {
@@ -59,7 +59,7 @@ pub fn get_account_state_query() -> GetAccountStateResult {
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn get_account_state(params: GetAccountStateParams) -> GetAccountStateResult {
     let result: Result<(AccountState, BalanceDomain), AccountStateError> = (async {
-        let user: User = caller().into();
+        let user: User = msg_caller().into();
 
         let GetAccountStateParams { refresh, domain } = params;
 
@@ -138,7 +138,7 @@ pub async fn get_account_state(params: GetAccountStateParams) -> GetAccountState
 #[query(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn get_position(params: GetPositionParams) -> Option<Position> {
-    let caller: User = caller().into();
+    let caller: User = msg_caller().into();
 
     POSITIONS.with(|positions| {
         positions
@@ -152,7 +152,7 @@ pub fn get_position(params: GetPositionParams) -> Option<Position> {
 #[query(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn get_positions() -> Vec<Position> {
-    let caller: User = caller().into();
+    let caller: User = msg_caller().into();
     POSITIONS.with(|positions: &RefCell<PositionsMap>| {
         positions
             .borrow()

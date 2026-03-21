@@ -1,11 +1,11 @@
 use candid::Principal;
-use ic_cdk::{api::is_controller, caller};
+use ic_cdk::api::{is_controller, msg_caller};
 
 use crate::memory::AUTHORIZED_CREATORS;
 
 /// Guard function to ensure the caller is not anonymous.
 pub fn caller_is_not_anonymous() -> Result<(), String> {
-    if caller() == Principal::anonymous() {
+    if msg_caller() == Principal::anonymous() {
         return Err("Update call error. RejectionCode: CanisterReject, Error: Anonymous caller not authorised.".to_owned());
     }
 
@@ -14,7 +14,7 @@ pub fn caller_is_not_anonymous() -> Result<(), String> {
 
 /// Guard function to ensure the caller is one of the canister controllers.
 pub fn caller_is_controller() -> Result<(), String> {
-    let caller = caller();
+    let caller = msg_caller();
 
     if is_controller(&caller) {
         Ok(())
@@ -27,7 +27,7 @@ pub fn caller_is_controller() -> Result<(), String> {
 ///
 /// Controllers are always authorized.
 pub fn caller_is_authorized_creator() -> Result<(), String> {
-    let caller = caller();
+    let caller = msg_caller();
 
     if is_controller(&caller) {
         return Ok(());

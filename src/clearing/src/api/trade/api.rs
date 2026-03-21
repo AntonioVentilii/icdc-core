@@ -1,7 +1,7 @@
 use core::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 
-use ic_cdk::{caller, id};
+use ic_cdk::api::{canister_self, msg_caller};
 use ic_cdk_macros::{query, update};
 use shared::{
     constants::USD_DECIMALS,
@@ -44,7 +44,7 @@ use crate::{
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatchedTradeResult {
     let result: Result<bool, TradeError> = (async {
-        let caller: User = caller().into();
+        let caller: User = msg_caller().into();
 
         if params.qty <= 0 {
             return Err(TradeError::Common(CommonError::InvalidInput(
@@ -139,7 +139,7 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatchedTradeResult {
     let result: Result<bool, TradeError> = (async {
-        let taker: User = caller().into();
+        let taker: User = msg_caller().into();
 
         let SubmitMarketOrderParams {
             trade_id,
@@ -210,7 +210,7 @@ pub(crate) fn submit_market_order_impl(
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn cancel_limit_order(params: CancelLimitOrderParams) -> SubmitMatchedTradeResult {
     let result: Result<bool, TradeError> = (async {
-        let caller: User = caller().into();
+        let caller: User = msg_caller().into();
 
         let order_id = params.order_id;
 
@@ -322,7 +322,7 @@ pub fn freeze_position_for_transfer(
                 series_id,
                 outcome_id,
                 qty: pos.net_qty,
-                clearing_id: id(),
+                clearing_id: canister_self(),
                 // Proofs are unsigned in the current cross-clearing protocol version.
                 signature: vec![],
                 valuation_price,
@@ -434,7 +434,7 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
 #[query(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn get_orders() -> Vec<LimitOrder> {
-    let caller: User = caller().into();
+    let caller: User = msg_caller().into();
 
     LIMIT_ORDERS.with(|orders: &RefCell<BTreeMap<OrderId, LimitOrder>>| {
         orders
@@ -528,7 +528,7 @@ pub(crate) fn validate_no_arbitrage(
 #[query(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn get_trade_history() -> Vec<Event> {
-    let caller: User = caller().into();
+    let caller: User = msg_caller().into();
 
     EVENTS.with(|events: &RefCell<Vec<Event>>| {
         events
@@ -564,7 +564,7 @@ pub fn list_orders(params: ListOrdersParams) -> Vec<LimitOrder> {
 /// full collateral requirement (1.0 USD vUSD).
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn mint_complete_set(series_id: SeriesId, qty: i128) -> Result<bool, TradeError> {
-    let caller: User = caller().into();
+    let caller: User = msg_caller().into();
     let series = ensure_series_registered(&series_id).await?;
     mint_complete_set_logic(caller, &series_id, &series, qty)
 }
@@ -669,7 +669,7 @@ pub(crate) fn mint_complete_set_logic(
 /// Returns 1.0 USD (vUSD) for every full set of N outcome positions provided.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn redeem_complete_set(series_id: SeriesId, qty: i128) -> Result<bool, TradeError> {
-    let caller: User = caller().into();
+    let caller: User = msg_caller().into();
     let series = ensure_series_registered(&series_id).await?;
     redeem_complete_set_logic(caller, &series_id, &series, qty)
 }

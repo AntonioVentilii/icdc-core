@@ -2,7 +2,7 @@ pub mod guards;
 pub mod state;
 pub mod utils;
 
-use ic_cdk::{call, export_candid, storage};
+use ic_cdk::{call::Call, export_candid, storage};
 use ic_cdk_macros::{init, post_upgrade, pre_upgrade, query, update};
 use icrc_ledger_types::icrc1::transfer::{BlockIndex, TransferArg, TransferError};
 use shared::types::minter::{Config, ConfigResult, MintParams, MintResult};
@@ -45,10 +45,14 @@ pub fn update_config(config: Config) {
 
 #[update(guard = "caller_is_authorized")]
 pub async fn mint(params: MintParams) -> MintResult {
-    let config = match read_config() {
-        Ok(config) => config,
-        Err(err) => return MintResult::Err(err.clone()),
-    };
+    match mint_impl(params).await {
+        Ok(outcome) => outcome,
+        Err(msg) => MintResult::Err(msg),
+    }
+}
+
+async fn mint_impl(params: MintParams) -> Result<MintResult, String> {
+    let config = read_config()?;
 
     let arg = TransferArg {
         from_subaccount: None,
@@ -59,15 +63,16 @@ pub async fn mint(params: MintParams) -> MintResult {
         created_at_time: None,
     };
 
-    let (res,): (Result<BlockIndex, TransferError>,) =
-        match call(config.ledger_canister, "icrc1_transfer", (arg,)).await {
-            Ok(v) => v,
-            Err((code, msg)) => {
-                return MintResult::Err(format!("Ledger call failed: {code:?} - {msg}"));
-            }
-        };
+    let response = Call::bounded_wait(config.ledger_canister, "icrc1_transfer")
+        .with_args(&(arg,))
+        .await
+        .map_err(|e| format!("Ledger call failed: {e}"))?;
 
-    res.into()
+    let (res,) = response
+        .candid_tuple::<(Result<BlockIndex, TransferError>,)>()
+        .map_err(|e| format!("Ledger response decode failed: {e}"))?;
+
+    Ok(res.into())
 }
 
 export_candid!();
