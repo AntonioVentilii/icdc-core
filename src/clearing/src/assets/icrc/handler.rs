@@ -22,16 +22,23 @@ use crate::{
     types::account::{AssetAccount, ExternalAssetAccount},
 };
 
+/// `AssetError::CallError.code` when the failure is not an IC reject (e.g. insufficient cycles).
+const LEDGER_CALL_CODE_NON_REJECT: i32 = -1;
+/// `AssetError::CallError.code` when the response bytes could not be decoded as Candid.
+const LEDGER_CALL_CODE_CANDID_DECODE: i32 = -2;
+/// Used when `raw_reject_code` does not fit in `i32`.
+const LEDGER_CALL_REJECT_CODE_OVERFLOW: i32 = i32::MAX;
+
 fn map_ledger_call_failed(method: &str, err: CallFailed) -> AssetError {
     match err {
         CallFailed::CallRejected(r) => AssetError::CallError {
             method: method.to_owned(),
-            code: i32::try_from(r.raw_reject_code()).unwrap_or(i32::MAX),
+            code: i32::try_from(r.raw_reject_code()).unwrap_or(LEDGER_CALL_REJECT_CODE_OVERFLOW),
             message: r.reject_message().to_owned(),
         },
         e => AssetError::CallError {
             method: method.to_owned(),
-            code: -1,
+            code: LEDGER_CALL_CODE_NON_REJECT,
             message: e.to_string(),
         },
     }
@@ -57,7 +64,7 @@ impl IcrcHandler {
                 .candid_tuple::<(Nat,)>()
                 .map_err(|e| AssetError::CallError {
                     method: "icrc1_balance_of".to_owned(),
-                    code: -2,
+                    code: LEDGER_CALL_CODE_CANDID_DECODE,
                     message: e.to_string(),
                 })?;
 
@@ -76,7 +83,7 @@ impl IcrcHandler {
             .candid_tuple::<(Nat,)>()
             .map_err(|e| AssetError::CallError {
                 method: "icrc1_fee".to_owned(),
-                code: -2,
+                code: LEDGER_CALL_CODE_CANDID_DECODE,
                 message: e.to_string(),
             })?;
 
@@ -96,7 +103,7 @@ impl IcrcHandler {
                 .candid_tuple::<(String,)>()
                 .map_err(|e| AssetError::CallError {
                     method: "icrc1_symbol".to_owned(),
-                    code: -2,
+                    code: LEDGER_CALL_CODE_CANDID_DECODE,
                     message: e.to_string(),
                 })?;
 
@@ -115,7 +122,7 @@ impl IcrcHandler {
             .candid_tuple::<(u8,)>()
             .map_err(|e| AssetError::CallError {
                 method: "icrc1_decimals".to_owned(),
-                code: -2,
+                code: LEDGER_CALL_CODE_CANDID_DECODE,
                 message: e.to_string(),
             })?;
 
@@ -150,7 +157,7 @@ impl IcrcHandler {
             .candid_tuple::<(Result<Nat, TransferError>,)>()
             .map_err(|e| AssetError::CallError {
                 method: "icrc1_transfer".to_owned(),
-                code: -2,
+                code: LEDGER_CALL_CODE_CANDID_DECODE,
                 message: e.to_string(),
             })?;
 
@@ -197,7 +204,7 @@ impl IcrcHandler {
             .candid_tuple::<(Result<Nat, TransferFromError>,)>()
             .map_err(|e| AssetError::CallError {
                 method: "icrc2_transfer_from".to_owned(),
-                code: -2,
+                code: LEDGER_CALL_CODE_CANDID_DECODE,
                 message: e.to_string(),
             })?;
 

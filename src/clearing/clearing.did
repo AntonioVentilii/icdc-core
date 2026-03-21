@@ -647,7 +647,6 @@ type SubmitMarketOrderParams = record {
 };
 // Input parameters for submitting a matched trade from an exchange.
 type SubmitMatchedTradeParams = record {
-	// The quantity of the trade.
 	// The quantity of the trade. Must be positive.
 	qty : int;
 	// Unique identifier for the trade provided by the exchange.

@@ -381,11 +381,12 @@ async fn update_asset_price_impl(
             return Err(UpdateAssetPriceError::Common(CommonError::RegistryNotSet));
         }
 
-        if !matches!(
-            registry::is_oracle_authorized(registry_canister, oracle_id, caller).await,
-            Ok(true)
-        ) {
-            return Err(UpdateAssetPriceError::Common(CommonError::Unauthorized));
+        match registry::is_oracle_authorized(registry_canister, oracle_id, caller).await {
+            Ok(true) => {}
+            Ok(false) => {
+                return Err(UpdateAssetPriceError::Common(CommonError::Unauthorized));
+            }
+            Err(e) => return Err(UpdateAssetPriceError::Common(e)),
         }
     }
 

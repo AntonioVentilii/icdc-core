@@ -24,7 +24,12 @@ require_candid_extractor() {
   minor="${minor:-0}"
   patch="${patch:-0}"
 
-  if ((major == 0 && minor == 1 && patch < MIN_CANDID_EXTRACTOR_PATCH)); then
+  # Require candid-extractor >= 0.1.MIN_CANDID_EXTRACTOR_PATCH (not only 0.1.x patch checks: 0.0.x must fail).
+  if ((major > 0)) ||
+    ((major == 0 && minor > 1)) ||
+    ((major == 0 && minor == 1 && patch >= MIN_CANDID_EXTRACTOR_PATCH)); then
+    :
+  else
     echo "error: candid-extractor ${raw} is too old (need >= 0.1.${MIN_CANDID_EXTRACTOR_PATCH} for current ic-cdk)." >&2
     echo "  From the repository root, run: ./scripts/setup candid-extractor" >&2
     exit 1
