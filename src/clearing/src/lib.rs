@@ -6,10 +6,7 @@ use std::collections::BTreeMap;
 use candid::Principal;
 use ic_cdk::export_candid;
 use ic_cdk_macros::{init, post_upgrade, pre_upgrade};
-use shared::types::{
-    AssetId, AssetMetrics, BalanceDomain, CollateralAssetConfig, CollateralAssetInfo, DomainPolicy,
-    Series, SeriesId,
-};
+use shared::types::{BalanceDomain, CollateralAssetInfo, DomainPolicy, Series, SeriesId};
 
 use crate::{
     api::{

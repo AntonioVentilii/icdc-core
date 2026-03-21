@@ -1007,8 +1007,7 @@ mod tests {
         }
 
         // Also verify that a payoff within post-settlement equity passes.
-        let result_ok =
-            check_settlement_solvency(BalanceDomain::Settlement, 1_050_000, &positions);
+        let result_ok = check_settlement_solvency(BalanceDomain::Settlement, 1_050_000, &positions);
         assert!(
             result_ok.is_ok(),
             "Expected success when net payoff equals post-settlement equity"

@@ -421,6 +421,7 @@ service : (Config) -> {
 	//
 	// Only the creator of the order can cancel it.
 	cancel_limit_order : (CancelLimitOrderParams) -> (SubmitMatchedTradeResult);
+	// Returns the current global configuration of the Clearing canister.
 	config : () -> (Config) query;
 	// Deposits collateral into the user's account state.
 	//
@@ -445,9 +446,6 @@ service : (Config) -> {
 	//
 	// This does not refresh balances from external ledgers.
 	get_account_state_query : () -> (GetAccountStateResult) query;
-	get_asset_metrics : () -> (vec record { text; AssetMetrics }) query;
-	// Returns a list of all supported collateral assets with their metrics.
-	get_collateral_assets : () -> (vec CollateralAssetInfo) query;
 	// Returns the current domain policies for all configured domains.
 	//
 	// This method is gated to canister controllers.
@@ -464,6 +462,7 @@ service : (Config) -> {
 	get_position : (GetPositionParams) -> (opt Position) query;
 	// Retrieves all open positions for the caller.
 	get_positions : () -> (vec Position) query;
+	// Returns the principal of the Series Registry canister.
 	get_registry_canister : () -> (principal) query;
 	// Returns the full settlement plan including per-position accounting details (admin only).
 	get_settlement_plan : (text) -> (opt SettlementPlan) query;
@@ -471,11 +470,12 @@ service : (Config) -> {
 	get_settlement_status : (text) -> (opt SettlementStatusView) query;
 	// Retrieves the trade history (executed trades) for the caller.
 	get_trade_history : () -> (vec Event) query;
-	http_request : (HttpRequest) -> (HttpResponse) query;
-	// Returns a list of all supported collateral assets.
+	// Handles incoming HTTP requests for Prometheus metrics.
 	//
-	// This method is gated to canister controllers.
-	list_collateral_assets : () -> (vec CollateralAssetConfig) query;
+	// This endpoint is restricted to canister controllers and serves metrics at `/metrics`.
+	http_request : (HttpRequest) -> (HttpResponse) query;
+	// Returns a list of all supported collateral assets with their metrics.
+	list_collateral_assets : () -> (vec CollateralAssetInfo) query;
 	// Returns a list of all active limit orders, potentially filtered by series.
 	list_orders : (ListOrdersParams) -> (vec LimitOrder) query;
 	// Returns a list of all derivative series currently cached in the clearing canister.

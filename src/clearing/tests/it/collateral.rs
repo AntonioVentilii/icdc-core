@@ -27,13 +27,13 @@ use crate::utils::{
 };
 
 #[test]
-fn get_collateral_assets_empty() {
+fn list_collateral_assets_empty() {
     let env = TestSetup::default();
     let user = test_user(50);
 
     let assets: Vec<CollateralAssetInfo> = assert_ok_value(
         env.clearing
-            .query::<Vec<CollateralAssetInfo>, _>(user, "get_collateral_assets", ()),
+            .query::<Vec<CollateralAssetInfo>, _>(user, "list_collateral_assets", ()),
     );
 
     assert_eq!(
@@ -44,7 +44,7 @@ fn get_collateral_assets_empty() {
 }
 
 #[test]
-fn get_collateral_assets_after_registration() {
+fn list_collateral_assets_after_registration() {
     let env = TestSetup::default();
     let user = test_user(51);
 
@@ -71,7 +71,7 @@ fn get_collateral_assets_after_registration() {
 
     let assets: Vec<CollateralAssetInfo> = assert_ok_value(
         env.clearing
-            .query::<Vec<CollateralAssetInfo>, _>(user, "get_collateral_assets", ()),
+            .query::<Vec<CollateralAssetInfo>, _>(user, "list_collateral_assets", ()),
     );
 
     assert_eq!(assets.len(), 3);
@@ -79,7 +79,7 @@ fn get_collateral_assets_after_registration() {
 }
 
 #[test]
-fn get_collateral_assets_with_metrics() {
+fn list_collateral_assets_with_metrics() {
     let env = TestSetup::default();
     let user = test_user(52);
 
@@ -87,7 +87,7 @@ fn get_collateral_assets_with_metrics() {
 
     let assets: Vec<CollateralAssetInfo> = assert_ok_value(
         env.clearing
-            .query::<Vec<CollateralAssetInfo>, _>(user, "get_collateral_assets", ()),
+            .query::<Vec<CollateralAssetInfo>, _>(user, "list_collateral_assets", ()),
     );
 
     assert_eq!(assets.len(), 3);
@@ -286,7 +286,7 @@ fn deposit_and_domain_isolation() {
     // 5. Verify Isolation
     let assets: Vec<CollateralAssetInfo> = assert_ok_value(
         env.clearing
-            .query::<Vec<CollateralAssetInfo>, _>(user, "get_collateral_assets", ()),
+            .query::<Vec<CollateralAssetInfo>, _>(user, "list_collateral_assets", ()),
     );
     assert!(!assets.is_empty());
 

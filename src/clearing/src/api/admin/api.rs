@@ -49,6 +49,7 @@ use crate::{
     },
 };
 
+/// Returns the principal of the Series Registry canister.
 #[query(guard = "caller_is_controller")]
 #[must_use]
 pub fn get_registry_canister() -> Principal {
@@ -66,6 +67,7 @@ pub fn set_registry_canister(registry: Principal) {
     });
 }
 
+/// Returns the current global configuration of the Clearing canister.
 #[query(guard = "caller_is_controller")]
 #[must_use]
 pub fn config() -> Config {
@@ -399,26 +401,6 @@ async fn update_asset_price_impl(
         } else {
             Err(UpdateAssetPriceError::AssetMetricsNotInitialized)
         }
-    })
-}
-
-/// Returns a list of all supported collateral assets.
-///
-/// This method is gated to canister controllers.
-#[query(guard = "caller_is_controller")]
-#[must_use]
-pub fn list_collateral_assets() -> Vec<CollateralAssetConfig> {
-    COLLATERAL_ASSETS.with(|assets| assets.borrow().values().cloned().collect())
-}
-
-#[query(guard = "caller_is_controller")]
-#[must_use]
-pub fn get_asset_metrics() -> Vec<(AssetId, AssetMetrics)> {
-    ASSET_METRICS.with(|m| {
-        m.borrow()
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect()
     })
 }
 

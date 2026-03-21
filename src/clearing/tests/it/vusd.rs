@@ -160,7 +160,7 @@ fn vusd_registration_checks() {
     // 2. Verify vUSD is NOT in collateral assets list
     let collateral_assets: Vec<CollateralAssetInfo> = env
         .clearing
-        .query(env.user, "get_collateral_assets", ())
+        .query(env.user, "list_collateral_assets", ())
         .unwrap();
     assert!(collateral_assets
         .iter()

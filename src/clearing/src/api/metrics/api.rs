@@ -165,6 +165,9 @@ pub fn metrics() -> String {
     metrics
 }
 
+/// Handles incoming HTTP requests for Prometheus metrics.
+///
+/// This endpoint is restricted to canister controllers and serves metrics at `/metrics`.
 #[query]
 #[must_use]
 #[expect(clippy::needless_pass_by_value)]

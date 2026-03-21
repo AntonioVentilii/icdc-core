@@ -133,18 +133,6 @@ fn update_collateral_asset() {
         "update_collateral_asset",
         (params,),
     ));
-
-    let assets: Vec<CollateralAssetConfig> =
-        assert_ok_value(env.clearing.query::<Vec<CollateralAssetConfig>, _>(
-            env.controller,
-            "list_collateral_assets",
-            (),
-        ));
-
-    assert_eq!(assets.len(), 3);
-    assert_eq!(assets[0].asset_id, "ETH");
-    assert_eq!(assets[0].symbol, "ETH");
-    assert!(assets[0].is_enabled);
 }
 
 #[test]

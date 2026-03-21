@@ -372,7 +372,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
 /// Returns a list of all supported collateral assets with their metrics.
 #[query(guard = "caller_is_not_anonymous")]
 #[must_use]
-pub fn get_collateral_assets() -> Vec<CollateralAssetInfo> {
+pub fn list_collateral_assets() -> Vec<CollateralAssetInfo> {
     let configs = COLLATERAL_ASSETS.with(|c| c.borrow().clone());
     let metrics = ASSET_METRICS.with(|m| m.borrow().clone());
 
