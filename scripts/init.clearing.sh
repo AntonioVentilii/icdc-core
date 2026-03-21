@@ -26,6 +26,31 @@ echo "Registry: $REGISTRY_CANISTER"
 echo "Setting registry canister..."
 dfx canister call clearing set_registry_canister "(principal \"$REGISTRY_CANISTER\")" --network "$NETWORK"
 
+# 1b. Domain policies (Settlement + Playground)
+#     Stored for admin / future enforcement; same defaults as DomainPolicy in code.
+echo "Configuring balance domain policies (Settlement, Playground)..."
+dfx canister call clearing update_domain_policy "(record {
+  domain = variant { Settlement };
+  policy = record {
+    deposits_enabled = true;
+    protocol_fee_ratio_override = null;
+    label = \"Settlement\";
+    withdrawals_enabled = true;
+    insurance_fund_fee_ratio_override = null;
+  };
+})" --network "$NETWORK"
+
+dfx canister call clearing update_domain_policy "(record {
+  domain = variant { Playground };
+  policy = record {
+    deposits_enabled = true;
+    protocol_fee_ratio_override = null;
+    label = \"Playground\";
+    withdrawals_enabled = true;
+    insurance_fund_fee_ratio_override = null;
+  };
+})" --network "$NETWORK"
+
 # 2. Register Collateral Asset ($TESTICP_SYMBOL)
 echo "Registering $TESTICP_SYMBOL collateral asset..."
 dfx canister call clearing register_icrc_asset "(record { 

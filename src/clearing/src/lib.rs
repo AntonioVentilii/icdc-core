@@ -1,12 +1,14 @@
 extern crate candid;
 
 use core::cell::RefCell;
+use std::collections::BTreeMap;
 
 use candid::Principal;
 use ic_cdk::export_candid;
 use ic_cdk_macros::{init, post_upgrade, pre_upgrade};
 use shared::types::{
-    AssetId, AssetMetrics, CollateralAssetConfig, CollateralAssetInfo, Series, SeriesId,
+    AssetId, AssetMetrics, BalanceDomain, CollateralAssetConfig, CollateralAssetInfo, DomainPolicy,
+    Series, SeriesId,
 };
 
 use crate::{
@@ -18,7 +20,8 @@ use crate::{
         admin::{
             params::{
                 CancelFundWithdrawalParams, RegisterIcrcAssetParams, UpdateAssetMetricsParams,
-                UpdateAssetPriceParams, UpdateCollateralAssetParams, WithdrawFundParams,
+                UpdateAssetPriceParams, UpdateCollateralAssetParams, UpdateDomainPolicyParams,
+                WithdrawFundParams,
             },
             results::{
                 CancelFundWithdrawalResult, GetFundsResult, RegisterIcrcAssetResult,
@@ -29,6 +32,7 @@ use crate::{
             params::{DepositCollateralParams, WithdrawCollateralParams},
             results::{DepositCollateralResult, WithdrawCollateralResult},
         },
+        migration::{params::MigrateDomainParams, results::MigrateDomainResult},
         settlement::{params::SettleSeriesParams, results::SettleSeriesResult},
         trade::{
             errors::TradeError,

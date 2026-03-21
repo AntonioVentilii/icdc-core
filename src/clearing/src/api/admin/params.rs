@@ -1,6 +1,8 @@
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
-use shared::types::{AssetId, AssetMetrics, CollateralAssetConfig, Price};
+use shared::types::{
+    AssetId, AssetMetrics, BalanceDomain, CollateralAssetConfig, DomainPolicy, Price,
+};
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FundType {
@@ -46,4 +48,10 @@ pub struct RegisterIcrcAssetParams {
     pub haircut_bps: u16,
     pub oracle_id: Option<String>,
     pub is_enabled: bool,
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct UpdateDomainPolicyParams {
+    pub domain: BalanceDomain,
+    pub policy: DomainPolicy,
 }

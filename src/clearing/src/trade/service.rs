@@ -1,6 +1,6 @@
 use core::cell::RefCell;
 
-use shared::types::{BalanceDomain, Series};
+use shared::types::Series;
 
 use crate::{
     api::trade::errors::TradeError,
@@ -173,18 +173,14 @@ pub(crate) fn execute_trade_impl(
                 .saturating_sub(buyer_reserved_delta.unsigned_abs())
         };
 
-        // Margin/Collateral checks only apply to Settlement domain.
-        if domain == BalanceDomain::Settlement {
-            // Check equity against target margin.
-            let buyer_equity = buyer_acc.calculate_raw_equity_i128(domain, &configs, &metrics);
+        let buyer_equity = buyer_acc.calculate_raw_equity_i128(domain, &configs, &metrics);
 
-            if buyer_equity < (target_buyer_reserved.cast_signed()) {
-                return Err(TradeError::InsufficientMargin {
-                    user: buyer,
-                    balance: buyer_acc.calculate_equity_usd(domain, &configs, &metrics),
-                    required: target_buyer_reserved,
-                });
-            }
+        if buyer_equity < (target_buyer_reserved.cast_signed()) {
+            return Err(TradeError::InsufficientMargin {
+                user: buyer,
+                balance: buyer_acc.calculate_equity_usd(domain, &configs, &metrics),
+                required: target_buyer_reserved,
+            });
         }
 
         // 2. Validate Seller
@@ -201,15 +197,13 @@ pub(crate) fn execute_trade_impl(
                 .saturating_sub(seller_reserved_delta.unsigned_abs())
         };
 
-        if domain == BalanceDomain::Settlement {
-            let seller_equity = seller_acc.calculate_raw_equity_i128(domain, &configs, &metrics);
-            if seller_equity < (target_seller_reserved.cast_signed()) {
-                return Err(TradeError::InsufficientMargin {
-                    user: seller,
-                    balance: seller_acc.calculate_equity_usd(domain, &configs, &metrics),
-                    required: target_seller_reserved,
-                });
-            }
+        let seller_equity = seller_acc.calculate_raw_equity_i128(domain, &configs, &metrics);
+        if seller_equity < (target_seller_reserved.cast_signed()) {
+            return Err(TradeError::InsufficientMargin {
+                user: seller,
+                balance: seller_acc.calculate_equity_usd(domain, &configs, &metrics),
+                required: target_seller_reserved,
+            });
         }
 
         Ok(())

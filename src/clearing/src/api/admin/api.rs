@@ -1,7 +1,11 @@
+use std::collections::BTreeMap;
+
 use candid::{Nat, Principal};
 use ic_cdk::{api::is_controller, call, caller, trap};
 use ic_cdk_macros::{query, update};
-use shared::types::{Asset, AssetId, AssetMetrics, CollateralAssetConfig};
+use shared::types::{
+    Asset, AssetId, AssetMetrics, BalanceDomain, CollateralAssetConfig, DomainPolicy,
+};
 
 use super::{
     errors::{
@@ -9,7 +13,8 @@ use super::{
     },
     params::{
         CancelFundWithdrawalParams, FundType, RegisterIcrcAssetParams, UpdateAssetMetricsParams,
-        UpdateAssetPriceParams, UpdateCollateralAssetParams, WithdrawFundParams,
+        UpdateAssetPriceParams, UpdateCollateralAssetParams, UpdateDomainPolicyParams,
+        WithdrawFundParams,
     },
     results::{
         CancelFundWithdrawalResult, GetFundsResult, RegisterIcrcAssetResult,
@@ -26,8 +31,8 @@ use crate::{
     },
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
-        ASSET_METRICS, COLLATERAL_ASSETS, CONFIG, FUND_WITHDRAWAL_PLANS, INSURANCE_FUND,
-        REGISTRY_CANISTER, TREASURY,
+        ASSET_METRICS, COLLATERAL_ASSETS, CONFIG, DOMAIN_POLICIES, FUND_WITHDRAWAL_PLANS,
+        INSURANCE_FUND, REGISTRY_CANISTER, TREASURY,
     },
     types::{
         account::AssetAccount,
@@ -399,6 +404,25 @@ pub fn get_asset_metrics() -> Vec<(AssetId, AssetMetrics)> {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect()
     })
+}
+
+/// Returns the current domain policies for all configured domains.
+///
+/// This method is gated to canister controllers.
+#[query(guard = "caller_is_controller")]
+#[must_use]
+pub fn get_domain_policies() -> BTreeMap<BalanceDomain, DomainPolicy> {
+    DOMAIN_POLICIES.with(|p| p.borrow().clone())
+}
+
+/// Adds or updates the policy for a specific balance domain.
+///
+/// This method is gated to canister controllers.
+#[update(guard = "caller_is_controller")]
+pub fn update_domain_policy(params: UpdateDomainPolicyParams) {
+    DOMAIN_POLICIES.with(|p| {
+        p.borrow_mut().insert(params.domain, params.policy);
+    });
 }
 
 pub(crate) fn deduct_fund_balance_impl(

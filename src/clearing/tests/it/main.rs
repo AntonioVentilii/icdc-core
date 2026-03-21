@@ -2,6 +2,7 @@ mod account;
 mod admin;
 mod atomicity;
 mod collateral;
+mod migration;
 mod settlement;
 mod settlement_exhaustive;
 mod setup;

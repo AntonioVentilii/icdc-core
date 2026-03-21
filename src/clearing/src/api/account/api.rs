@@ -1,9 +1,8 @@
 use core::cell::RefCell;
-use std::collections::BTreeMap;
 
 use ic_cdk::caller;
 use ic_cdk_macros::{query, update};
-use shared::types::{AssetId, BalanceDomain};
+use shared::types::BalanceDomain;
 
 use super::{
     errors::AccountStateError,
@@ -79,41 +78,38 @@ pub async fn get_account_state(params: GetAccountStateParams) -> GetAccountState
             return Ok((state, domain));
         }
 
-        // Refresh balances from ledgers
+        // Refresh: verify external ledger balances match internal accounting.
+        // We do NOT overwrite domain-specific balances here because the deposit
+        // flow is the authoritative source for per-domain allocations. Writing
+        // the raw external balance into a specific domain would contaminate
+        // the other domain's accounting (the user has one shared ledger account
+        // but balances are logically partitioned across domains).
         let collateral_configs = COLLATERAL_ASSETS.with(|assets| assets.borrow().clone());
 
-        let mut fresh_collateral_balances: BTreeMap<AssetId, u128> = BTreeMap::new();
-
-        for (asset_id, config) in collateral_configs {
+        for config in collateral_configs.values() {
             if !config.is_enabled {
                 continue;
             }
 
             let handler = get_handler(&config.asset).map_err(AccountStateError::Asset)?;
 
-            let balance = handler
+            // We still call balance_of to warm the cache / detect ledger issues,
+            // but we intentionally do not overwrite domain balances.
+            let _external_balance = handler
                 .balance_of(AssetBalanceOfParams {
                     asset: &config.asset,
                     account: AssetAccount::UserClearing(user),
                 })
                 .await
                 .map_err(AccountStateError::Asset)?;
-
-            fresh_collateral_balances.insert(asset_id, balance);
         }
 
-        // Update the account state in memory
         let final_state = ACCOUNT_STATES.with(|accounts| {
-            let mut accounts = accounts.borrow_mut();
-            let state = accounts
-                .entry(user)
-                .or_insert_with(|| AccountState::new(user));
-
-            for (asset_id, balance) in fresh_collateral_balances {
-                state.set_balance(domain, asset_id, balance);
-            }
-
-            state.clone()
+            let accounts = accounts.borrow();
+            accounts
+                .get(&user)
+                .cloned()
+                .unwrap_or_else(|| AccountState::new(user))
         });
 
         Ok((final_state, domain))

@@ -4,9 +4,12 @@ use shared::types::{AssetId, BalanceDomain, OutcomeId, SeriesId, SettlementInput
 
 use crate::{
     api::admin::params::FundType,
-    memory::{DEPOSIT_PLANS, FUND_WITHDRAWAL_PLANS, SETTLEMENT_PLANS, WITHDRAWAL_PLANS},
+    memory::{
+        DEPOSIT_PLANS, FUND_WITHDRAWAL_PLANS, MIGRATION_PLANS, SETTLEMENT_PLANS, WITHDRAWAL_PLANS,
+    },
     types::{
         payment::{PaymentIdempotency, PaymentReceipt},
+        trade::OrderId,
         user::{DepositId, User, WithdrawalId},
     },
     utils::system::now_ns,
@@ -327,6 +330,94 @@ impl FundWithdrawalPlan {
             };
 
             m.insert(params.request_id, plan.clone());
+            plan
+        })
+    }
+}
+
+/// Unique key for a migration plan.
+pub type MigrationKey = (User, String);
+
+/// Input parameters for creating a [`MigrationPlan`].
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct MigrationPlanParams {
+    /// Caller-provided unique identifier for idempotency.
+    pub migration_id: String,
+    /// The user whose state is being migrated.
+    pub user: User,
+    /// The source domain.
+    pub from_domain: BalanceDomain,
+    /// The target domain.
+    pub to_domain: BalanceDomain,
+}
+
+/// Snapshot of a position being migrated between domains.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct MigratedPosition {
+    pub series_id: SeriesId,
+    pub outcome_id: Option<OutcomeId>,
+    pub net_qty: i128,
+    pub reserved_margin_usd: u128,
+}
+
+/// Snapshot of an order being migrated between domains.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct MigratedOrder {
+    pub order_id: OrderId,
+    pub blocked_margin_usd: u128,
+}
+
+/// A plan for migrating a user's entire state from one domain to another.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct MigrationPlan {
+    pub migration_id: String,
+    pub user: User,
+    pub from_domain: BalanceDomain,
+    pub to_domain: BalanceDomain,
+    pub status: PlanStatus,
+    pub idempotency_ns: PaymentIdempotency,
+    /// Snapshot of migrated positions for auditability.
+    pub positions: Vec<MigratedPosition>,
+    /// Snapshot of migrated orders for auditability.
+    pub orders: Vec<MigratedOrder>,
+    /// Snapshot of migrated balances (`asset_id` -> amount).
+    pub balances: Vec<(AssetId, u128)>,
+    /// Migrated cash balance (USD).
+    pub cash_balance_usd: i128,
+    /// Migrated reserved margin (USD).
+    pub reserved_margin_usd: u128,
+}
+
+impl MigrationPlan {
+    /// Retrieves an existing migration plan or creates a new one if it doesn't exist.
+    #[must_use]
+    pub fn get_or_create(params: MigrationPlanParams) -> Self {
+        MIGRATION_PLANS.with(|m| {
+            let mut m = m.borrow_mut();
+
+            let key: MigrationKey = (params.user, params.migration_id.clone());
+
+            if let Some(existing) = m.get(&key) {
+                return existing.clone();
+            }
+
+            let idempotency_ns = now_ns().into();
+
+            let plan = MigrationPlan {
+                migration_id: params.migration_id,
+                user: params.user,
+                from_domain: params.from_domain,
+                to_domain: params.to_domain,
+                status: PlanStatus::Planned,
+                idempotency_ns,
+                positions: Vec::new(),
+                orders: Vec::new(),
+                balances: Vec::new(),
+                cash_balance_usd: 0,
+                reserved_margin_usd: 0,
+            };
+
+            m.insert(key, plan.clone());
             plan
         })
     }

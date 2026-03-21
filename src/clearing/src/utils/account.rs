@@ -21,7 +21,9 @@ pub(crate) fn derive_user_subaccount_for_canister(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use candid::Principal;
+
+    use crate::utils::account::derive_user_subaccount_for_canister;
 
     #[test]
     fn subaccount_derivation() {

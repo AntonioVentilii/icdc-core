@@ -7,6 +7,7 @@ The Clearing Engine acts as a Central Counterparty (CCP) for derivative trades. 
 - **Margin Management**: Tracks user collateral balances and calculates maintenance margin requirements.
 - **Trade Clearing**: Validates matched trades from exchanges and updates buyer/seller positions.
 - **Settlement**: Executes a multi-phase, idempotent settlement process for expiring series.
+- **Domain Management**: Supports multiple balance domains (`Settlement`, `Playground`) with identical risk enforcement and configurable policies. Users can migrate their full state between domains.
 - **Position Novation**: Enables portable positions between different clearing canisters through a 6-step protocol:
   1. **Request**: User requests a transfer to a new clearing house.
   2. **Freeze**: Source clearing house freezes the position and calculates the final margin state.
@@ -30,6 +31,8 @@ The canister follows a strict **Plan-Execute-Finalise** pattern for all sensitiv
 - `deposit_collateral(params)` / `withdraw_collateral(params)`: Manages user funds.
 - `settle_series(params)`: Initiates settlement for an expired series.
 - `freeze_position_for_transfer(params)`: Prepares a position to be moved to another clearing house.
+- `migrate_domain(params)`: Atomically migrates a user's balances, cash, margin, and orders from one domain to another (idempotent).
+- `get_domain_policies()` / `update_domain_policy(params)`: Admin endpoints to read/update per-domain policy (deposits, withdrawals, fee overrides).
 
 ## Current Limitations & Roadmap
 

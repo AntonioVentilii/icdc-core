@@ -32,7 +32,7 @@ pub fn canonical_id_part(s: &str) -> String {
 mod tests {
     use std::panic::catch_unwind;
 
-    use super::*;
+    use crate::utils::canonical_id_part;
 
     #[test]
     fn canonical_id_part_valid() {

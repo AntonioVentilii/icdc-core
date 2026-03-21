@@ -90,11 +90,18 @@ impl AccountService {
 
 #[cfg(test)]
 mod tests {
-    use candid::Principal;
-    use shared::types::{asset::Asset, decimal::DecimalValue};
+    use std::collections::BTreeMap;
 
-    use super::*;
-    use crate::types::user::User;
+    use candid::Principal;
+    use shared::types::{
+        asset::Asset, decimal::DecimalValue, AssetId, AssetMetrics, BalanceDomain,
+        CollateralAssetConfig,
+    };
+
+    use crate::{
+        account::service::AccountService,
+        types::{margin::AccountState, user::User},
+    };
 
     #[test]
     fn build_account_state_response_basic() {

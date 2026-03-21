@@ -98,6 +98,13 @@ type Description = record {
 	markdown : opt text;
 	plain : text
 };
+type DomainPolicy = record {
+	deposits_enabled : bool;
+	protocol_fee_ratio_override : opt nat16;
+	label : text;
+	withdrawals_enabled : bool;
+	insurance_fund_fee_ratio_override : opt nat16
+};
 type ErcToken = record {
 	decimals : nat8;
 	token_address : text;
@@ -159,6 +166,18 @@ type LimitOrder = record {
 	balance_domain : BalanceDomain
 };
 type ListOrdersParams = record { series_id : opt text };
+type MigrateDomainParams = record {
+	from_domain : BalanceDomain;
+	migration_id : text;
+	to_domain : BalanceDomain
+};
+type MigrateDomainResult = variant { Ok; Err : MigrationError };
+type MigrationError = variant {
+	NoStateTOMigrate;
+	SameDomain;
+	InFlightPlansExist;
+	Common : CommonError
+};
 type NativeEvmAsset = record { decimals : nat8; chain_id : nat64 };
 type NonMonetaryUnit = variant { Points };
 type Outcome = record {
@@ -337,6 +356,10 @@ type UpdateAssetPriceError = variant {
 type UpdateAssetPriceParams = record { price : Price; asset_id : text };
 type UpdateAssetPriceResult = variant { Ok; Err : UpdateAssetPriceError };
 type UpdateCollateralAssetParams = record { config : CollateralAssetConfig };
+type UpdateDomainPolicyParams = record {
+	domain : BalanceDomain;
+	policy : DomainPolicy
+};
 type WithdrawCollateralError = variant {
 	InsufficientExcessMargin : record { requested : nat; available : nat };
 	MathOverflow;
@@ -405,6 +428,12 @@ service : (Config) -> {
 	get_asset_metrics : () -> (vec record { text; AssetMetrics }) query;
 	// Returns a list of all supported collateral assets with their metrics.
 	get_collateral_assets : () -> (vec CollateralAssetInfo) query;
+	// Returns the current domain policies for all configured domains.
+	//
+	// This method is gated to canister controllers.
+	get_domain_policies : () -> (
+		vec record { BalanceDomain; DomainPolicy }
+	) query;
 	// Returns the current balances of the Insurance Fund and Treasury.
 	//
 	// This method is gated to canister controllers.
@@ -435,6 +464,17 @@ service : (Config) -> {
 	//
 	// This method is gated to canister controllers.
 	metrics : () -> (text) query;
+	// Migrates a user's entire domain state (balances, cash, margin, positions, orders)
+	// from one balance domain to another.
+	//
+	// This operation is idempotent: providing the same `migration_id` returns `Ok`
+	// if the migration was already finalised.
+	//
+	// Pre-conditions enforced:
+	// - `from_domain != to_domain`
+	// - No in-flight deposit, withdrawal, or settlement plans for the user in the source domain.
+	// - User must have state to migrate.
+	migrate_domain : (MigrateDomainParams) -> (MigrateDomainResult);
 	// Mints a complete set of categorical outcome positions.
 	//
 	// Returns 1 unit of every outcome position in the series in exchange for the
@@ -508,6 +548,10 @@ service : (Config) -> {
 	// Immutable properties like `internal_ledger_id` and `version` are preserved from the existing
 	// state. This method is gated to canister controllers.
 	update_config : (Config) -> ();
+	// Adds or updates the policy for a specific balance domain.
+	//
+	// This method is gated to canister controllers.
+	update_domain_policy : (UpdateDomainPolicyParams) -> ();
 	// Withdraws collateral from the user's account state to an external address.
 	//
 	// This implements the "Deterministic Withdrawal Policy":

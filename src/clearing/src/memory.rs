@@ -3,13 +3,19 @@ use std::collections::BTreeMap;
 
 use candid::Principal;
 use ic_cdk::{storage, trap};
-use shared::types::{Asset, AssetId, AssetMetrics, CollateralAssetConfig, Series, SeriesId};
+use shared::types::{
+    Asset, AssetId, AssetMetrics, BalanceDomain, CollateralAssetConfig, DomainPolicy, Series,
+    SeriesId,
+};
 
 use crate::{
     types::{
         event::Event,
         margin::{AccountState, Position, PositionsMap},
-        plans::{DepositPlan, FundWithdrawalPlan, SettlementPlan, WithdrawalPlan},
+        plans::{
+            DepositPlan, FundWithdrawalPlan, MigrationKey, MigrationPlan, SettlementPlan,
+            WithdrawalPlan,
+        },
         state::{Config, StableState},
         trade::{LimitOrder, OrderId, TradeId, TransferId},
         user::{DepositKey, User, WithdrawalKey},
@@ -52,6 +58,8 @@ thread_local! {
     pub static COLLATERAL_ASSETS: RefCell<BTreeMap<AssetId, CollateralAssetConfig>> = const { RefCell::new(BTreeMap::new()) };
     pub static EVM_ADDRESSES: RefCell<BTreeMap<Principal, String>> = const { RefCell::new(BTreeMap::new()) };
     pub static ASSET_METRICS: RefCell<BTreeMap<AssetId, AssetMetrics>> = const { RefCell::new(BTreeMap::new()) };
+    pub static DOMAIN_POLICIES: RefCell<BTreeMap<BalanceDomain, DomainPolicy>> = const { RefCell::new(BTreeMap::new()) };
+    pub static MIGRATION_PLANS: RefCell<BTreeMap<MigrationKey, MigrationPlan>> = const { RefCell::new(BTreeMap::new()) };
 }
 
 pub fn save_state() {
@@ -82,6 +90,10 @@ pub fn save_state() {
         COLLATERAL_ASSETS.with(|f| f.borrow().clone());
     let evm_addresses: BTreeMap<Principal, String> = EVM_ADDRESSES.with(|f| f.borrow().clone());
     let asset_metrics: BTreeMap<AssetId, AssetMetrics> = ASSET_METRICS.with(|f| f.borrow().clone());
+    let domain_policies: BTreeMap<BalanceDomain, DomainPolicy> =
+        DOMAIN_POLICIES.with(|f| f.borrow().clone());
+    let migration_plans: BTreeMap<MigrationKey, MigrationPlan> =
+        MIGRATION_PLANS.with(|f| f.borrow().clone());
     let state = StableState {
         config,
         positions,
@@ -103,6 +115,8 @@ pub fn save_state() {
         collateral_assets,
         evm_addresses,
         asset_metrics,
+        domain_policies,
+        migration_plans,
     };
 
     storage::stable_save((state,)).expect("Save failed");
@@ -139,6 +153,8 @@ pub fn restore_state() {
         collateral_assets,
         evm_addresses,
         asset_metrics,
+        domain_policies,
+        migration_plans,
     } = state;
 
     POSITIONS.with(|p: &RefCell<PositionsMap>| {
@@ -170,4 +186,6 @@ pub fn restore_state() {
     COLLATERAL_ASSETS.with(|f| *f.borrow_mut() = collateral_assets);
     EVM_ADDRESSES.with(|f| *f.borrow_mut() = evm_addresses);
     ASSET_METRICS.with(|f| *f.borrow_mut() = asset_metrics);
+    DOMAIN_POLICIES.with(|f| *f.borrow_mut() = domain_policies);
+    MIGRATION_PLANS.with(|f| *f.borrow_mut() = migration_plans);
 }

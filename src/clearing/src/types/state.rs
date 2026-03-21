@@ -3,13 +3,17 @@ use std::collections::BTreeMap;
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 use shared::types::{
-    AssetId, AssetMetrics, CollateralAssetConfig, OutcomeId, Price, Series, SeriesId,
+    AssetId, AssetMetrics, BalanceDomain, CollateralAssetConfig, DomainPolicy, OutcomeId, Price,
+    Series, SeriesId,
 };
 
 use crate::types::{
     event::Event,
     margin::{AccountState, Position},
-    plans::{DepositPlan, FundWithdrawalPlan, SettlementPlan, WithdrawalPlan},
+    plans::{
+        DepositPlan, FundWithdrawalPlan, MigrationKey, MigrationPlan, SettlementPlan,
+        WithdrawalPlan,
+    },
     trade::{LimitOrder, OrderId, TradeId, TransferId},
     user::{DepositKey, User, WithdrawalKey},
 };
@@ -95,4 +99,10 @@ pub struct StableState {
     pub evm_addresses: BTreeMap<Principal, String>,
     /// Dynamic metrics for collateral assets.
     pub asset_metrics: BTreeMap<AssetId, AssetMetrics>,
+    /// Per-domain policy configuration.
+    #[serde(default)]
+    pub domain_policies: BTreeMap<BalanceDomain, DomainPolicy>,
+    /// Active domain migration plans.
+    #[serde(default)]
+    pub migration_plans: BTreeMap<MigrationKey, MigrationPlan>,
 }

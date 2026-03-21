@@ -5,7 +5,7 @@ use ic_cdk::{caller, id};
 use ic_cdk_macros::{query, update};
 use shared::{
     constants::USD_DECIMALS,
-    types::{BalanceDomain, PayoffType, Series, SeriesId},
+    types::{PayoffType, Series, SeriesId},
 };
 
 use super::{
@@ -96,20 +96,17 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
 
             let domain = series.balance_domain;
 
-            // Margin/Collateral checks only apply to Settlement domain.
-            if domain == BalanceDomain::Settlement {
-                let equity = acc.calculate_equity_usd(domain, &configs, &metrics);
-                let target_reserved = acc.get_reserved_margin_usd(domain) + required_margin_usd;
+            let equity = acc.calculate_equity_usd(domain, &configs, &metrics);
+            let target_reserved = acc.get_reserved_margin_usd(domain) + required_margin_usd;
 
-                if (equity.cast_signed()) < (target_reserved.cast_signed()) {
-                    return Err(TradeError::InsufficientMargin {
-                        user: caller,
-                        balance: equity,
-                        required: target_reserved,
-                    });
-                }
-                acc.set_reserved_margin_usd(domain, target_reserved);
+            if (equity.cast_signed()) < (target_reserved.cast_signed()) {
+                return Err(TradeError::InsufficientMargin {
+                    user: caller,
+                    balance: equity,
+                    required: target_reserved,
+                });
             }
+            acc.set_reserved_margin_usd(domain, target_reserved);
 
             LIMIT_ORDERS.with(|m| {
                 m.borrow_mut().insert(
@@ -122,11 +119,7 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
                         side,
                         qty,
                         price,
-                        blocked_margin_usd: if domain == BalanceDomain::Settlement {
-                            required_margin_usd
-                        } else {
-                            0
-                        },
+                        blocked_margin_usd: required_margin_usd,
                         balance_domain: domain,
                     },
                 );
@@ -626,18 +619,16 @@ pub(crate) fn mint_complete_set_logic(
 
         let domain = series.balance_domain;
 
-        if domain == BalanceDomain::Settlement {
-            let equity = acc.calculate_raw_equity_i128(domain, &configs, &metrics);
-            let current_reserved = acc.get_reserved_margin_usd(domain);
-            if equity - total_cost_usd < (current_reserved.cast_signed()) {
-                return Err(TradeError::InsufficientMargin {
-                    user: caller,
-                    balance: acc.calculate_equity_usd(domain, &configs, &metrics),
-                    required: current_reserved + total_cost_usd.unsigned_abs(),
-                });
-            }
-            acc.set_reserved_margin_usd(domain, current_reserved + total_cost_usd.unsigned_abs());
+        let equity = acc.calculate_raw_equity_i128(domain, &configs, &metrics);
+        let current_reserved = acc.get_reserved_margin_usd(domain);
+        if equity - total_cost_usd < (current_reserved.cast_signed()) {
+            return Err(TradeError::InsufficientMargin {
+                user: caller,
+                balance: acc.calculate_equity_usd(domain, &configs, &metrics),
+                required: current_reserved + total_cost_usd.unsigned_abs(),
+            });
         }
+        acc.set_reserved_margin_usd(domain, current_reserved + total_cost_usd.unsigned_abs());
 
         let current_cash = acc.get_cash_balance_usd(domain);
         acc.set_cash_balance_usd(domain, current_cash - total_cost_usd);
