@@ -52,13 +52,14 @@ impl IcrcHandler {
             .await
             .map_err(|e| map_ledger_call_failed("icrc1_balance_of", e))?;
 
-        let (ledger_balance,) = response
-            .candid_tuple::<(Nat,)>()
-            .map_err(|e| AssetError::CallError {
-                method: "icrc1_balance_of".to_owned(),
-                code: -2,
-                message: e.to_string(),
-            })?;
+        let (ledger_balance,) =
+            response
+                .candid_tuple::<(Nat,)>()
+                .map_err(|e| AssetError::CallError {
+                    method: "icrc1_balance_of".to_owned(),
+                    code: -2,
+                    message: e.to_string(),
+                })?;
 
         ledger_balance.0.to_u128().ok_or(AssetError::MathOverflow)
     }
@@ -71,11 +72,13 @@ impl IcrcHandler {
             .await
             .map_err(|e| map_ledger_call_failed("icrc1_fee", e))?;
 
-        let (fee_nat,) = response.candid_tuple::<(Nat,)>().map_err(|e| AssetError::CallError {
-            method: "icrc1_fee".to_owned(),
-            code: -2,
-            message: e.to_string(),
-        })?;
+        let (fee_nat,) = response
+            .candid_tuple::<(Nat,)>()
+            .map_err(|e| AssetError::CallError {
+                method: "icrc1_fee".to_owned(),
+                code: -2,
+                message: e.to_string(),
+            })?;
 
         fee_nat.0.to_u128().ok_or(AssetError::MathOverflow)
     }
@@ -88,11 +91,14 @@ impl IcrcHandler {
             .await
             .map_err(|e| map_ledger_call_failed("icrc1_symbol", e))?;
 
-        let (symbol,) = response.candid_tuple::<(String,)>().map_err(|e| AssetError::CallError {
-            method: "icrc1_symbol".to_owned(),
-            code: -2,
-            message: e.to_string(),
-        })?;
+        let (symbol,) =
+            response
+                .candid_tuple::<(String,)>()
+                .map_err(|e| AssetError::CallError {
+                    method: "icrc1_symbol".to_owned(),
+                    code: -2,
+                    message: e.to_string(),
+                })?;
 
         Ok(symbol)
     }
@@ -105,11 +111,13 @@ impl IcrcHandler {
             .await
             .map_err(|e| map_ledger_call_failed("icrc1_decimals", e))?;
 
-        let (decimals,) = response.candid_tuple::<(u8,)>().map_err(|e| AssetError::CallError {
-            method: "icrc1_decimals".to_owned(),
-            code: -2,
-            message: e.to_string(),
-        })?;
+        let (decimals,) = response
+            .candid_tuple::<(u8,)>()
+            .map_err(|e| AssetError::CallError {
+                method: "icrc1_decimals".to_owned(),
+                code: -2,
+                message: e.to_string(),
+            })?;
 
         Ok(decimals)
     }

@@ -97,9 +97,9 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
                     ));
                 }
                 Err(e) => {
-                    return SettleSeriesResult::Err(SettlementError::Common(CommonError::Internal(
-                        format!("Registry response decode failed: {e}"),
-                    )));
+                    return SettleSeriesResult::Err(SettlementError::Common(
+                        CommonError::Internal(format!("Registry response decode failed: {e}")),
+                    ));
                 }
             },
             Err(e) => {
@@ -246,12 +246,9 @@ pub(crate) async fn settle_series_inner(params: SettleSeriesParams) -> SettleSer
                 settlement: settlement.clone(),
             };
 
-            set_timer(
-                Duration::from_millis(50),
-                async move {
-                    let _ = settle_series_inner(params_clone).await;
-                },
-            );
+            set_timer(Duration::from_millis(50), async move {
+                let _ = settle_series_inner(params_clone).await;
+            });
 
             Ok(SettleSeriesResult::processing())
         }

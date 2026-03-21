@@ -1,320 +1,320 @@
 // Input parameters for registering a new price oracle.
 type AddOracleParams = record {
-  // Initial information about the oracle.
-  metadata : OracleMetadata;
-  // Initial list of authorised principals.
-  authorized_principals : vec principal;
-  // Unique identifier for the oracle (e.g., "COINGECKO").
-  oracle_id : text;
+	// Initial information about the oracle.
+	metadata : OracleMetadata;
+	// Initial list of authorised principals.
+	authorized_principals : vec principal;
+	// Unique identifier for the oracle (e.g., "COINGECKO").
+	oracle_id : text
 };
 // Input parameters for registering a new derivative series.
 type AddSeriesParams = record {
-  // A short, descriptive title for the series.
-  title : text;
-  // The option strike price, if applicable.
-  strike : opt Price;
-  // The payoff model for the series.
-  payoff_type : PayoffType;
-  // The unit in which the contract payoff is expressed.
-  payout_unit : PayoutUnit;
-  // Expiry timestamp in nanoseconds since UNIX epoch.
-  expiry_ns : nat64;
-  // An optional banner URL for the market.
-  banner_url : opt text;
-  // The underlying asset ticker (case-insensitive, e.g., "ICP").
-  underlying : text;
-  // A detailed description of the series.
-  description : Description;
-  // The defined outcomes for categorical markets (ordered).
-  outcomes : opt vec Outcome;
-  // An optional icon URL for the market.
-  icon_url : opt text;
-  // The number of decimals used for prices and strikes in this series.
-  price_precision : nat8;
-  // The balance domain this series belongs to.
-  balance_domain : BalanceDomain;
-  // The price oracle identifier (case-insensitive, e.g., "Coingecko").
-  oracle_source : text;
+	// A short, descriptive title for the series.
+	title : text;
+	// The option strike price, if applicable.
+	strike : opt Price;
+	// The payoff model for the series.
+	payoff_type : PayoffType;
+	// The unit in which the contract payoff is expressed.
+	payout_unit : PayoutUnit;
+	// Expiry timestamp in nanoseconds since UNIX epoch.
+	expiry_ns : nat64;
+	// An optional banner URL for the market.
+	banner_url : opt text;
+	// The underlying asset ticker (case-insensitive, e.g., "ICP").
+	underlying : text;
+	// A detailed description of the series.
+	description : Description;
+	// The defined outcomes for categorical markets (ordered).
+	outcomes : opt vec Outcome;
+	// An optional icon URL for the market.
+	icon_url : opt text;
+	// The number of decimals used for prices and strikes in this series.
+	price_precision : nat8;
+	// The balance domain this series belongs to.
+	balance_domain : BalanceDomain;
+	// The price oracle identifier (case-insensitive, e.g., "Coingecko").
+	oracle_source : text
 };
 // The result of an [`add_series`] operation.
 type AddSeriesResult = variant {
-  // Successfully registered the series with the returned [`SeriesId`].
-  Ok : text;
-  // Failed to register the series.
-  Err : SeriesError;
+	// Successfully registered the series with the returned [`SeriesId`].
+	Ok : text;
+	// Failed to register the series.
+	Err : SeriesError
 };
 // Represents a supported asset in the ICDC ecosystem.
 type Asset = variant {
-  // An ERC-20 token on an EVM-compatible chain.
-  Erc20 : ErcToken;
-  // An ICRC-compliant token identified by its canister [`Principal`].
-  Icrc : principal;
-  // A native asset on an EVM-compatible chain.
-  NativeEvm : NativeEvmAsset;
+	// An ERC-20 token on an EVM-compatible chain.
+	Erc20 : ErcToken;
+	// An ICRC-compliant token identified by its canister [`Principal`].
+	Icrc : principal;
+	// A native asset on an EVM-compatible chain.
+	NativeEvm : NativeEvmAsset
 };
 // Represents a distinct domain for balances and trading logic.
 type BalanceDomain = variant {
-  // Non-collateralized trading (e.g., using VICI).
-  Playground;
-  // Real collateralized trading (e.g., using ckUSDC, ICP).
-  Settlement;
+	// Non-collateralized trading (e.g., using VICI).
+	Playground;
+	// Real collateralized trading (e.g., using ckUSDC, ICP).
+	Settlement
 };
 // A generic representation of a decimal value with fixed precision.
 // This decouples numeric logic from domain-specific types like Price or Quantity.
 type DecimalValue = record {
-  // The number of decimal places (exponent).
-  decimals : nat8;
-  // The numeric value (mantissa).
-  value : nat;
+	// The number of decimal places (exponent).
+	decimals : nat8;
+	// The numeric value (mantissa).
+	value : nat
 };
 // A multiformat description.
 // Provides multiple versions of the same content for different rendering environments.
 type Description = record {
-  // Optional HTML version of the description.
-  html : opt text;
-  // Optional markdown version of the description.
-  markdown : opt text;
-  // The mandatory plain text description.
-  plain : text;
+	// Optional HTML version of the description.
+	html : opt text;
+	// Optional markdown version of the description.
+	markdown : opt text;
+	// The mandatory plain text description.
+	plain : text
 };
 // Represents an ERC-20 token on a specific EVM chain.
 type ErcToken = record {
-  // The number of decimals the token uses (e.g., 18 for ETH, 6 for USDC).
-  decimals : nat8;
-  // The contract address of the token.
-  token_address : text;
-  // The ID of the EVM chain where the token is deployed.
-  chain_id : nat64;
+	// The number of decimals the token uses (e.g., 18 for ETH, 6 for USDC).
+	decimals : nat8;
+	// The contract address of the token.
+	token_address : text;
+	// The ID of the EVM chain where the token is deployed.
+	chain_id : nat64
 };
 type FiatUnit = variant { Chf; Eur; Gbp; Usd };
 // Parameters for filtering the list of registered derivative series.
 type ListSeriesParams = record {
-  // Filter by the strike price.
-  strike : opt Price;
-  // Filter by the principal identifier of the creator.
-  creator : opt principal;
-  // Filter by the payoff model.
-  payoff_type : opt PayoffType;
-  // Filter by the payout unit.
-  payout_unit : opt PayoutUnit;
-  // Optional pagination parameters.
-  pagination : opt PaginationParams;
-  // Filter by the underlying asset ticker (case-insensitive).
-  underlying : opt text;
-  // Filter by a search term in the title or description (case-insensitive, partial match).
-  search_term : opt text;
-  // Filter by balance domain.
-  balance_domain : opt BalanceDomain;
-  // Filter by the price oracle identifier (case-insensitive, partial match).
-  oracle_source : opt text;
+	// Filter by the strike price.
+	strike : opt Price;
+	// Filter by the principal identifier of the creator.
+	creator : opt principal;
+	// Filter by the payoff model.
+	payoff_type : opt PayoffType;
+	// Filter by the payout unit.
+	payout_unit : opt PayoutUnit;
+	// Optional pagination parameters.
+	pagination : opt PaginationParams;
+	// Filter by the underlying asset ticker (case-insensitive).
+	underlying : opt text;
+	// Filter by a search term in the title or description (case-insensitive, partial match).
+	search_term : opt text;
+	// Filter by balance domain.
+	balance_domain : opt BalanceDomain;
+	// Filter by the price oracle identifier (case-insensitive, partial match).
+	oracle_source : opt text
 };
 // Input parameters for managing authorised principals of an oracle.
 type ManageOraclePrincipalsParams = record {
-  // Principals to be added to the authorised list.
-  add_principals : vec principal;
-  // Principals to be removed from the authorised list.
-  remove_principals : vec principal;
-  // The unique identifier of the oracle.
-  oracle_id : text;
+	// Principals to be added to the authorised list.
+	add_principals : vec principal;
+	// Principals to be removed from the authorised list.
+	remove_principals : vec principal;
+	// The unique identifier of the oracle.
+	oracle_id : text
 };
 // Represents a native asset on an EVM-compatible chain
 // (for example ETH on Ethereum/Base, POL on Polygon, or BNB on BSC).
 type NativeEvmAsset = record {
-  // The number of decimals the native asset uses.
-  decimals : nat8;
-  // The EVM chain where this native asset is used.
-  chain_id : nat64;
+	// The number of decimals the native asset uses.
+	decimals : nat8;
+	// The EVM chain where this native asset is used.
+	chain_id : nat64
 };
 type NonMonetaryUnit = variant { Points };
 // Represents an authorised price oracle group.
 type Oracle = record {
-  // The principal identifier of the oracle's manager (defaults to creator).
-  manager : principal;
-  // Timestamp of oracle registration in nanoseconds since UNIX epoch.
-  registered_at_ns : nat64;
-  // Metadata about the oracle.
-  metadata : OracleMetadata;
-  // The set of principals authorised to push settlement data for this oracle.
-  authorized_principals : vec principal;
-  // Unique identifier for the oracle (e.g., "COINGECKO").
-  oracle_id : text;
+	// The principal identifier of the oracle's manager (defaults to creator).
+	manager : principal;
+	// Timestamp of oracle registration in nanoseconds since UNIX epoch.
+	registered_at_ns : nat64;
+	// Metadata about the oracle.
+	metadata : OracleMetadata;
+	// The set of principals authorised to push settlement data for this oracle.
+	authorized_principals : vec principal;
+	// Unique identifier for the oracle (e.g., "COINGECKO").
+	oracle_id : text
 };
 // Errors that can occur during oracle-related operations.
 type OracleError = variant {
-  // Returned when the caller is not authorised to manage the oracle.
-  UnauthorizedOracleManager;
-  // Returned when attempting to add an oracle that already exists.
-  OracleAlreadyExists;
-  // Returned when the specified oracle does not exist.
-  OracleNotFound;
+	// Returned when the caller is not authorised to manage the oracle.
+	UnauthorizedOracleManager;
+	// Returned when attempting to add an oracle that already exists.
+	OracleAlreadyExists;
+	// Returned when the specified oracle does not exist.
+	OracleNotFound
 };
 // Metadata about a price oracle entity.
 type OracleMetadata = record {
-  // The human-readable name of the oracle.
-  name : text;
-  // A short description of the oracle's methodology or data sources.
-  description : opt Description;
-  // Optional URL to the oracle's website.
-  website : opt text;
+	// The human-readable name of the oracle.
+	name : text;
+	// A short description of the oracle's methodology or data sources.
+	description : opt Description;
+	// Optional URL to the oracle's website.
+	website : opt text
 };
 // The result of an oracle-related operation.
 type OracleResult = variant { Ok; Err : OracleError };
 // Metadata for a specific outcome in a categorical market.
 type Outcome = record {
-  // The unique identifier of the outcome.
-  id : text;
-  // A short title for the outcome (e.g., "Yes", "No", "Team A").
-  title : text;
-  // An optional detailed description of the outcome.
-  description : opt Description;
-  // An optional icon URL for the outcome.
-  icon_url : opt text;
+	// The unique identifier of the outcome.
+	id : text;
+	// A short title for the outcome (e.g., "Yes", "No", "Team A").
+	title : text;
+	// An optional detailed description of the outcome.
+	description : opt Description;
+	// An optional icon URL for the outcome.
+	icon_url : opt text
 };
 // Parameters for paginating results.
 type PaginationParams = record {
-  // Return items strictly *after* this series id (exclusive).
-  cursor : opt text;
-  // Maximum number of items to return.
-  limit : opt nat64;
+	// Return items strictly *after* this series id (exclusive).
+	cursor : opt text;
+	// Maximum number of items to return.
+	limit : opt nat64
 };
 // Defines the payoff structure for a derivative contract.
 type PayoffType = variant {
-  // Payoff based on the positive difference between strike and underlying price.
-  Put;
-  // A fixed payoff if the condition is met (all-or-nothing).
-  Binary;
-  // Payoff based on the positive difference between underlying price and strike.
-  Call;
-  // A categorical market with multiple mutually exclusive outcomes.
-  Categorical;
+	// Payoff based on the positive difference between strike and underlying price.
+	Put;
+	// A fixed payoff if the condition is met (all-or-nothing).
+	Binary;
+	// Payoff based on the positive difference between underlying price and strike.
+	Call;
+	// A categorical market with multiple mutually exclusive outcomes.
+	Categorical
 };
 type PayoutUnit = variant {
-  Fiat : FiatUnit;
-  Asset : Asset;
-  NonMonetary : NonMonetaryUnit;
+	Fiat : FiatUnit;
+	Asset : Asset;
+	NonMonetary : NonMonetaryUnit
 };
 // Encapsulates a price with its numerical value and domain-specific metadata.
 // Decouples the mathematical representation (`DecimalValue`) from the
 // reporting context (timestamp, oracle Source).
 type Price = record {
-  // Optional timestamp when this price was generated/observed.
-  timestamp : opt nat64;
-  // Optional identifier for the oracle source.
-  oracle_id : opt text;
-  // The numeric component of the price.
-  decimal : DecimalValue;
+	// Optional timestamp when this price was generated/observed.
+	timestamp : opt nat64;
+	// Optional identifier for the oracle source.
+	oracle_id : opt text;
+	// The numeric component of the price.
+	decimal : DecimalValue
 };
 // Defines a specific derivative series (contract).
 type Series = record {
-  // A short, descriptive title for the series.
-  title : text;
-  // Target price for options, if applicable.
-  strike : opt Price;
-  // The principal identifier of the series creator.
-  creator : principal;
-  // The mathematical payoff model used for this series.
-  payoff_type : PayoffType;
-  // The unit in which the contract payoff is expressed.
-  payout_unit : PayoutUnit;
-  // Expiry timestamp in nanoseconds since UNIX epoch.
-  expiry_ns : nat64;
-  // An optional banner URL for the market.
-  banner_url : opt text;
-  // Unique identifier computed from series parameters.
-  series_id : text;
-  // The underlying asset ticker or identifier (e.g., "ICP/USD").
-  underlying : text;
-  // A detailed description of the series.
-  description : Description;
-  // The defined outcomes for categorical markets (ordered).
-  outcomes : opt vec Outcome;
-  // Timestamp of series creation in nanoseconds since UNIX epoch.
-  created_at_ns : nat64;
-  // An optional icon URL for the market.
-  icon_url : opt text;
-  // The canonical number of decimals used for prices and strikes in this series.
-  price_precision : nat8;
-  // The domain this market belongs to (e.g. Playground, Settlement).
-  balance_domain : BalanceDomain;
-  // The identifier of the oracle providing the settlement data.
-  oracle_source : text;
+	// A short, descriptive title for the series.
+	title : text;
+	// Target price for options, if applicable.
+	strike : opt Price;
+	// The principal identifier of the series creator.
+	creator : principal;
+	// The mathematical payoff model used for this series.
+	payoff_type : PayoffType;
+	// The unit in which the contract payoff is expressed.
+	payout_unit : PayoutUnit;
+	// Expiry timestamp in nanoseconds since UNIX epoch.
+	expiry_ns : nat64;
+	// An optional banner URL for the market.
+	banner_url : opt text;
+	// Unique identifier computed from series parameters.
+	series_id : text;
+	// The underlying asset ticker or identifier (e.g., "ICP/USD").
+	underlying : text;
+	// A detailed description of the series.
+	description : Description;
+	// The defined outcomes for categorical markets (ordered).
+	outcomes : opt vec Outcome;
+	// Timestamp of series creation in nanoseconds since UNIX epoch.
+	created_at_ns : nat64;
+	// An optional icon URL for the market.
+	icon_url : opt text;
+	// The canonical number of decimals used for prices and strikes in this series.
+	price_precision : nat8;
+	// The domain this market belongs to (e.g. Playground, Settlement).
+	balance_domain : BalanceDomain;
+	// The identifier of the oracle providing the settlement data.
+	oracle_source : text
 };
 // Errors that can occur during series-related operations.
 type SeriesError = variant {
-  // Returned when the provided description exceeds the maximum allowed length.
-  DescriptionTooLong;
-  // Returned when the provided title exceeds the maximum allowed length.
-  TitleTooLong;
-  // Returned when the caller is not authorized to add a series.
-  Unauthorized;
-  // Returned when the provided payout unit is not supported by the protocol.
-  UnsupportedPayoutUnit;
-  // Returned when attempting to add a series that already exists.
-  SeriesAlreadyExists;
+	// Returned when the provided description exceeds the maximum allowed length.
+	DescriptionTooLong;
+	// Returned when the provided title exceeds the maximum allowed length.
+	TitleTooLong;
+	// Returned when the caller is not authorized to add a series.
+	Unauthorized;
+	// Returned when the provided payout unit is not supported by the protocol.
+	UnsupportedPayoutUnit;
+	// Returned when attempting to add a series that already exists.
+	SeriesAlreadyExists
 };
 // A paginated page of registered series.
 type SeriesPage = record {
-  // The cursor to be used for the next request, if any.
-  next_cursor : opt text;
-  // The list of series in this page.
-  items : vec Series;
+	// The cursor to be used for the next request, if any.
+	next_cursor : opt text;
+	// The list of series in this page.
+	items : vec Series
 };
 // Input parameters for updating an existing oracle's metadata.
 type UpdateOracleMetadataParams = record {
-  // The updated metadata.
-  metadata : OracleMetadata;
-  // The unique identifier of the oracle to update.
-  oracle_id : text;
+	// The updated metadata.
+	metadata : OracleMetadata;
+	// The unique identifier of the oracle to update.
+	oracle_id : text
 };
 service : {
-  // Authorizes a list of principals to create new derivative series.
-  // 
-  // This method is gated to canister controllers.
-  add_authorized_creators : (vec principal) -> ();
-  // Registers a new price oracle in the registry.
-  add_oracle : (AddOracleParams) -> (OracleResult);
-  // Adds a new derivative series to the registry.
-  // 
-  // This method generates a canonical [`SeriesId`] for the provided parameters.
-  // If the series already exists, it returns an error.
-  // 
-  // # Arguments
-  // * `params` - The defining parameters for the new series.
-  // 
-  // # Returns
-  // * [`AddSeriesResult::Ok`] containing the new [`SeriesId`] on success.
-  // * [`AddSeriesResult::Err`] with [`SeriesError::SeriesAlreadyExists`] if the series is already
-  // registered.
-  add_series : (AddSeriesParams) -> (AddSeriesResult);
-  // Retrieves the details of a specific oracle by its ID.
-  get_oracle : (text) -> (opt Oracle) query;
-  // Retrieves a specific [`Series`] by its [`SeriesId`].
-  // 
-  // # Arguments
-  // * `series_id` - The unique identifier of the series to retrieve.
-  // 
-  // # Returns
-  // * `Some(Series)` if the series exists in the registry.
-  // * `None` otherwise.
-  get_series : (text) -> (opt Series) query;
-  // Checks if a principal is authorized to create derivative series.
-  is_authorized_creator : (principal) -> (bool) query;
-  // Checks if a principal is authorized to push settlement data for a given oracle.
-  is_oracle_authorized : (text, principal) -> (bool) query;
-  // Returns a list of all principals currently authorized to create series.
-  // 
-  // This method is gated to canister controllers.
-  list_authorized_creators : () -> (vec principal) query;
-  // Returns a paginated page of all registered derivative series.
-  list_series : (PaginationParams) -> (SeriesPage) query;
-  // Returns a paginated page of registered derivative series, optionally filtered.
-  list_series_with : (ListSeriesParams) -> (SeriesPage) query;
-  // Adds or removes authorised principals for an oracle.
-  manage_oracle_principals : (ManageOraclePrincipalsParams) -> (OracleResult);
-  // Removes authorization from a list of principals, preventing them from creating new series.
-  // 
-  // This method is gated to canister controllers.
-  remove_authorized_creators : (vec principal) -> ();
-  // Updates the metadata of an existing oracle.
-  update_oracle_metadata : (UpdateOracleMetadataParams) -> (OracleResult);
+	// Authorizes a list of principals to create new derivative series.
+	//
+	// This method is gated to canister controllers.
+	add_authorized_creators : (vec principal) -> ();
+	// Registers a new price oracle in the registry.
+	add_oracle : (AddOracleParams) -> (OracleResult);
+	// Adds a new derivative series to the registry.
+	//
+	// This method generates a canonical [`SeriesId`] for the provided parameters.
+	// If the series already exists, it returns an error.
+	//
+	// # Arguments
+	// * `params` - The defining parameters for the new series.
+	//
+	// # Returns
+	// * [`AddSeriesResult::Ok`] containing the new [`SeriesId`] on success.
+	// * [`AddSeriesResult::Err`] with [`SeriesError::SeriesAlreadyExists`] if the series is already
+	// registered.
+	add_series : (AddSeriesParams) -> (AddSeriesResult);
+	// Retrieves the details of a specific oracle by its ID.
+	get_oracle : (text) -> (opt Oracle) query;
+	// Retrieves a specific [`Series`] by its [`SeriesId`].
+	//
+	// # Arguments
+	// * `series_id` - The unique identifier of the series to retrieve.
+	//
+	// # Returns
+	// * `Some(Series)` if the series exists in the registry.
+	// * `None` otherwise.
+	get_series : (text) -> (opt Series) query;
+	// Checks if a principal is authorized to create derivative series.
+	is_authorized_creator : (principal) -> (bool) query;
+	// Checks if a principal is authorized to push settlement data for a given oracle.
+	is_oracle_authorized : (text, principal) -> (bool) query;
+	// Returns a list of all principals currently authorized to create series.
+	//
+	// This method is gated to canister controllers.
+	list_authorized_creators : () -> (vec principal) query;
+	// Returns a paginated page of all registered derivative series.
+	list_series : (PaginationParams) -> (SeriesPage) query;
+	// Returns a paginated page of registered derivative series, optionally filtered.
+	list_series_with : (ListSeriesParams) -> (SeriesPage) query;
+	// Adds or removes authorised principals for an oracle.
+	manage_oracle_principals : (ManageOraclePrincipalsParams) -> (OracleResult);
+	// Removes authorization from a list of principals, preventing them from creating new series.
+	//
+	// This method is gated to canister controllers.
+	remove_authorized_creators : (vec principal) -> ();
+	// Updates the metadata of an existing oracle.
+	update_oracle_metadata : (UpdateOracleMetadataParams) -> (OracleResult)
 }

@@ -33,7 +33,7 @@ pub struct AccountStateResponse {
     pub available_margin_usd: i128,
 }
 
-/// Result of an account state retrieval request.
+/// Outcome of an account state retrieval request.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum GetAccountStateResult {
     /// Successfully retrieved the account state details.
