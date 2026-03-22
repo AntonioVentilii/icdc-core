@@ -155,13 +155,13 @@ SCALAR_MARKETS=$(sort -u "$TMP_SCALAR" 2>/dev/null || true)
 
 # --- 2. THRESHOLD ---
 # Formula: NUM_MARKETS * ORDERS_PER_SIDE * 2_SIDES * UNITS_PER_ORDER * WIGGLE_ROOM
-REQ_ICP=$(echo "$TOTAL_UNITS * $NUM_ORDERS_PER_SIDE * 2 * $ORDER_VALUE_USD * $WIGGLE_ROOM" | bc)
-REQ_E8S=$(echo "$REQ_ICP * 100000000 / 1" | bc | cut -d'.' -f1)
-echo "Required TEST_ICP: $REQ_ICP ($REQ_E8S e8s)"
+REQ_VXP=$(echo "$TOTAL_UNITS * $NUM_ORDERS_PER_SIDE * 2 * $ORDER_VALUE_USD * $WIGGLE_ROOM" | bc)
+REQ_E8S=$(echo "$REQ_VXP * 100000000 / 1" | bc | cut -d'.' -f1)
+echo "Required $VICI_XP_SYMBOL: $REQ_VXP ($REQ_E8S e8s)"
 
 # --- 3. BALANCE & FAUCET ---
 echo "Checking balance..."
-if ! BAL_RES=$(dfx canister call "$TESTICP_LEDGER" icrc1_balance_of "(record { owner = principal \"$MY_PRINCIPAL\" })" --network "$NETWORK" 2>/dev/null); then
+if ! BAL_RES=$(dfx canister call "$VICI_XP_LEDGER" icrc1_balance_of "(record { owner = principal \"$MY_PRINCIPAL\" })" --network "$NETWORK" 2>/dev/null); then
   echo "Warning: Balance check failed."
   CUR_BAL_E8S=0
 else
@@ -170,7 +170,8 @@ fi
 echo "Current balance: $CUR_BAL_E8S e8s"
 
 while [[ "$CUR_BAL_E8S" -lt "$REQ_E8S" ]]; do
-  echo "Current balance ($CUR_BAL_E8S) is less than required ($REQ_E8S). Calling faucet..."
+  echo "Current balance ($CUR_BAL_E8S) is less than required ($REQ_E8S). Please ensure you have sufficient $VICI_XP_SYMBOL tokens."
+  # The faucet might not support VXP directly via transfer_icp, so we just wait or the user provides it.
   dfx identity use default
   if [[ -n "$MY_ACCOUNT_ID" ]]; then
     dfx canister call "$FAUCET_CANISTER" transfer_icp "(\"$MY_ACCOUNT_ID\")" --network "$NETWORK"
@@ -184,7 +185,7 @@ while [[ "$CUR_BAL_E8S" -lt "$REQ_E8S" ]]; do
   sleep 5
 
   # Re-check balance
-  if ! BAL_RES=$(dfx canister call "$TESTICP_LEDGER" icrc1_balance_of "(record { owner = principal \"$MY_PRINCIPAL\" })" --network "$NETWORK" 2>/dev/null); then
+  if ! BAL_RES=$(dfx canister call "$VICI_XP_LEDGER" icrc1_balance_of "(record { owner = principal \"$MY_PRINCIPAL\" })" --network "$NETWORK" 2>/dev/null); then
     echo "Warning: Balance check failed during retry loop."
   else
     CUR_BAL_E8S=$(echo "$BAL_RES" | grep -oE '[0-9_]+ : nat' | head -n1 | awk '{print $1}' | tr -d '_')
@@ -206,8 +207,8 @@ DEPOSIT_AMOUNT=$((CUR_BAL_E8S - 2 * LEDGER_FEE))
 [[ "$APPROVE_AMOUNT" -lt 0 ]] && APPROVE_AMOUNT=0
 [[ "$DEPOSIT_AMOUNT" -lt 0 ]] && DEPOSIT_AMOUNT=0
 
-echo "  Approving Clearing to spend $APPROVE_AMOUNT e8s of TESTICP..."
-dfx canister call "$TESTICP_LEDGER" icrc2_approve "(record {
+echo "  Approving Clearing to spend $APPROVE_AMOUNT e8s of $VICI_XP_SYMBOL..."
+dfx canister call "$VICI_XP_LEDGER" icrc2_approve "(record {
     amount = $APPROVE_AMOUNT : nat; 
     spender = record { owner = principal \"$CLEARING_CANISTER\" };
 })" --network "$NETWORK"
@@ -215,9 +216,9 @@ dfx canister call "$TESTICP_LEDGER" icrc2_approve "(record {
 echo "  Executing deposit_collateral on Clearing..."
 dfx canister call clearing deposit_collateral "(record { 
     amount = $DEPOSIT_AMOUNT : nat; 
-    asset_id = \"$TESTICP_SYMBOL\"; 
+    asset_id = \"$VICI_XP_SYMBOL\"; 
     deposit_id = \"$DID\"; 
-    domain = opt variant { Settlement };
+    domain = opt variant { ViciXp };
 })" --network "$NETWORK"
 
 # --- 5. PLACE ORDERS ---
