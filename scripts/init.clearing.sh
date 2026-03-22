@@ -26,9 +26,9 @@ echo "Registry: $REGISTRY_CANISTER"
 echo "Setting registry canister..."
 dfx canister call clearing set_registry_canister "(principal \"$REGISTRY_CANISTER\")" --network "$NETWORK"
 
-# 1b. Domain policies (Settlement + Playground)
+# 1b. Domain policies (Settlement, Playground, ViciXp)
 #     Stored for admin / future enforcement; same defaults as DomainPolicy in code.
-echo "Configuring balance domain policies (Settlement, Playground)..."
+echo "Configuring balance domain policies (Settlement, Playground, ViciXp)..."
 dfx canister call clearing update_domain_policy "(record {
   domain = variant { Settlement };
   policy = record {
@@ -51,10 +51,56 @@ dfx canister call clearing update_domain_policy "(record {
   };
 })" --network "$NETWORK"
 
-# 2. Register collateral (ICRC): allowed_balance_domains enforced on deposit/withdraw.
-#    Test tokens → Playground only. Tune CLEARING_DOMAINS_* in init.common.sh if needed.
+dfx canister call clearing update_domain_policy "(record {
+  domain = variant { ViciXp };
+  policy = record {
+    deposits_enabled = true;
+    protocol_fee_ratio_override = null;
+    label = \"Vici XP\";
+    withdrawals_enabled = true;
+    insurance_fund_fee_ratio_override = null;
+  };
+})" --network "$NETWORK"
 
-# 2a. TESTICP (playground-only)
+# 2. Register collateral (ICRC): allowed_balance_domains enforced on deposit/withdraw.
+#    ICP → Settlement. VXP → ViciXp only. Test tokens → Playground only.
+#    Tune CLEARING_DOMAINS_* and prices in init.common.sh if needed.
+
+# 2a. ICP (Settlement only)
+echo "Registering $ICP_SYMBOL collateral asset (domains: Settlement)..."
+dfx canister call clearing register_icrc_asset "(record {
+    asset_id = \"$ICP_SYMBOL\";
+    ledger_id = principal \"$ICP_LEDGER\";
+    haircut_bps = $ICP_HAIRCUT_BPS : nat16;
+    oracle_id = null;
+    is_enabled = true;
+    allowed_balance_domains = $CLEARING_DOMAINS_SETTLEMENT;
+})" --network "$NETWORK"
+
+echo "Setting price for $ICP_SYMBOL (\$$(echo "scale=6; $ICP_PRICE_E6 / (10^$USD_DECIMALS)" | bc))..."
+dfx canister call clearing update_asset_price "(record {
+    asset_id = \"$ICP_SYMBOL\";
+    price = record { decimal = record { value = $ICP_PRICE_E6 : nat; decimals = $USD_DECIMALS : nat8 }; oracle_id = null; timestamp = null };
+})" --network "$NETWORK"
+
+# 2b. Vici XP / VXP (ViciXp domain only)
+echo "Registering $VICI_XP_SYMBOL collateral asset (domains: ViciXp; ledger $VICI_XP_LEDGER)..."
+dfx canister call clearing register_icrc_asset "(record {
+    asset_id = \"$VICI_XP_SYMBOL\";
+    ledger_id = principal \"$VICI_XP_LEDGER\";
+    haircut_bps = $VICI_XP_HAIRCUT_BPS : nat16;
+    oracle_id = null;
+    is_enabled = true;
+    allowed_balance_domains = $CLEARING_DOMAINS_VICI_XP;
+})" --network "$NETWORK"
+
+echo "Setting price for $VICI_XP_SYMBOL (\$$(echo "scale=6; $VICI_XP_PRICE_E6 / (10^$USD_DECIMALS)" | bc))..."
+dfx canister call clearing update_asset_price "(record {
+    asset_id = \"$VICI_XP_SYMBOL\";
+    price = record { decimal = record { value = $VICI_XP_PRICE_E6 : nat; decimals = $USD_DECIMALS : nat8 }; oracle_id = null; timestamp = null };
+})" --network "$NETWORK"
+
+# 2c. TESTICP (playground-only)
 echo "Registering $TESTICP_SYMBOL collateral asset (domains: Playground)..."
 dfx canister call clearing register_icrc_asset "(record { 
     asset_id = \"$TESTICP_SYMBOL\"; 

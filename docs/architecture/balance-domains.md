@@ -27,3 +27,5 @@ Consumer apps stay out of the protocol: the clearing only sees domains and asset
 
 - `src/shared/src/types/domain.rs` — `BalanceDomain`, `AllowedBalanceDomains`, `DomainPolicy`
 - `src/clearing/src/api/admin/api.rs` — `register_icrc_asset`, `update_collateral_allowed_domains`, `update_domain_policy`
+- `scripts/init.common.sh` — domain Candid snippets (`CLEARING_DOMAINS_*`) and default ledger IDs / prices for init
+- `scripts/init.clearing.sh` — `update_domain_policy` for each domain and `register_icrc_asset` (e.g. ICP → Settlement, VXP → `ViciXp`)
