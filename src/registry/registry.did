@@ -54,7 +54,9 @@ type Asset = variant {
 };
 // Represents a distinct domain for balances and trading logic.
 type BalanceDomain = variant {
-	// Non-collateralized trading (e.g., using VICI).
+	// VICI XP (loyalty points) — segregated from Playground test assets.
+	ViciXp;
+	// Testnet / sandbox collateral (e.g. TESTICP, Sepolia) — not real funds.
 	Playground;
 	// Real collateralized trading (e.g., using ckUSDC, ICP).
 	Settlement

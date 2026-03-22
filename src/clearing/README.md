@@ -7,7 +7,7 @@ The Clearing Engine acts as a Central Counterparty (CCP) for derivative trades. 
 - **Margin Management**: Tracks user collateral balances and calculates maintenance margin requirements.
 - **Trade Clearing**: Validates matched trades from exchanges and updates buyer/seller positions.
 - **Settlement**: Executes a multi-phase, idempotent settlement process for expiring series.
-- **Domain Management**: Supports multiple balance domains (`Settlement`, `Playground`) with identical risk enforcement and configurable policies. Users can migrate their full state between domains.
+- **Domain Management**: Supports multiple balance domains (core: `Settlement`, `Playground`; optional branded domains such as `ViciXp`) with identical risk enforcement and configurable policies. Users can migrate their full state between domains. See **[Balance domains](../../docs/architecture/balance-domains.md)** for defaults vs app-specific domains.
 - **Position Novation**: Enables portable positions between different clearing canisters through a 6-step protocol:
   1. **Request**: User requests a transfer to a new clearing house.
   2. **Freeze**: Source clearing house freezes the position and calculates the final margin state.

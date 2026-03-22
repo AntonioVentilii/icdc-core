@@ -19,11 +19,13 @@ use serde::{Deserialize, Serialize};
     Default,
 )]
 pub enum BalanceDomain {
-    /// Non-collateralized trading (e.g., using VICI).
+    /// Testnet / sandbox collateral (e.g. TESTICP, Sepolia) — not real funds.
     Playground,
     /// Real collateralized trading (e.g., using ckUSDC, ICP).
     #[default]
     Settlement,
+    /// VICI XP (loyalty points) — segregated from Playground test assets.
+    ViciXp,
 }
 
 /// Building an [`AllowedBalanceDomains`] failed (e.g. empty input).
@@ -85,7 +87,7 @@ impl AllowedBalanceDomains {
 /// Configurable policy for a balance domain.
 ///
 /// Controls domain-specific behavior such as fee ratios and feature flags.
-/// Both domains default to identical policies so risk enforcement is uniform.
+/// Domains default to identical policies so risk enforcement is uniform unless overridden.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct DomainPolicy {
     /// Whether deposits of real collateral assets are accepted in this domain.
@@ -131,12 +133,17 @@ mod tests {
         let got = AllowedBalanceDomains::try_from(vec![
             BalanceDomain::Settlement,
             BalanceDomain::Playground,
+            BalanceDomain::ViciXp,
             BalanceDomain::Settlement,
         ])
         .unwrap();
         assert_eq!(
             got.as_slice(),
-            &[BalanceDomain::Playground, BalanceDomain::Settlement]
+            &[
+                BalanceDomain::Playground,
+                BalanceDomain::Settlement,
+                BalanceDomain::ViciXp
+            ]
         );
     }
 }

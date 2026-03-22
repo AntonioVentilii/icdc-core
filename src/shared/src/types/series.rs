@@ -142,6 +142,7 @@ impl Series {
         match params.balance_domain {
             BalanceDomain::Playground => hasher.update(b"PLAYGROUND"),
             BalanceDomain::Settlement => hasher.update(b"SETTLEMENT"),
+            BalanceDomain::ViciXp => hasher.update(b"VICI_XP"),
         }
 
         // Explicit field separators to avoid ambiguity

@@ -104,7 +104,9 @@ type AssetWorth = record {
 };
 // Represents a distinct domain for balances and trading logic.
 type BalanceDomain = variant {
-	// Non-collateralized trading (e.g., using VICI).
+	// VICI XP (loyalty points) — segregated from Playground test assets.
+	ViciXp;
+	// Testnet / sandbox collateral (e.g. TESTICP, Sepolia) — not real funds.
 	Playground;
 	// Real collateralized trading (e.g., using ckUSDC, ICP).
 	Settlement
@@ -224,7 +226,7 @@ type Description = record {
 // Configurable policy for a balance domain.
 //
 // Controls domain-specific behavior such as fee ratios and feature flags.
-// Both domains default to identical policies so risk enforcement is uniform.
+// Domains default to identical policies so risk enforcement is uniform unless overridden.
 type DomainPolicy = record {
 	// Whether deposits of real collateral assets are accepted in this domain.
 	deposits_enabled : bool;
