@@ -847,6 +847,8 @@ service : (Config) -> {
 	get_settlement_status : (text) -> (opt SettlementStatusView) query;
 	// Retrieves the trade history (executed trades) for the caller.
 	get_trade_history : () -> (vec Event) query;
+	// Returns the official number of decimals for USD accounting.
+	get_usd_decimals : () -> (nat8) query;
 	// Handles incoming HTTP requests for Prometheus metrics.
 	//
 	// This endpoint is restricted to canister controllers and serves metrics at `/metrics`.
