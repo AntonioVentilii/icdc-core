@@ -139,8 +139,7 @@ impl AccountState {
         configs: &BTreeMap<AssetId, CollateralAssetConfig>,
         metrics: &BTreeMap<AssetId, AssetMetrics>,
     ) -> i128 {
-        let mut total_equity_usd: i128 = self.get_cash_balance_usd(domain)
-            + (self.get_reserved_margin_usd(domain).cast_signed());
+        let mut total_equity_usd: i128 = self.get_cash_balance_usd(domain);
 
         let target_decimals = u32::from(USD_DECIMALS);
 

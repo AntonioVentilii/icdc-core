@@ -115,8 +115,8 @@ fn complex_available_margin_check() {
     if let GetAccountStateResult::Ok(resp) = state_final {
         assert_eq!(
             resp.state.get_cash_balance_usd(BalanceDomain::Settlement),
-            -500_000,
-            "Cash balance should be negative $50"
+            0,
+            "Cash balance should be 0 (no deduction for margin in new model)"
         );
         assert_eq!(
             resp.total_equity_usd, 2_205_000,

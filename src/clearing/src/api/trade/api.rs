@@ -621,7 +621,7 @@ pub(crate) fn mint_complete_set_logic(
 
         let equity = acc.calculate_raw_equity_i128(domain, &configs, &metrics);
         let current_reserved = acc.get_reserved_margin_usd(domain);
-        if equity - total_cost_usd < (current_reserved.cast_signed()) {
+        if equity < (current_reserved.cast_signed() + total_cost_usd) {
             return Err(TradeError::InsufficientMargin {
                 user: caller,
                 balance: acc.calculate_equity_usd(domain, &configs, &metrics),
@@ -629,9 +629,6 @@ pub(crate) fn mint_complete_set_logic(
             });
         }
         acc.set_reserved_margin_usd(domain, current_reserved + total_cost_usd.unsigned_abs());
-
-        let current_cash = acc.get_cash_balance_usd(domain);
-        acc.set_cash_balance_usd(domain, current_cash - total_cost_usd);
         Ok(())
     })?;
 
@@ -753,20 +750,8 @@ pub(crate) fn redeem_complete_set_logic(
         }
     });
 
-    // Credit cash
-    let asset_decimals = u32::from(USD_DECIMALS);
-    let unit_cost_usd = 10_u128.pow(asset_decimals);
-    let total_credit_usd = (qty.unsigned_abs() * unit_cost_usd).cast_signed();
-
-    ACCOUNT_STATES.with(|accounts| {
-        let mut accounts = accounts.borrow_mut();
-        if let Some(acc) = accounts.get_mut(&caller) {
-            let domain = series.balance_domain;
-            let current = acc.get_cash_balance_usd(domain);
-            acc.set_cash_balance_usd(domain, current + total_credit_usd);
-        }
-    });
-
+    // We don't credit cash here anymore, as redemption simply releases the reserved margin.
+    // The underlying collateral remains in the 'balances' map.
     Ok(true)
 }
 

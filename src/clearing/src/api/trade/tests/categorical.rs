@@ -55,12 +55,12 @@ fn categorical_mint_redeem_complete_set() {
     setup_test_state(vec![(user, 100_000)]);
 
     mint_complete_set_logic(user, &series_id.clone(), &series.clone(), 5).expect("mint failed");
-    verify_cash_balance(user, 50_000);
+    verify_cash_balance(user, 100_000); // Cash stays same
     verify_position_qty(user, &series_id, Some(&outcome_a.clone()), 5);
     verify_position_qty(user, &series_id, Some(&outcome_b.clone()), 5);
 
     redeem_complete_set_logic(user, &series_id.clone(), &series, 2).expect("redeem failed");
-    verify_cash_balance(user, 70_000);
+    verify_cash_balance(user, 100_000); // Cash stays same
     verify_position_qty(user, &series_id, Some(&outcome_a.clone()), 3);
     verify_position_qty(user, &series_id, Some(&outcome_b.clone()), 3);
 }
@@ -115,7 +115,7 @@ fn categorical_lifecycle_scenario() {
     setup_test_state(vec![(seller, 200_000), (buyer, 100_000)]);
 
     mint_complete_set_logic(seller, &series_id.clone(), &series.clone(), 10).expect("mint failed");
-    verify_cash_balance(seller, 100_000);
+    verify_cash_balance(seller, 200_000); // Cash stays same
 
     execute_trade_checked(
         &series.clone(),
@@ -132,8 +132,8 @@ fn categorical_lifecycle_scenario() {
         },
     );
 
-    verify_cash_balance(seller, 140_000);
-    verify_cash_balance(buyer, 60_000);
+    verify_cash_balance(seller, 206_667); // 200,000 + 6,667 PnL from selling A at profit
+    verify_cash_balance(buyer, 100_000); // Cash stays same
 
     verify_position_qty(seller, &series_id, Some(&outcome_a.clone()), 0);
     verify_position_qty(seller, &series_id, Some(&outcome_b.clone()), 10);
@@ -142,8 +142,8 @@ fn categorical_lifecycle_scenario() {
 
     settle_series_checked(&series, &SettlementInput::Outcome(outcome_a.clone()));
 
-    verify_cash_balance(buyer, 160_000);
-    verify_cash_balance(seller, 140_000);
+    verify_cash_balance(buyer, 200_000); // 100k + 100k payoff
+    verify_cash_balance(seller, 206_667); // 206,667 + 0 payoff
 
     verify_position_qty(buyer, &series_id, Some(&outcome_a.clone()), 0);
     verify_position_qty(seller, &series_id, Some(&outcome_b.clone()), 0);
@@ -207,20 +207,18 @@ fn categorical_short_settlement() {
         },
     );
 
-    // After trade:
-    // Buyer: 10 - 4 (margin/price) = 6
-    // Seller: 10 - 6 (margin = 1 - 0.4) = 4
-    verify_cash_balance(buyer, 60_000);
-    verify_cash_balance(seller, 40_000);
+    // After trade, cash stays same
+    verify_cash_balance(buyer, 100_000);
+    verify_cash_balance(seller, 100_000);
 
     // Settle with Outcome B winning (so A loses)
     settle_series_checked(&series, &SettlementInput::Outcome(outcome_b.clone()));
 
     // Results:
-    // Buyer (Long A): receives 0. Final = 6 + 0 = 6.
-    // Seller (Short A): receives 1.0 (collateral return). Final = 4 + 10 = 14.
-    verify_cash_balance(buyer, 60_000);
-    verify_cash_balance(seller, 140_000);
+    // Buyer (Long A): receives 0. Final = 100k + 0 = 100k.
+    // Seller (Short A): receives 1.0 payoff. Final = 100k + 100k = 200k.
+    verify_cash_balance(buyer, 100_000);
+    verify_cash_balance(seller, 200_000);
 }
 
 #[test]
@@ -284,8 +282,8 @@ fn categorical_short_loss() {
     settle_series_checked(&series, &SettlementInput::Outcome(outcome_a.clone()));
 
     // Results:
-    // Buyer (Long A): receives 1.0. Final = 6 + 10 = 16.
-    // Seller (Short A): receives 0. Final = 4 + 0 = 4.
-    verify_cash_balance(buyer, 160_000);
-    verify_cash_balance(seller, 40_000);
+    // Buyer (Long A): receives 1.0 payoff. Final = 100k + 100k = 200k.
+    // Seller (Short A): receives 0. Final = 100k + 0 = 100k.
+    verify_cash_balance(buyer, 200_000);
+    verify_cash_balance(seller, 100_000);
 }

@@ -39,7 +39,8 @@ All operations affecting balances, positions, or margin MUST follow a strict two
 The system uses `vUSD` (or `cvUSD`) as a ghost ICRC token for internal accounting. Agents must understand its specific role:
 
 - **Not a Collateral Asset**: Users do NOT deposit `vUSD`. They deposit supported collateral (ICP, BTC, USDC).
-- **Realized PnL Ledger**: `vUSD` represents the user's realized PnL and cash claims within the clearing system.
+- **Realized PnL Ledger**: `vUSD` represents the user's realized PnL and cash claims. In the new margin model, `vUSD` (cash balance) DOES NOT decrease when opening a position or placing a limit order; instead, the collateral is locked via the `reserved_margin_usd` field, and "Available Margin" is calculated as `Equity - Reserved`.
+- **Mark-to-Market Realization**: Trades realize PnL into the `vUSD` balance by comparing the previous cost-basis (old margin) to the current value at trade price.
 - **Internal Only**: It is a "ghost token" used to simplify indexing and transaction history.
 - **Withdrawal Mechanic**: When a user withdraws realized value, the system **burns** the corresponding `vUSD` and transfers an equivalent value of vault-backed assets to the user.
 

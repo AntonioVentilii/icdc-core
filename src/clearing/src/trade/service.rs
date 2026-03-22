@@ -118,14 +118,13 @@ pub(crate) fn execute_trade_impl(
                 })?;
 
             // Mark-to-Market Cashflow Model:
-            // We calculate the cash delta as the difference in required margin
-            // Evaluated at the CURRENT trade price.
-            // This ensures that any PnL from the previous price to 'price'
-            // is realized immediately into the cash balance.
+            // We calculate the realized PnL of the existing position
+            // by comparing its cost-basis (old_margin) to its value at
+            // the CURRENT trade price (old_margin_at_price).
             let buyer_cash_delta =
-                (new_buyer_margin_usd.cast_signed()) - (old_buyer_margin_at_price.cast_signed());
+                (old_buyer_margin.cast_signed()) - (old_buyer_margin_at_price.cast_signed());
             let seller_cash_delta =
-                (new_seller_margin_usd.cast_signed()) - (old_seller_margin_at_price.cast_signed());
+                (old_seller_margin.cast_signed()) - (old_seller_margin_at_price.cast_signed());
 
             // Margin Delta:
             // We calculate how much the TOTAL reserved margin in the account should change.
