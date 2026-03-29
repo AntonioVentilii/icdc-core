@@ -12,7 +12,8 @@ use ic_cdk_macros::{post_upgrade, pre_upgrade};
 pub use shared::types::{
     groups::{
         CreateGroupParams, CreateGroupResult, Group, GroupError, GroupId, GroupResult,
-        UpdateGroupMembersParams, UpdateTradingAccessParams,
+        UpdateGroupAdminsParams, UpdateGroupMembersParams, UpdateGroupParams,
+        UpdateTradingAccessParams,
     },
     oracle::{
         AddOracleParams, ManageOraclePrincipalsParams, Oracle, OracleError, OracleResult,

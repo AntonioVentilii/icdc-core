@@ -100,9 +100,7 @@ pub struct StableState {
     /// Dynamic metrics for collateral assets.
     pub asset_metrics: BTreeMap<AssetId, AssetMetrics>,
     /// Per-domain policy configuration.
-    #[serde(default)]
     pub domain_policies: BTreeMap<BalanceDomain, DomainPolicy>,
     /// Active domain migration plans.
-    #[serde(default)]
     pub migration_plans: BTreeMap<MigrationKey, MigrationPlan>,
 }

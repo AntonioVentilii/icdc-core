@@ -37,25 +37,43 @@ impl GroupId {
 /// A trading group (closed circle).
 ///
 /// Groups are the building blocks of restricted trading access.
-/// A user creates a group, invites members by principal, and an admin
-/// can then assign one or more groups to a series via [`TradingAccess::Restricted`].
+/// A group has three roles:
 ///
-/// Only group members (and canister controllers) may trade on series
-/// that are restricted to that group.
+/// - **Creator** — immutable, recorded at creation, always treated as an admin.
+/// - **Admins** — can manage other admins, manage members, update metadata, and delete the group.
+/// - **Members** — can trade on series restricted to this group, nothing else.
+///
+/// The `admins` and `members` sets are independent: an admin is NOT automatically
+/// a member. If an admin should also trade, they must appear in both sets.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct Group {
     /// The unique identifier assigned at creation.
     pub group_id: GroupId,
     /// A human-readable display name for the group (max 128 chars).
     pub name: String,
-    /// The principal that created this group. Has permission to
-    /// add/remove members and delete the group.
+    /// An optional longer description of the group's purpose.
+    pub description: Option<String>,
+    /// An optional icon/avatar URL for the group.
+    pub icon_url: Option<String>,
+    /// The principal that created this group. Immutable, always treated
+    /// as an admin even if not explicitly in the `admins` set.
     pub creator: Principal,
+    /// Principals with administrative privileges on this group.
+    /// Admins can manage other admins, manage members, update metadata,
+    /// and delete the group. The creator is implicitly an admin and does
+    /// not need to be in this set.
+    pub admins: BTreeSet<Principal>,
     /// The set of principals who are members of this group.
     /// Members are authorized to trade on any series restricted to this group.
     pub members: BTreeSet<Principal>,
     /// Timestamp of group creation in nanoseconds since UNIX epoch.
     pub created_at_ns: u64,
+    /// Timestamp of the last mutation in nanoseconds since UNIX epoch.
+    /// Set on every write operation (create, update metadata, add/remove
+    /// admins/members, etc.).
+    pub updated_at_ns: u64,
+    /// The principal that performed the last mutation.
+    pub updated_by: Principal,
 }
 
 /// A single trading access policy attached to a derivative series.
@@ -69,9 +87,8 @@ pub struct Group {
 ///
 /// The `trading_access` vector on a [`Series`](super::series::Series) **must
 /// never be empty**. Every series must carry at least one policy. The default
-/// is `[Open]`. This invariant is enforced at the API level (`add_series`,
-/// `update_trading_access`) and at the deserialization level (`serde(default)`
-/// fills `[Open]` for legacy series that lack the field).
+/// is `[Open]`. This invariant is enforced at the API level: `add_series`
+/// fills `[Open]` if empty, and `update_trading_access` rejects empty lists.
 ///
 /// # Combining policies
 ///
@@ -100,18 +117,55 @@ pub enum TradingAccess {
 
 /// Input parameters for creating a new trading group.
 ///
-/// The caller's principal is automatically recorded as the group creator
-/// and added as the first member.
+/// The caller's principal is automatically recorded as the group creator,
+/// added as the first member, and treated as an implicit admin.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct CreateGroupParams {
     /// A human-readable name for the group. Must not exceed 128 characters.
     pub name: String,
+    /// An optional longer description of the group's purpose.
+    pub description: Option<String>,
+    /// An optional icon/avatar URL for the group.
+    pub icon_url: Option<String>,
 }
 
-/// Input parameters for adding or removing members from a group.
+/// Input parameters for updating a group's metadata (name, description, icon).
+///
+/// Only group admins (including the creator) or canister controllers may call
+/// `update_group`. Fields set to `None` are left unchanged.
+///
+/// For `description` and `icon_url`, the double-`Option` distinguishes
+/// "don't change" (`None`) from "set to null" (`Some(None)`).
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct UpdateGroupParams {
+    /// The group to update.
+    pub group_id: GroupId,
+    /// New name, or `None` to keep the current name.
+    pub name: Option<String>,
+    /// New description: `None` = keep, `Some(None)` = clear, `Some(Some(..))` = set.
+    pub description: Option<Option<String>>,
+    /// New icon URL: `None` = keep, `Some(None)` = clear, `Some(Some(..))` = set.
+    pub icon_url: Option<Option<String>>,
+}
+
+/// Input parameters for adding or removing group admins.
+///
+/// Used by both `add_group_admins` and `remove_group_admins`.
+/// Only existing group admins (including the creator) or canister controllers
+/// may call these.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct UpdateGroupAdminsParams {
+    /// The group to modify.
+    pub group_id: GroupId,
+    /// The principals to add or remove as admins.
+    pub principals: Vec<Principal>,
+}
+
+/// Input parameters for adding or removing group members.
 ///
 /// Used by both `add_group_members` and `remove_group_members`.
-/// Only the group creator or a canister controller may call these.
+/// Only group admins (including the creator) or canister controllers
+/// may call these.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct UpdateGroupMembersParams {
     /// The group to modify.
@@ -139,7 +193,8 @@ pub enum GroupError {
     /// The specified group ID does not exist in the registry.
     GroupNotFound,
     /// The caller does not have permission for this operation.
-    /// Typically means the caller is neither the group creator nor a controller.
+    /// Typically means the caller is neither a group admin, the creator,
+    /// nor a canister controller.
     Unauthorized,
     /// The provided group name exceeds the maximum allowed length (128 chars).
     NameTooLong,

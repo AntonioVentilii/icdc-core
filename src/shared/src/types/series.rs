@@ -8,10 +8,6 @@ use crate::types::{
     price::Price,
 };
 
-fn default_trading_access() -> Vec<TradingAccess> {
-    vec![TradingAccess::Open]
-}
-
 /// A unique identifier for a derivative series.
 /// Encapsulates a hex-encoded string derived from series parameters.
 #[derive(
@@ -139,10 +135,6 @@ pub struct Series {
     /// - `[Open]` → explicitly unrestricted (default).
     /// - `[Restricted { groups }]` → only group members may trade.
     /// - Multiple policies can coexist (e.g. `[Open, Restricted { groups }]`).
-    ///
-    /// Series created before the closed-circles feature will not have this
-    /// field in stable storage; serde deserializes them as `[Open]`.
-    #[serde(default = "default_trading_access")]
     pub trading_access: Vec<TradingAccess>,
 }
 impl Series {
@@ -267,7 +259,7 @@ pub struct AddSeriesParams {
     /// An optional banner URL for the market.
     pub banner_url: Option<String>,
     /// Initial trading access policies for the new series.
-    /// **Must not be empty** — defaults to `[Open]` if omitted during deserialization.
+    /// **Must not be empty** — pass at least `[Open]`.
     ///
     /// Controls who may submit orders on this market once it is registered.
     /// Pass `[Restricted { groups: [g1, g2, ...] }]` to limit trading to
@@ -275,7 +267,6 @@ pub struct AddSeriesParams {
     ///
     /// If the caller passes an empty list, `add_series` will fill it with `[Open]`.
     /// Policies can be updated after creation via `update_trading_access`.
-    #[serde(default = "default_trading_access")]
     pub trading_access: Vec<TradingAccess>,
 }
 

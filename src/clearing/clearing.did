@@ -135,8 +135,6 @@ type CollateralAssetConfig = record {
 	// Whether the asset is currently enabled for deposits.
 	is_enabled : bool;
 	// Balance domains where this asset may be deposited or withdrawn.
-	//
-	// Defaults to both domains when deserializing legacy state.
 	allowed_balance_domains : vec BalanceDomain;
 	// Identifier of the oracle responsible for updating this asset's metrics.
 	oracle_id : opt text;
@@ -514,17 +512,14 @@ type Series = record {
 	// An optional icon URL for the market.
 	icon_url : opt text;
 	// The set of trading access policies governing who may trade this series.
+	// **Must never be empty** — every series carries at least one policy.
 	//
 	// Evaluated as a logical OR: a caller is authorized if **any** policy
 	// in the list grants them access.
 	//
-	// - Empty list → unrestricted (same as `[Open]`).
-	// - `[Open]` → explicitly unrestricted.
+	// - `[Open]` → explicitly unrestricted (default).
 	// - `[Restricted { groups }]` → only group members may trade.
 	// - Multiple policies can coexist (e.g. `[Open, Restricted { groups }]`).
-	//
-	// Uses `#[serde(default)]` so that series created before the closed-circles
-	// feature deserialize with an empty list (unrestricted).
 	trading_access : vec TradingAccess;
 	// The canonical number of decimals used for prices and strikes in this series.
 	price_precision : nat8;
@@ -733,19 +728,20 @@ type TradeError = variant {
 // if *any* policy in the list grants access to the caller, the caller
 // may trade.
 //
-// # Default behaviour
+// # Invariant
 //
-// An empty `Vec` is treated as `[Open]` — i.e. unrestricted access.
-// This preserves backward compatibility for series created before the
-// closed-circles feature.
+// The `trading_access` vector on a [`Series`](super::series::Series) **must
+// never be empty**. Every series must carry at least one policy. The default
+// is `[Open]`. This invariant is enforced at the API level: `add_series`
+// fills `[Open]` if empty, and `update_trading_access` rejects empty lists.
 //
 // # Combining policies
 //
 // A series may carry multiple policies simultaneously. For example:
 // - `[Open]` — open to everyone (default).
 // - `[Restricted { groups: [g1, g2] }]` — only members of g1 or g2.
-// - `[Open, Restricted { groups: [g1] }]` — open to everyone *and*
-// additionally tagged as belonging to g1 (useful for discovery/UI filtering).
+// - `[Open, Restricted { groups: [g1] }]` — open to everyone *and* additionally tagged as
+// belonging to g1 (useful for discovery/UI filtering).
 //
 // # Extensibility
 //

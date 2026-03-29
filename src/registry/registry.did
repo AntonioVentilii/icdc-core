@@ -30,12 +30,13 @@ type AddSeriesParams = record {
 	// An optional icon URL for the market.
 	icon_url : opt text;
 	// Initial trading access policies for the new series.
+	// **Must not be empty** — pass at least `[Open]`.
 	//
 	// Controls who may submit orders on this market once it is registered.
-	// Pass an empty list or `[Open]` for unrestricted access (the default).
 	// Pass `[Restricted { groups: [g1, g2, ...] }]` to limit trading to
 	// members of those groups.
 	//
+	// If the caller passes an empty list, `add_series` will fill it with `[Open]`.
 	// Policies can be updated after creation via `update_trading_access`.
 	trading_access : vec TradingAccess;
 	// The number of decimals used for prices and strikes in this series.
@@ -72,11 +73,15 @@ type BalanceDomain = variant {
 };
 // Input parameters for creating a new trading group.
 //
-// The caller's principal is automatically recorded as the group creator
-// and added as the first member.
+// The caller's principal is automatically recorded as the group creator,
+// added as the first member, and treated as an implicit admin.
 type CreateGroupParams = record {
 	// A human-readable name for the group. Must not exceed 128 characters.
-	name : text
+	name : text;
+	// An optional longer description of the group's purpose.
+	description : opt text;
+	// An optional icon/avatar URL for the group.
+	icon_url : opt text
 };
 // The result of a [`create_group`] operation.
 //
@@ -118,31 +123,53 @@ type FiatUnit = variant { Chf; Eur; Gbp; Usd };
 // A trading group (closed circle).
 //
 // Groups are the building blocks of restricted trading access.
-// A user creates a group, invites members by principal, and an admin
-// can then assign one or more groups to a series via [`TradingAccess::Restricted`].
+// A group has three roles:
 //
-// Only group members (and canister controllers) may trade on series
-// that are restricted to that group.
+// - **Creator** — immutable, recorded at creation, always treated as an admin.
+// - **Admins** — can manage other admins, manage members, update metadata, and delete the group.
+// - **Members** — can trade on series restricted to this group, nothing else.
+//
+// The `admins` and `members` sets are independent: an admin is NOT automatically
+// a member. If an admin should also trade, they must appear in both sets.
 type Group = record {
-	// The principal that created this group. Has permission to
-	// add/remove members and delete the group.
+	// The principal that performed the last mutation.
+	updated_by : principal;
+	// The principal that created this group. Immutable, always treated
+	// as an admin even if not explicitly in the `admins` set.
 	creator : principal;
 	// The set of principals who are members of this group.
 	// Members are authorized to trade on any series restricted to this group.
 	members : vec principal;
 	// A human-readable display name for the group (max 128 chars).
 	name : text;
+	// An optional longer description of the group's purpose.
+	description : opt text;
+	// Timestamp of the last mutation in nanoseconds since UNIX epoch.
+	// Set on every write operation (create, update metadata, add/remove
+	// admins/members, etc.).
+	updated_at_ns : nat64;
 	// Timestamp of group creation in nanoseconds since UNIX epoch.
 	created_at_ns : nat64;
+	// An optional icon/avatar URL for the group.
+	icon_url : opt text;
 	// The unique identifier assigned at creation.
-	group_id : text
+	group_id : text;
+	// Principals with administrative privileges on this group.
+	// Admins can manage other admins, manage members, update metadata,
+	// and delete the group. The creator is implicitly an admin and does
+	// not need to be in this set.
+	admins : vec principal
 };
 // Errors that can occur during group-related operations.
 type GroupError = variant {
 	// The specified group ID does not exist in the registry.
 	GroupNotFound;
+	// The provided `trading_access` list is empty.
+	// Every series must have at least one policy (e.g. `[Open]`).
+	EmptyTradingAccess;
 	// The caller does not have permission for this operation.
-	// Typically means the caller is neither the group creator nor a controller.
+	// Typically means the caller is neither a group admin, the creator,
+	// nor a canister controller.
 	Unauthorized;
 	// A group with this name already exists for this creator.
 	GroupAlreadyExists;
@@ -307,17 +334,14 @@ type Series = record {
 	// An optional icon URL for the market.
 	icon_url : opt text;
 	// The set of trading access policies governing who may trade this series.
+	// **Must never be empty** — every series carries at least one policy.
 	//
 	// Evaluated as a logical OR: a caller is authorized if **any** policy
 	// in the list grants them access.
 	//
-	// - Empty list → unrestricted (same as `[Open]`).
-	// - `[Open]` → explicitly unrestricted.
+	// - `[Open]` → explicitly unrestricted (default).
 	// - `[Restricted { groups }]` → only group members may trade.
 	// - Multiple policies can coexist (e.g. `[Open, Restricted { groups }]`).
-	//
-	// Uses `#[serde(default)]` so that series created before the closed-circles
-	// feature deserialize with an empty list (unrestricted).
 	trading_access : vec TradingAccess;
 	// The canonical number of decimals used for prices and strikes in this series.
 	price_precision : nat8;
@@ -353,19 +377,20 @@ type SeriesPage = record {
 // if *any* policy in the list grants access to the caller, the caller
 // may trade.
 //
-// # Default behaviour
+// # Invariant
 //
-// An empty `Vec` is treated as `[Open]` — i.e. unrestricted access.
-// This preserves backward compatibility for series created before the
-// closed-circles feature.
+// The `trading_access` vector on a [`Series`](super::series::Series) **must
+// never be empty**. Every series must carry at least one policy. The default
+// is `[Open]`. This invariant is enforced at the API level: `add_series`
+// fills `[Open]` if empty, and `update_trading_access` rejects empty lists.
 //
 // # Combining policies
 //
 // A series may carry multiple policies simultaneously. For example:
 // - `[Open]` — open to everyone (default).
 // - `[Restricted { groups: [g1, g2] }]` — only members of g1 or g2.
-// - `[Open, Restricted { groups: [g1] }]` — open to everyone *and*
-// additionally tagged as belonging to g1 (useful for discovery/UI filtering).
+// - `[Open, Restricted { groups: [g1] }]` — open to everyone *and* additionally tagged as
+// belonging to g1 (useful for discovery/UI filtering).
 //
 // # Extensibility
 //
@@ -382,15 +407,33 @@ type TradingAccess = variant {
 		groups : vec text
 	}
 };
-// Input parameters for adding or removing members from a group.
+// Input parameters for adding or removing group admins.
 //
-// Used by both `add_group_members` and `remove_group_members`.
-// Only the group creator or a canister controller may call these.
-type UpdateGroupMembersParams = record {
+// Used by both `add_group_admins` and `remove_group_admins`.
+// Only existing group admins (including the creator) or canister controllers
+// may call these.
+type UpdateGroupAdminsParams = record {
 	// The group to modify.
 	group_id : text;
-	// The principals to add or remove.
+	// The principals to add or remove as admins.
 	principals : vec principal
+};
+// Input parameters for updating a group's metadata (name, description, icon).
+//
+// Only group admins (including the creator) or canister controllers may call
+// `update_group`. Fields set to `None` are left unchanged.
+//
+// For `description` and `icon_url`, the double-`Option` distinguishes
+// "don't change" (`None`) from "set to null" (`Some(None)`).
+type UpdateGroupParams = record {
+	// New name, or `None` to keep the current name.
+	name : opt text;
+	// New description: `None` = keep, `Some(None)` = clear, `Some(Some(..))` = set.
+	description : opt opt text;
+	// New icon URL: `None` = keep, `Some(None)` = clear, `Some(Some(..))` = set.
+	icon_url : opt opt text;
+	// The group to update.
+	group_id : text
 };
 // Input parameters for updating an existing oracle's metadata.
 type UpdateOracleMetadataParams = record {
@@ -406,8 +449,8 @@ type UpdateOracleMetadataParams = record {
 type UpdateTradingAccessParams = record {
 	// The series whose trading access policies will be replaced.
 	series_id : text;
-	// The new set of trading access policies.
-	// Pass an empty vec or `[Open]` to make the series unrestricted.
+	// The new set of trading access policies. **Must not be empty.**
+	// Pass `[Open]` to make the series unrestricted.
 	trading_access : vec TradingAccess
 };
 service : {
@@ -415,6 +458,19 @@ service : {
 	//
 	// This method is gated to canister controllers.
 	add_authorized_creators : (vec principal) -> ();
+	// Adds one or more principals to an existing group's admin set.
+	//
+	// Duplicate principals are silently ignored (the admin set is a `BTreeSet`).
+	//
+	// # Errors
+	//
+	// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
+	// * [`GroupError::Unauthorized`] — the caller is not a group admin.
+	//
+	// # Access
+	//
+	// Group admin (creator, explicit admin, or canister controller).
+	add_group_admins : (UpdateGroupAdminsParams) -> (GroupResult);
 	// Adds one or more principals to an existing group's member list.
 	//
 	// Duplicate principals are silently ignored (the member set is a `BTreeSet`).
@@ -422,13 +478,12 @@ service : {
 	// # Errors
 	//
 	// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
-	// * [`GroupError::Unauthorized`] — the caller is neither the group creator
-	// nor a canister controller.
+	// * [`GroupError::Unauthorized`] — the caller is not a group admin.
 	//
 	// # Access
 	//
-	// Group creator **or** canister controller.
-	add_group_members : (UpdateGroupMembersParams) -> (GroupResult);
+	// Group admin (creator, explicit admin, or canister controller).
+	add_group_members : (UpdateGroupAdminsParams) -> (GroupResult);
 	// Registers a new price oracle in the registry.
 	add_oracle : (AddOracleParams) -> (OracleResult);
 	// Adds a new derivative series to the registry.
@@ -447,8 +502,9 @@ service : {
 	// Creates a new trading group (closed circle).
 	//
 	// The caller's principal is recorded as the group creator and is automatically
-	// inserted as the first member. A monotonically increasing ID (`grp_0`, `grp_1`, ...)
-	// is assigned.
+	// inserted as the first member. The creator is implicitly an admin and does
+	// not need to be in the `admins` set. A monotonically increasing ID
+	// (`grp_0`, `grp_1`, ...) is assigned.
 	//
 	// # Errors
 	//
@@ -468,12 +524,11 @@ service : {
 	// # Errors
 	//
 	// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
-	// * [`GroupError::Unauthorized`] — the caller is neither the group creator
-	// nor a canister controller.
+	// * [`GroupError::Unauthorized`] — the caller is not a group admin.
 	//
 	// # Access
 	//
-	// Group creator **or** canister controller.
+	// Group admin (creator, explicit admin, or canister controller).
 	delete_group : (text) -> (GroupResult);
 	// Retrieves a group by its ID, returning `None` if it does not exist.
 	//
@@ -513,12 +568,13 @@ service : {
 	//
 	// 1. **Controllers** are always authorized, regardless of policies.
 	// 2. If the series does not exist, returns `false`.
-	// 3. If the series has an **empty** `trading_access` list, it is open → `true`.
-	// 4. Each policy in the list is evaluated as a logical OR:
+	// 3. Each policy in the list is evaluated as a logical OR:
 	// - [`TradingAccess::Open`] → immediately `true`.
-	// - [`TradingAccess::Restricted`] → `true` if the principal is a member
-	// of **at least one** of the referenced groups.
-	// 5. If no policy grants access, returns `false`.
+	// - [`TradingAccess::Restricted`] → `true` if the principal is a member of **at least one** of
+	// the referenced groups.
+	// 4. If no policy grants access, returns `false`.
+	//
+	// **Note:** `trading_access` must never be empty — the API layer enforces this.
 	//
 	// # Access
 	//
@@ -533,8 +589,8 @@ service : {
 	//
 	// # Arguments
 	//
-	// * `creator` — if `Some`, only groups created by this principal are returned.
-	// If `None`, all groups are returned.
+	// * `creator` — if `Some`, only groups created by this principal are returned. If `None`, all
+	// groups are returned.
 	//
 	// # Access
 	//
@@ -550,6 +606,21 @@ service : {
 	//
 	// This method is gated to canister controllers.
 	remove_authorized_creators : (vec principal) -> ();
+	// Removes one or more principals from an existing group's admin set.
+	//
+	// Principals that are not currently admins are silently ignored.
+	// The group creator cannot be removed from admins (they are implicitly
+	// always an admin).
+	//
+	// # Errors
+	//
+	// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
+	// * [`GroupError::Unauthorized`] — the caller is not a group admin.
+	//
+	// # Access
+	//
+	// Group admin (creator, explicit admin, or canister controller).
+	remove_group_admins : (UpdateGroupAdminsParams) -> (GroupResult);
 	// Removes one or more principals from an existing group's member list.
 	//
 	// Principals that are not currently members are silently ignored.
@@ -557,20 +628,33 @@ service : {
 	// # Errors
 	//
 	// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
-	// * [`GroupError::Unauthorized`] — the caller is neither the group creator
-	// nor a canister controller.
+	// * [`GroupError::Unauthorized`] — the caller is not a group admin.
 	//
 	// # Access
 	//
-	// Group creator **or** canister controller.
-	remove_group_members : (UpdateGroupMembersParams) -> (GroupResult);
+	// Group admin (creator, explicit admin, or canister controller).
+	remove_group_members : (UpdateGroupAdminsParams) -> (GroupResult);
+	// Updates a group's metadata (name, description, icon URL).
+	//
+	// Fields set to `None` are left unchanged. For `description` and `icon_url`,
+	// `Some(None)` clears the value while `Some(Some(..))` sets it.
+	//
+	// # Errors
+	//
+	// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
+	// * [`GroupError::Unauthorized`] — the caller is not a group admin.
+	// * [`GroupError::NameTooLong`] — if a new name exceeds [`MAX_GROUP_NAME_LEN`] chars.
+	//
+	// # Access
+	//
+	// Group admin (creator, explicit admin, or canister controller).
+	update_group : (UpdateGroupParams) -> (GroupResult);
 	// Updates the metadata of an existing oracle.
 	update_oracle_metadata : (UpdateOracleMetadataParams) -> (OracleResult);
 	// Atomically replaces the trading access policies on an existing series.
 	//
 	// The entire `trading_access` vector is overwritten. To make a series open,
-	// pass an empty list or `[Open]`. To restrict it, pass one or more
-	// `Restricted { groups }` entries.
+	// pass `[Open]`. To restrict it, pass one or more `Restricted { groups }` entries.
 	//
 	// **Important:** the clearing canister caches series data. After updating
 	// trading access, the clearing cache will pick up the change on the next
@@ -578,6 +662,7 @@ service : {
 	//
 	// # Errors
 	//
+	// * [`GroupError::EmptyTradingAccess`] — the provided list is empty.
 	// * [`GroupError::Unauthorized`] — the caller is not a canister controller.
 	// * [`GroupError::SeriesNotFound`] — the series ID does not exist.
 	//

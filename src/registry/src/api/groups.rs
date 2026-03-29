@@ -9,12 +9,12 @@
 //! | Action | Who may call |
 //! |---|---|
 //! | Create a group | Any authenticated caller |
-//! | Add/remove members | Group creator **or** canister controller |
-//! | Delete a group | Group creator **or** canister controller |
+//! | Update group metadata | Group admin (or creator, or controller) |
+//! | Add/remove admins | Group admin (or creator, or controller) |
+//! | Add/remove members | Group admin (or creator, or controller) |
+//! | Delete a group | Group admin (or creator, or controller) |
 //! | Update series trading access | Canister controller only |
 //! | Query groups / membership | Anyone (public queries) |
-
-#![allow(clippy::needless_pass_by_value)]
 
 use std::collections::BTreeSet;
 
@@ -24,7 +24,8 @@ use ic_cdk_macros::{query, update};
 use shared::types::{
     groups::{
         CreateGroupParams, CreateGroupResult, Group, GroupError, GroupId, GroupResult,
-        UpdateGroupMembersParams, UpdateTradingAccessParams,
+        UpdateGroupAdminsParams, UpdateGroupMembersParams, UpdateGroupParams,
+        UpdateTradingAccessParams,
     },
     SeriesId, TradingAccess,
 };
@@ -37,11 +38,32 @@ use crate::{
 /// Maximum number of characters allowed in a group name.
 const MAX_GROUP_NAME_LEN: usize = 128;
 
+/// Returns `true` if the caller has administrative privileges on the group.
+///
+/// A caller is considered a group admin if any of the following holds:
+/// - They are a canister controller.
+/// - They are the group's original creator.
+/// - They are explicitly listed in the group's `admins` set.
+fn caller_is_group_admin(group: &Group, caller: &Principal) -> bool {
+    is_controller(caller) || *caller == group.creator || group.admins.contains(caller)
+}
+
+/// Stamps the audit fields on a group after a mutation.
+fn stamp_audit(group: &mut Group, caller: Principal) {
+    group.updated_at_ns = time();
+    group.updated_by = caller;
+}
+
+// ---------------------------------------------------------------------------
+// Group lifecycle
+// ---------------------------------------------------------------------------
+
 /// Creates a new trading group (closed circle).
 ///
 /// The caller's principal is recorded as the group creator and is automatically
-/// inserted as the first member. A monotonically increasing ID (`grp_0`, `grp_1`, ...)
-/// is assigned.
+/// inserted as the first member. The creator is implicitly an admin and does
+/// not need to be in the `admins` set. A monotonically increasing ID
+/// (`grp_0`, `grp_1`, ...) is assigned.
 ///
 /// # Errors
 ///
@@ -54,6 +76,7 @@ const MAX_GROUP_NAME_LEN: usize = 128;
 #[must_use]
 pub fn create_group(params: CreateGroupParams) -> CreateGroupResult {
     let caller = msg_caller();
+    let now = time();
 
     if params.name.chars().count() > MAX_GROUP_NAME_LEN {
         return Err(GroupError::NameTooLong).into();
@@ -72,9 +95,14 @@ pub fn create_group(params: CreateGroupParams) -> CreateGroupResult {
     let group = Group {
         group_id: group_id.clone(),
         name: params.name,
+        description: params.description,
+        icon_url: params.icon_url,
         creator: caller,
+        admins: BTreeSet::new(),
         members,
-        created_at_ns: time(),
+        created_at_ns: now,
+        updated_at_ns: now,
+        updated_by: caller,
     };
 
     GROUPS_STORE.with(|store| {
@@ -84,6 +112,181 @@ pub fn create_group(params: CreateGroupParams) -> CreateGroupResult {
     Ok(group_id).into()
 }
 
+/// Updates a group's metadata (name, description, icon URL).
+///
+/// Fields set to `None` are left unchanged. For `description` and `icon_url`,
+/// `Some(None)` clears the value while `Some(Some(..))` sets it.
+///
+/// # Errors
+///
+/// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
+/// * [`GroupError::Unauthorized`] — the caller is not a group admin.
+/// * [`GroupError::NameTooLong`] — if a new name exceeds [`MAX_GROUP_NAME_LEN`] chars.
+///
+/// # Access
+///
+/// Group admin (creator, explicit admin, or canister controller).
+#[update(guard = "caller_is_not_anonymous")]
+#[must_use]
+pub fn update_group(params: UpdateGroupParams) -> GroupResult {
+    let caller = msg_caller();
+
+    if let Some(ref name) = params.name {
+        if name.chars().count() > MAX_GROUP_NAME_LEN {
+            return Err(GroupError::NameTooLong).into();
+        }
+    }
+
+    GROUPS_STORE
+        .with(|store| {
+            let mut store = store.borrow_mut();
+            let group = store
+                .get_mut(&params.group_id)
+                .ok_or(GroupError::GroupNotFound)?;
+
+            if !caller_is_group_admin(group, &caller) {
+                return Err(GroupError::Unauthorized);
+            }
+
+            if let Some(name) = params.name {
+                group.name = name;
+            }
+            if let Some(description) = params.description {
+                group.description = description;
+            }
+            if let Some(icon_url) = params.icon_url {
+                group.icon_url = icon_url;
+            }
+
+            stamp_audit(group, caller);
+            Ok(true)
+        })
+        .into()
+}
+
+/// Permanently deletes a group and all its membership data.
+///
+/// **Note:** deleting a group does not automatically update series that
+/// reference it in their `trading_access`. Those series will simply fail
+/// the membership check for the deleted group (the group ID will not
+/// resolve to any members).
+///
+/// # Errors
+///
+/// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
+/// * [`GroupError::Unauthorized`] — the caller is not a group admin.
+///
+/// # Access
+///
+/// Group admin (creator, explicit admin, or canister controller).
+#[update(guard = "caller_is_not_anonymous")]
+#[must_use]
+pub fn delete_group(group_id: GroupId) -> GroupResult {
+    let caller = msg_caller();
+
+    GROUPS_STORE
+        .with(move |store| {
+            let mut store = store.borrow_mut();
+            let group = store.get(&group_id).ok_or(GroupError::GroupNotFound)?;
+
+            if !caller_is_group_admin(group, &caller) {
+                return Err(GroupError::Unauthorized);
+            }
+
+            store.remove(&group_id);
+            Ok(true)
+        })
+        .into()
+}
+
+// ---------------------------------------------------------------------------
+// Admin management
+// ---------------------------------------------------------------------------
+
+/// Adds one or more principals to an existing group's admin set.
+///
+/// Duplicate principals are silently ignored (the admin set is a `BTreeSet`).
+///
+/// # Errors
+///
+/// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
+/// * [`GroupError::Unauthorized`] — the caller is not a group admin.
+///
+/// # Access
+///
+/// Group admin (creator, explicit admin, or canister controller).
+#[update(guard = "caller_is_not_anonymous")]
+#[must_use]
+pub fn add_group_admins(params: UpdateGroupAdminsParams) -> GroupResult {
+    let caller = msg_caller();
+
+    GROUPS_STORE
+        .with(|store| {
+            let mut store = store.borrow_mut();
+            let group = store
+                .get_mut(&params.group_id)
+                .ok_or(GroupError::GroupNotFound)?;
+
+            if !caller_is_group_admin(group, &caller) {
+                return Err(GroupError::Unauthorized);
+            }
+
+            for p in params.principals {
+                group.admins.insert(p);
+            }
+
+            stamp_audit(group, caller);
+            Ok(true)
+        })
+        .into()
+}
+
+/// Removes one or more principals from an existing group's admin set.
+///
+/// Principals that are not currently admins are silently ignored.
+/// The group creator cannot be removed from admins (they are implicitly
+/// always an admin).
+///
+/// # Errors
+///
+/// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
+/// * [`GroupError::Unauthorized`] — the caller is not a group admin.
+///
+/// # Access
+///
+/// Group admin (creator, explicit admin, or canister controller).
+#[update(guard = "caller_is_not_anonymous")]
+#[must_use]
+pub fn remove_group_admins(params: UpdateGroupAdminsParams) -> GroupResult {
+    let caller = msg_caller();
+    let UpdateGroupAdminsParams {
+        group_id,
+        principals,
+    } = params;
+
+    GROUPS_STORE
+        .with(|store| {
+            let mut store = store.borrow_mut();
+            let group = store.get_mut(&group_id).ok_or(GroupError::GroupNotFound)?;
+
+            if !caller_is_group_admin(group, &caller) {
+                return Err(GroupError::Unauthorized);
+            }
+
+            for p in &principals {
+                group.admins.remove(p);
+            }
+
+            stamp_audit(group, caller);
+            Ok(true)
+        })
+        .into()
+}
+
+// ---------------------------------------------------------------------------
+// Member management
+// ---------------------------------------------------------------------------
+
 /// Adds one or more principals to an existing group's member list.
 ///
 /// Duplicate principals are silently ignored (the member set is a `BTreeSet`).
@@ -91,12 +294,11 @@ pub fn create_group(params: CreateGroupParams) -> CreateGroupResult {
 /// # Errors
 ///
 /// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
-/// * [`GroupError::Unauthorized`] — the caller is neither the group creator nor a canister
-///   controller.
+/// * [`GroupError::Unauthorized`] — the caller is not a group admin.
 ///
 /// # Access
 ///
-/// Group creator **or** canister controller.
+/// Group admin (creator, explicit admin, or canister controller).
 #[update(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn add_group_members(params: UpdateGroupMembersParams) -> GroupResult {
@@ -109,7 +311,7 @@ pub fn add_group_members(params: UpdateGroupMembersParams) -> GroupResult {
                 .get_mut(&params.group_id)
                 .ok_or(GroupError::GroupNotFound)?;
 
-            if group.creator != caller && !is_controller(&caller) {
+            if !caller_is_group_admin(group, &caller) {
                 return Err(GroupError::Unauthorized);
             }
 
@@ -117,6 +319,7 @@ pub fn add_group_members(params: UpdateGroupMembersParams) -> GroupResult {
                 group.members.insert(p);
             }
 
+            stamp_audit(group, caller);
             Ok(true)
         })
         .into()
@@ -129,36 +332,42 @@ pub fn add_group_members(params: UpdateGroupMembersParams) -> GroupResult {
 /// # Errors
 ///
 /// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
-/// * [`GroupError::Unauthorized`] — the caller is neither the group creator nor a canister
-///   controller.
+/// * [`GroupError::Unauthorized`] — the caller is not a group admin.
 ///
 /// # Access
 ///
-/// Group creator **or** canister controller.
+/// Group admin (creator, explicit admin, or canister controller).
 #[update(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn remove_group_members(params: UpdateGroupMembersParams) -> GroupResult {
     let caller = msg_caller();
+    let UpdateGroupMembersParams {
+        group_id,
+        principals,
+    } = params;
 
     GROUPS_STORE
         .with(|store| {
             let mut store = store.borrow_mut();
-            let group = store
-                .get_mut(&params.group_id)
-                .ok_or(GroupError::GroupNotFound)?;
+            let group = store.get_mut(&group_id).ok_or(GroupError::GroupNotFound)?;
 
-            if group.creator != caller && !is_controller(&caller) {
+            if !caller_is_group_admin(group, &caller) {
                 return Err(GroupError::Unauthorized);
             }
 
-            for p in &params.principals {
+            for p in &principals {
                 group.members.remove(p);
             }
 
+            stamp_audit(group, caller);
             Ok(true)
         })
         .into()
 }
+
+// ---------------------------------------------------------------------------
+// Queries
+// ---------------------------------------------------------------------------
 
 /// Retrieves a group by its ID, returning `None` if it does not exist.
 ///
@@ -168,7 +377,7 @@ pub fn remove_group_members(params: UpdateGroupMembersParams) -> GroupResult {
 #[query]
 #[must_use]
 pub fn get_group(group_id: GroupId) -> Option<Group> {
-    GROUPS_STORE.with(|store| store.borrow().get(&group_id).cloned())
+    GROUPS_STORE.with(move |store| store.borrow().get(&group_id).cloned())
 }
 
 /// Lists all registered groups, optionally filtered by creator principal.
@@ -193,42 +402,6 @@ pub fn list_groups(creator: Option<Principal>) -> Vec<Group> {
     })
 }
 
-/// Permanently deletes a group and all its membership data.
-///
-/// **Note:** deleting a group does not automatically update series that
-/// reference it in their `trading_access`. Those series will simply fail
-/// the membership check for the deleted group (the group ID will not
-/// resolve to any members).
-///
-/// # Errors
-///
-/// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
-/// * [`GroupError::Unauthorized`] — the caller is neither the group creator nor a canister
-///   controller.
-///
-/// # Access
-///
-/// Group creator **or** canister controller.
-#[update(guard = "caller_is_not_anonymous")]
-#[must_use]
-pub fn delete_group(group_id: GroupId) -> GroupResult {
-    let caller = msg_caller();
-
-    GROUPS_STORE
-        .with(|store| {
-            let mut store = store.borrow_mut();
-            let group = store.get(&group_id).ok_or(GroupError::GroupNotFound)?;
-
-            if group.creator != caller && !is_controller(&caller) {
-                return Err(GroupError::Unauthorized);
-            }
-
-            store.remove(&group_id);
-            Ok(true)
-        })
-        .into()
-}
-
 /// Checks whether a principal is a member of a specific group.
 ///
 /// Returns `false` if the group does not exist or if the principal is not a member.
@@ -239,13 +412,17 @@ pub fn delete_group(group_id: GroupId) -> GroupResult {
 #[query]
 #[must_use]
 pub fn is_group_member(group_id: GroupId, principal: Principal) -> bool {
-    GROUPS_STORE.with(|store| {
+    GROUPS_STORE.with(move |store| {
         store
             .borrow()
             .get(&group_id)
             .is_some_and(|g| g.members.contains(&principal))
     })
 }
+
+// ---------------------------------------------------------------------------
+// Trading access
+// ---------------------------------------------------------------------------
 
 /// Determines whether a principal is authorized to trade on a given series.
 ///
@@ -275,7 +452,7 @@ pub fn is_trading_authorized(principal: Principal, series_id: SeriesId) -> bool 
         return true;
     }
 
-    let policies = SERIES_STORE.with(|store| {
+    let policies = SERIES_STORE.with(move |store| {
         store
             .borrow()
             .get(&series_id)

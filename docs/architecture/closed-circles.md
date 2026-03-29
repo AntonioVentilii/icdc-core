@@ -13,8 +13,9 @@ A series can have **multiple trading access policies** simultaneously. If any po
 ```mermaid
 flowchart TD
     subgraph app [vici-app]
-        GroupCreatorUser["Group Creator"]
-        Admin["Admin"]
+        GroupCreatorUser["Group Creator / Admin"]
+        GroupAdmin["Group Admin"]
+        SiteAdmin["Site Admin"]
         Trader["Trader"]
     end
 
@@ -29,9 +30,10 @@ flowchart TD
         AccessGate["check_trading_access"]
     end
 
-    GroupCreatorUser -->|"create_group, add/remove members"| GroupsStore
-    Admin -->|"add_series with trading_access"| SeriesStore
-    Admin -->|"update_trading_access"| SeriesStore
+    GroupCreatorUser -->|"create_group"| GroupsStore
+    GroupAdmin -->|"update_group, add/remove admins/members"| GroupsStore
+    SiteAdmin -->|"add_series with trading_access"| SeriesStore
+    SiteAdmin -->|"update_trading_access"| SeriesStore
     Trader -->|"submit_limit_order"| OrderSubmit
     OrderSubmit --> AccessGate
     AccessGate -->|"Series is Open?"| SkipCheck["Allow immediately"]
@@ -60,13 +62,26 @@ A `Series` holds `trading_access: Vec<TradingAccess>`. **This list must never be
 struct Group {
     group_id: GroupId,
     name: String,
-    creator: Principal,
-    members: BTreeSet<Principal>,
+    description: Option<String>,
+    icon_url: Option<String>,
+    creator: Principal,           // immutable, always treated as admin
+    admins: BTreeSet<Principal>,  // can manage everything
+    members: BTreeSet<Principal>, // can trade
     created_at_ns: u64,
+    updated_at_ns: u64,
+    updated_by: Principal,
 }
 ```
 
-Groups are stored in the registry's `GROUPS_STORE`. Any authenticated user with the `GROUP_CREATOR` role can create groups and manage membership (add/remove principals).
+Groups are stored in the registry's `GROUPS_STORE`. A group has three roles:
+
+- **Creator** — recorded at creation, immutable, always treated as an admin.
+- **Admins** — can manage other admins, manage members, update metadata, and delete the group. The creator is implicitly an admin even if not in the `admins` set.
+- **Members** — can trade on series restricted to this group, nothing else.
+
+The `admins` and `members` sets are independent: an admin is NOT automatically a member. If an admin should also trade, they must appear in both sets.
+
+Every mutation stamps `updated_at_ns` and `updated_by` for audit purposes.
 
 ## Enforcement Flow
 
@@ -106,17 +121,22 @@ Key design decisions:
 
 ## Registry API (Groups)
 
-| Endpoint                                           | Guard                     | Description                                              |
-| -------------------------------------------------- | ------------------------- | -------------------------------------------------------- |
-| `create_group(CreateGroupParams)`                  | `caller_is_not_anonymous` | Creates a group; caller becomes creator and first member |
-| `add_group_members(UpdateGroupMembersParams)`      | Creator or controller     | Adds principals to a group                               |
-| `remove_group_members(UpdateGroupMembersParams)`   | Creator or controller     | Removes principals from a group                          |
-| `get_group(GroupId)`                               | Public query              | Returns group details                                    |
-| `list_groups(Option<Principal>)`                   | Public query              | Lists groups, optionally filtered by creator             |
-| `delete_group(GroupId)`                            | Creator or controller     | Deletes a group                                          |
-| `is_group_member(GroupId, Principal)`              | Public query              | Checks membership                                        |
-| `is_trading_authorized(Principal, SeriesId)`       | Public query              | Resolves all policies for a series                       |
-| `update_trading_access(UpdateTradingAccessParams)` | Controller only           | Changes trading access on a series                       |
+| Endpoint                                           | Guard             | Description                                              |
+| -------------------------------------------------- | ----------------- | -------------------------------------------------------- |
+| `create_group(CreateGroupParams)`                  | Any authenticated | Creates a group; caller becomes creator and first member |
+| `update_group(UpdateGroupParams)`                  | Group admin       | Updates group metadata (name, description, icon)         |
+| `add_group_admins(UpdateGroupAdminsParams)`        | Group admin       | Adds principals to the admin set                         |
+| `remove_group_admins(UpdateGroupAdminsParams)`     | Group admin       | Removes principals from the admin set                    |
+| `add_group_members(UpdateGroupMembersParams)`      | Group admin       | Adds principals to the member set                        |
+| `remove_group_members(UpdateGroupMembersParams)`   | Group admin       | Removes principals from the member set                   |
+| `delete_group(GroupId)`                            | Group admin       | Deletes a group                                          |
+| `get_group(GroupId)`                               | Public query      | Returns group details                                    |
+| `list_groups(Option<Principal>)`                   | Public query      | Lists groups, optionally filtered by creator             |
+| `is_group_member(GroupId, Principal)`              | Public query      | Checks membership                                        |
+| `is_trading_authorized(Principal, SeriesId)`       | Public query      | Resolves all policies for a series                       |
+| `update_trading_access(UpdateTradingAccessParams)` | Controller only   | Changes trading access on a series                       |
+
+**"Group admin"** means: canister controller, group creator, or a principal in the group's `admins` set.
 
 ## vici-app Roles
 
@@ -125,12 +145,6 @@ Key design decisions:
 | `CONTROLLER` / `ADMIN` | All permissions including `CREATE_GROUP` and `MANAGE_TRADING_ACCESS` |
 | `GROUP_CREATOR`        | `CREATE_GROUP` — can create and manage groups                        |
 | `CREATOR`              | `CREATE_MARKET` — cannot manage trading access (admin does that)     |
-
-## Backward Compatibility
-
-- **On-chain state:** The `trading_access` field uses `#[serde(default = "default_trading_access")]`, which fills `[Open]` for series created before the closed-circles feature. This upholds the invariant that the list is never empty.
-- **Registry stable storage:** Uses a versioned `StableState` struct with fallback to the legacy tuple format for canisters that haven't been upgraded yet.
-- **App layer:** The `mapTradingAccess` utility handles `undefined` (pre-upgrade Candid types) defensively by defaulting to `[{ type: 'Open' }]`.
 
 ## Future Extensions
 
