@@ -1,11 +1,12 @@
 use core::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 
+use candid::Principal;
 use ic_cdk::api::{canister_self, msg_caller};
 use ic_cdk_macros::{query, update};
 use shared::{
     constants::USD_DECIMALS,
-    types::{PayoffType, Series, SeriesId},
+    types::{PayoffType, Series, SeriesId, TradingAccess},
 };
 
 use super::{
@@ -20,7 +21,7 @@ use crate::{
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
         ACCEPTED_TRANSFERS, ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, EVENTS,
-        FROZEN_TRANSFERS, LIMIT_ORDERS, POSITIONS,
+        FROZEN_TRANSFERS, LIMIT_ORDERS, POSITIONS, REGISTRY_CANISTER,
     },
     payoffs::{get_required_margin, scale_price, RoundingMode},
     trade::{
@@ -35,7 +36,7 @@ use crate::{
         trade::{LimitOrder, OrderId, Side, TradeId, TransferId},
         user::User,
     },
-    utils::series::ensure_series_registered,
+    utils::{registry::is_trading_authorized, series::ensure_series_registered},
 };
 
 /// Submits a limit order for the caller.
@@ -63,6 +64,8 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
         }
 
         let series = ensure_series_registered(&params.series_id).await?;
+
+        check_trading_access(&series, caller.0).await?;
 
         validate_no_arbitrage(&series, &params)?;
 
@@ -154,6 +157,8 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
         })?;
 
         let series = ensure_series_registered(&order.series_id).await?;
+
+        check_trading_access(&series, taker.0).await?;
 
         submit_market_order_impl(taker, order, &trade_id, &series)
     })
@@ -446,6 +451,50 @@ pub fn get_orders() -> Vec<LimitOrder> {
     })
 }
 
+/// Verifies that a principal is authorized to trade on a series based on its
+/// [`TradingAccess`] policies.
+///
+/// # Performance
+///
+/// This function is designed for **zero overhead on open markets**:
+/// - If the series' `trading_access` contains [`TradingAccess::Open`], the function returns
+///   `Ok(())` immediately with no inter-canister call.
+/// - Only when all policies are [`TradingAccess::Restricted`] does it make a bounded-wait query to
+///   the registry canister to resolve group membership.
+///
+/// # Errors
+///
+/// * [`TradeError::Common(RegistryNotSet)`] — the registry principal is not configured.
+/// * [`TradeError::RegistryError`] — the inter-canister call to the registry failed.
+/// * [`TradeError::NotAuthorizedToTrade`] — the principal is not a member of any group referenced
+///   by the series' restricted policies.
+async fn check_trading_access(series: &Series, principal: Principal) -> Result<(), TradeError> {
+    let dominated_by_open = series
+        .trading_access
+        .iter()
+        .any(|p| matches!(p, TradingAccess::Open));
+
+    if dominated_by_open {
+        return Ok(());
+    }
+
+    let registry = REGISTRY_CANISTER.with(|r| *r.borrow());
+
+    if registry == Principal::anonymous() {
+        return Err(TradeError::Common(CommonError::RegistryNotSet));
+    }
+
+    let authorized = is_trading_authorized(registry, principal, series.series_id.clone())
+        .await
+        .map_err(|e| TradeError::RegistryError(format!("Trading access check failed: {e:?}")))?;
+
+    if authorized {
+        Ok(())
+    } else {
+        Err(TradeError::NotAuthorizedToTrade)
+    }
+}
+
 pub(crate) fn validate_no_arbitrage(
     series: &Series,
     new_order: &SubmitLimitOrderParams,
@@ -566,6 +615,7 @@ pub fn list_orders(params: ListOrdersParams) -> Vec<LimitOrder> {
 pub async fn mint_complete_set(series_id: SeriesId, qty: i128) -> Result<bool, TradeError> {
     let caller: User = msg_caller().into();
     let series = ensure_series_registered(&series_id).await?;
+    check_trading_access(&series, caller.0).await?;
     mint_complete_set_logic(caller, &series_id, &series, qty)
 }
 
@@ -668,6 +718,7 @@ pub(crate) fn mint_complete_set_logic(
 pub async fn redeem_complete_set(series_id: SeriesId, qty: i128) -> Result<bool, TradeError> {
     let caller: User = msg_caller().into();
     let series = ensure_series_registered(&series_id).await?;
+    check_trading_access(&series, caller.0).await?;
     redeem_complete_set_logic(caller, &series_id, &series, qty)
 }
 
@@ -805,6 +856,7 @@ mod tests {
             icon_url: None,
             banner_url: None,
             balance_domain: BalanceDomain::Settlement,
+            trading_access: vec![],
         }
     }
 

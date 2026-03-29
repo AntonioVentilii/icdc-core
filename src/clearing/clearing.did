@@ -513,6 +513,19 @@ type Series = record {
 	created_at_ns : nat64;
 	// An optional icon URL for the market.
 	icon_url : opt text;
+	// The set of trading access policies governing who may trade this series.
+	//
+	// Evaluated as a logical OR: a caller is authorized if **any** policy
+	// in the list grants them access.
+	//
+	// - Empty list → unrestricted (same as `[Open]`).
+	// - `[Open]` → explicitly unrestricted.
+	// - `[Restricted { groups }]` → only group members may trade.
+	// - Multiple policies can coexist (e.g. `[Open, Restricted { groups }]`).
+	//
+	// Uses `#[serde(default)]` so that series created before the closed-circles
+	// feature deserialize with an empty list (unrestricted).
+	trading_access : vec TradingAccess;
 	// The canonical number of decimals used for prices and strikes in this series.
 	price_precision : nat8;
 	// The domain this market belongs to (e.g. Playground, Settlement).
@@ -703,8 +716,51 @@ type TradeError = variant {
 	NotOrderCreator;
 	// The specified series was not found in the registry.
 	SeriesNotFound : text;
+	// The caller is not authorized to trade on this restricted series.
+	//
+	// Returned when a series carries `TradingAccess::Restricted` policies
+	// and the caller is not a member of any of the referenced groups.
+	// The caller should check `is_trading_authorized` on the registry
+	// or contact the group creator to be added as a member.
+	NotAuthorizedToTrade;
 	// A common error occurred.
 	Common : CommonError
+};
+// A single trading access policy attached to a derivative series.
+//
+// A [`Series`](super::series::Series) holds a `Vec<TradingAccess>`.
+// Authorization is evaluated as a logical **OR** across all policies:
+// if *any* policy in the list grants access to the caller, the caller
+// may trade.
+//
+// # Default behaviour
+//
+// An empty `Vec` is treated as `[Open]` — i.e. unrestricted access.
+// This preserves backward compatibility for series created before the
+// closed-circles feature.
+//
+// # Combining policies
+//
+// A series may carry multiple policies simultaneously. For example:
+// - `[Open]` — open to everyone (default).
+// - `[Restricted { groups: [g1, g2] }]` — only members of g1 or g2.
+// - `[Open, Restricted { groups: [g1] }]` — open to everyone *and*
+// additionally tagged as belonging to g1 (useful for discovery/UI filtering).
+//
+// # Extensibility
+//
+// New variants (e.g. `TokenGated`, `ReputationBased`) can be added in
+// the future without breaking existing policies or on-chain state.
+type TradingAccess = variant {
+	// Unrestricted: any authenticated (non-anonymous) caller can trade.
+	Open;
+	// Restricted to members of the specified groups.
+	// The caller is authorized if they belong to **at least one** of the
+	// listed groups.
+	Restricted : record {
+		// The group IDs whose members are allowed to trade.
+		groups : vec text
+	}
 };
 type UpdateAssetMetricsParams = record {
 	metrics : AssetMetrics;

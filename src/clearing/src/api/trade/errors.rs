@@ -35,4 +35,11 @@ pub enum TradeError {
     },
     /// A user tried to trade with themselves.
     SelfTradingNotAllowed,
+    /// The caller is not authorized to trade on this restricted series.
+    ///
+    /// Returned when a series carries `TradingAccess::Restricted` policies
+    /// and the caller is not a member of any of the referenced groups.
+    /// The caller should check `is_trading_authorized` on the registry
+    /// or contact the group creator to be added as a member.
+    NotAuthorizedToTrade,
 }

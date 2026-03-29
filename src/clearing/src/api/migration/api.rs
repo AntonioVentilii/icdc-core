@@ -303,6 +303,7 @@ mod tests {
             icon_url: None,
             banner_url: None,
             balance_domain: domain,
+            trading_access: vec![],
         };
         SERIES.with(|s| s.borrow_mut().insert(series_id.clone(), series));
     }

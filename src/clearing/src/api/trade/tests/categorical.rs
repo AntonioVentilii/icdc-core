@@ -50,6 +50,7 @@ fn categorical_mint_redeem_complete_set() {
         icon_url: None,
         banner_url: None,
         balance_domain: BalanceDomain::Settlement,
+        trading_access: vec![],
     };
 
     setup_test_state(vec![(user, 100_000)]);
@@ -110,6 +111,7 @@ fn categorical_lifecycle_scenario() {
         icon_url: None,
         banner_url: None,
         balance_domain: BalanceDomain::Settlement,
+        trading_access: vec![],
     };
 
     setup_test_state(vec![(seller, 200_000), (buyer, 100_000)]);
@@ -188,6 +190,7 @@ fn categorical_short_settlement() {
         icon_url: None,
         banner_url: None,
         balance_domain: BalanceDomain::Settlement,
+        trading_access: vec![],
     };
 
     setup_test_state(vec![(seller, 100_000), (buyer, 100_000)]);
@@ -259,6 +262,7 @@ fn categorical_short_loss() {
         icon_url: None,
         banner_url: None,
         balance_domain: BalanceDomain::Settlement,
+        trading_access: vec![],
     };
 
     setup_test_state(vec![(seller, 100_000), (buyer, 100_000)]);

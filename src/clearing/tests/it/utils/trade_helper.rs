@@ -209,6 +209,7 @@ impl TradeHelperTrait for TestSetup {
             outcomes: None,
             icon_url: None,
             banner_url: None,
+            trading_access: vec![],
         };
 
         let res_bytes = self

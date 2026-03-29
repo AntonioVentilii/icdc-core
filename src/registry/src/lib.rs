@@ -10,6 +10,10 @@ use candid::Principal;
 use ic_cdk::export_candid;
 use ic_cdk_macros::{post_upgrade, pre_upgrade};
 pub use shared::types::{
+    groups::{
+        CreateGroupParams, CreateGroupResult, Group, GroupError, GroupId, GroupResult,
+        UpdateGroupMembersParams, UpdateTradingAccessParams,
+    },
     oracle::{
         AddOracleParams, ManageOraclePrincipalsParams, Oracle, OracleError, OracleResult,
         UpdateOracleMetadataParams,
@@ -18,6 +22,7 @@ pub use shared::types::{
         AddSeriesParams, AddSeriesResult, ListSeriesParams, PaginationParams, Series, SeriesError,
         SeriesId, SeriesPage,
     },
+    TradingAccess,
 };
 
 #[pre_upgrade]

@@ -4,8 +4,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::types::{
-    description::Description, domain::BalanceDomain, payout::PayoutUnit, price::Price,
+    description::Description, domain::BalanceDomain, groups::TradingAccess, payout::PayoutUnit,
+    price::Price,
 };
+
+fn default_trading_access() -> Vec<TradingAccess> {
+    vec![TradingAccess::Open]
+}
 
 /// A unique identifier for a derivative series.
 /// Encapsulates a hex-encoded string derived from series parameters.
@@ -125,6 +130,20 @@ pub struct Series {
     pub banner_url: Option<String>,
     /// The domain this market belongs to (e.g. Playground, Settlement).
     pub balance_domain: BalanceDomain,
+    /// The set of trading access policies governing who may trade this series.
+    /// **Must never be empty** — every series carries at least one policy.
+    ///
+    /// Evaluated as a logical OR: a caller is authorized if **any** policy
+    /// in the list grants them access.
+    ///
+    /// - `[Open]` → explicitly unrestricted (default).
+    /// - `[Restricted { groups }]` → only group members may trade.
+    /// - Multiple policies can coexist (e.g. `[Open, Restricted { groups }]`).
+    ///
+    /// Series created before the closed-circles feature will not have this
+    /// field in stable storage; serde deserializes them as `[Open]`.
+    #[serde(default = "default_trading_access")]
+    pub trading_access: Vec<TradingAccess>,
 }
 impl Series {
     /// Generates a unique [`SeriesId`] based on the contract parameters.
@@ -247,6 +266,17 @@ pub struct AddSeriesParams {
     pub icon_url: Option<String>,
     /// An optional banner URL for the market.
     pub banner_url: Option<String>,
+    /// Initial trading access policies for the new series.
+    /// **Must not be empty** — defaults to `[Open]` if omitted during deserialization.
+    ///
+    /// Controls who may submit orders on this market once it is registered.
+    /// Pass `[Restricted { groups: [g1, g2, ...] }]` to limit trading to
+    /// members of those groups.
+    ///
+    /// If the caller passes an empty list, `add_series` will fill it with `[Open]`.
+    /// Policies can be updated after creation via `update_trading_access`.
+    #[serde(default = "default_trading_access")]
+    pub trading_access: Vec<TradingAccess>,
 }
 
 /// Parameters for paginating results.
@@ -431,7 +461,8 @@ mod tests {
     use candid::Principal;
 
     use crate::types::{
-        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId, SeriesIdParams,
+        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId,
+        SeriesIdParams, TradingAccess,
     };
 
     #[test]
@@ -562,6 +593,7 @@ mod tests {
             icon_url: None,
             banner_url: None,
             balance_domain: BalanceDomain::Settlement,
+            trading_access: vec![TradingAccess::Open],
         };
 
         assert_eq!(series.title, "Long ICP Call");

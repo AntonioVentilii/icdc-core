@@ -9,7 +9,7 @@ use shared::{
             AddSeriesParams, AddSeriesResult, ListSeriesParams, PaginationParams, Series,
             SeriesError, SeriesPage,
         },
-        PayoutUnit, SeriesId, SeriesIdParams,
+        PayoutUnit, SeriesId, SeriesIdParams, TradingAccess,
     },
 };
 
@@ -44,6 +44,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
         outcomes,
         icon_url,
         banner_url,
+        trading_access,
     } = params;
 
     // Validate payout unit - currently only USD is supported across the protocol
@@ -58,6 +59,12 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
     if description.plain.chars().count() > MAX_SERIES_DESCRIPTION_LEN {
         return Err(SeriesError::DescriptionTooLong).into();
     }
+
+    let trading_access = if trading_access.is_empty() {
+        vec![TradingAccess::Open]
+    } else {
+        trading_access
+    };
 
     let underlying = canonical_id_part(&underlying);
     let oracle_source = canonical_id_part(&oracle_source);
@@ -91,6 +98,7 @@ pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
         description,
         icon_url,
         banner_url,
+        trading_access,
     };
 
     let res = SERIES_STORE.with(|store| {
@@ -182,6 +190,7 @@ mod tests {
             outcomes: None,
             icon_url: None,
             banner_url: None,
+            trading_access: vec![],
         };
 
         let result = add_series(params);

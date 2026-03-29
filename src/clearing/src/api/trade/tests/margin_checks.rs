@@ -10,7 +10,7 @@ mod tests {
     use crate::types::{margin::AccountState, user::User};
 
     #[test]
-    fn test_margin_consumption_logic() {
+    fn margin_consumption_logic() {
         let user = User(Principal::from_slice(&[1]));
         let asset_id = AssetId::from("USDC");
 
@@ -65,6 +65,6 @@ mod tests {
         let next_req = 5_000_000; // Another $500
         let target_res = acc.get_reserved_margin_usd(BalanceDomain::Settlement) + next_req;
         let eq_raw = acc.calculate_raw_equity_i128(BalanceDomain::Settlement, &configs, &metrics);
-        assert!(eq_raw < target_res as i128); // $1000 < $1100 -> TRUE (Fail)
+        assert!(eq_raw < target_res.cast_signed()); // $1000 < $1100 -> TRUE (Fail)
     }
 }
