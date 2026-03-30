@@ -40,9 +40,12 @@ export ICP_PRICE_E6=30000 # $3.00
 # Vici XP (VXP) — ICRC ledger; default = mainnet id from vici-points/canister_ids.json. Override: VICI_XP_LEDGER=...
 export VICI_XP_SYMBOL="VXP"
 export VICI_XP_LEDGER="${VICI_XP_LEDGER:-s7ux4-yyaaa-aaaam-qidha-cai}"
-export VICI_XP_DECIMALS=8
+export VICI_XP_DECIMALS=4
 export VICI_XP_HAIRCUT_BPS=0  # 0% haircut for Playground-only app-specific token
 export VICI_XP_PRICE_E6=10000 # $1.00
+
+# ICRC transfer fee for VXP ledger (base units; 1 = 0.0001 VXP at 4 decimals)
+export VICI_XP_TRANSFER_FEE=1
 
 # vUSD: configured on the clearing canister via install/init `Config.internal_ledger` (build args).
 # Do not use register_icrc_asset for vUSD — it is internal accounting, not user collateral.
@@ -75,7 +78,7 @@ export TICRC1_PRICE_E6=5000    # $0.50
 # Shared Minting Account
 export TEST_MINTING_ACCOUNT="bnuz2-zaaaa-aaaal-arrba-cai"
 
-# Standard Ledger Fee (10,000 e8s)
+# Legacy default for 8-decimal test ledgers (unused for VXP; see VICI_XP_TRANSFER_FEE)
 export DEFAULT_LEDGER_FEE=10000
 
 # Faucet Canister

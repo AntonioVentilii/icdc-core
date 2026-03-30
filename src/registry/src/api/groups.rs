@@ -1,21 +1,3 @@
-//! Canister API for managing trading groups (closed circles) and series access policies.
-//!
-//! Groups are on-chain entities stored in [`GROUPS_STORE`]. They allow market admins
-//! to restrict who may trade on specific series by referencing groups in the series'
-//! [`TradingAccess`] policies.
-//!
-//! ## Permissions model
-//!
-//! | Action | Who may call |
-//! |---|---|
-//! | Create a group | Any authenticated caller |
-//! | Update group metadata | Group admin (or creator, or controller) |
-//! | Add/remove admins | Group admin (or creator, or controller) |
-//! | Add/remove members | Group admin (or creator, or controller) |
-//! | Delete a group | Group admin (or creator, or controller) |
-//! | Update series trading access | Canister controller only |
-//! | Query groups / membership | Anyone (public queries) |
-
 use std::collections::BTreeSet;
 
 use candid::Principal;

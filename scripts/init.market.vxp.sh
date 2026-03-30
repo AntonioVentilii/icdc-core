@@ -156,21 +156,21 @@ SCALAR_MARKETS=$(sort -u "$TMP_SCALAR" 2>/dev/null || true)
 # --- 2. THRESHOLD ---
 # Formula: NUM_MARKETS * ORDERS_PER_SIDE * 2_SIDES * UNITS_PER_ORDER * WIGGLE_ROOM
 REQ_VXP=$(echo "$TOTAL_UNITS * $NUM_ORDERS_PER_SIDE * 2 * $ORDER_VALUE_USD * $WIGGLE_ROOM" | bc)
-REQ_E8S=$(echo "$REQ_VXP * 100000000 / 1" | bc | cut -d'.' -f1)
-echo "Required $VICI_XP_SYMBOL: $REQ_VXP ($REQ_E8S e8s)"
+REQ_BASE_UNITS=$(echo "scale=0; $REQ_VXP * (10^$VICI_XP_DECIMALS) / 1" | bc | cut -d'.' -f1)
+echo "Required $VICI_XP_SYMBOL: $REQ_VXP whole tokens ($REQ_BASE_UNITS ledger base units)"
 
 # --- 3. BALANCE & FAUCET ---
 echo "Checking balance..."
 if ! BAL_RES=$(dfx canister call "$VICI_XP_LEDGER" icrc1_balance_of "(record { owner = principal \"$MY_PRINCIPAL\" })" --network "$NETWORK" 2>/dev/null); then
   echo "Warning: Balance check failed."
-  CUR_BAL_E8S=0
+  CUR_BAL_BASE=0
 else
-  CUR_BAL_E8S=$(echo "$BAL_RES" | grep -oE '[0-9_]+ : nat' | head -n1 | awk '{print $1}' | tr -d '_')
+  CUR_BAL_BASE=$(echo "$BAL_RES" | grep -oE '[0-9_]+ : nat' | head -n1 | awk '{print $1}' | tr -d '_')
 fi
-echo "Current balance: $CUR_BAL_E8S e8s"
+echo "Current balance: $CUR_BAL_BASE base units"
 
-while [[ "$CUR_BAL_E8S" -lt "$REQ_E8S" ]]; do
-  echo "Current balance ($CUR_BAL_E8S) is less than required ($REQ_E8S). Please ensure you have sufficient $VICI_XP_SYMBOL tokens."
+while [[ "$CUR_BAL_BASE" -lt "$REQ_BASE_UNITS" ]]; do
+  echo "Current balance ($CUR_BAL_BASE) is less than required ($REQ_BASE_UNITS). Please ensure you have sufficient $VICI_XP_SYMBOL tokens."
   # The faucet might not support VXP directly via transfer_icp, so we just wait or the user provides it.
   dfx identity use default
   if [[ -n "$MY_ACCOUNT_ID" ]]; then
@@ -188,26 +188,25 @@ while [[ "$CUR_BAL_E8S" -lt "$REQ_E8S" ]]; do
   if ! BAL_RES=$(dfx canister call "$VICI_XP_LEDGER" icrc1_balance_of "(record { owner = principal \"$MY_PRINCIPAL\" })" --network "$NETWORK" 2>/dev/null); then
     echo "Warning: Balance check failed during retry loop."
   else
-    CUR_BAL_E8S=$(echo "$BAL_RES" | grep -oE '[0-9_]+ : nat' | head -n1 | awk '{print $1}' | tr -d '_')
+    CUR_BAL_BASE=$(echo "$BAL_RES" | grep -oE '[0-9_]+ : nat' | head -n1 | awk '{print $1}' | tr -d '_')
   fi
 done
 
-echo "Balance sufficient ($CUR_BAL_E8S e8s)."
+echo "Balance sufficient ($CUR_BAL_BASE base units)."
 
 # --- 4. DEPOSIT COLLATERAL TO CLEARING ---
 echo "Depositing collateral to Clearing..."
 DID=$(openssl rand -hex 8)
 
 # Deduct ledger fees: one for icrc2_approve and one for icrc2_transfer_from
-# Assume 10,000 e8s fee per call (standard for ICRC-1 ledgers)
-LEDGER_FEE=$DEFAULT_LEDGER_FEE
-APPROVE_AMOUNT=$((CUR_BAL_E8S - LEDGER_FEE))
-DEPOSIT_AMOUNT=$((CUR_BAL_E8S - 2 * LEDGER_FEE))
+LEDGER_FEE=$VICI_XP_TRANSFER_FEE
+APPROVE_AMOUNT=$((CUR_BAL_BASE - LEDGER_FEE))
+DEPOSIT_AMOUNT=$((CUR_BAL_BASE - 2 * LEDGER_FEE))
 
 [[ "$APPROVE_AMOUNT" -lt 0 ]] && APPROVE_AMOUNT=0
 [[ "$DEPOSIT_AMOUNT" -lt 0 ]] && DEPOSIT_AMOUNT=0
 
-echo "  Approving Clearing to spend $APPROVE_AMOUNT e8s of $VICI_XP_SYMBOL..."
+echo "  Approving Clearing to spend $APPROVE_AMOUNT base units of $VICI_XP_SYMBOL..."
 dfx canister call "$VICI_XP_LEDGER" icrc2_approve "(record {
     amount = $APPROVE_AMOUNT : nat; 
     spender = record { owner = principal \"$CLEARING_CANISTER\" };

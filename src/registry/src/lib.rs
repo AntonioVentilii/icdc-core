@@ -1,6 +1,3 @@
-//! The Series Registry canister provides a centralised directory for derivative contract series.
-//! It allows for registration and discovery of [`Series`] by their canonical identifiers.
-
 pub mod api;
 pub mod guards;
 pub mod memory;
