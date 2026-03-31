@@ -10,17 +10,19 @@ use shared::types::{
 
 use super::{
     errors::{
-        CancelFundWithdrawalError, RegisterIcrcAssetError, UpdateAssetPriceError,
-        UpdateCollateralAllowedDomainsError, WithdrawFundError,
+        CancelFundWithdrawalError, RefreshIcrcAssetMetadataError, RegisterIcrcAssetError,
+        UpdateAssetPriceError, UpdateCollateralAllowedDomainsError, WithdrawFundError,
     },
     params::{
-        CancelFundWithdrawalParams, FundType, RegisterIcrcAssetParams, UpdateAssetMetricsParams,
-        UpdateAssetPriceParams, UpdateCollateralAllowedDomainsParams, UpdateCollateralAssetParams,
+        CancelFundWithdrawalParams, FundType, RefreshIcrcAssetMetadataParams,
+        RegisterIcrcAssetParams, UpdateAssetMetricsParams, UpdateAssetPriceParams,
+        UpdateCollateralAllowedDomainsParams, UpdateCollateralAssetParams,
         UpdateDomainPolicyParams, WithdrawFundParams,
     },
     results::{
-        CancelFundWithdrawalResult, GetFundsResult, RegisterIcrcAssetResult,
-        UpdateAssetPriceResult, UpdateCollateralAllowedDomainsResult, WithdrawFundResult,
+        CancelFundWithdrawalResult, GetFundsResult, RefreshIcrcAssetMetadataResult,
+        RegisterIcrcAssetResult, UpdateAssetPriceResult, UpdateCollateralAllowedDomainsResult,
+        WithdrawFundResult,
     },
 };
 use crate::{
@@ -341,6 +343,60 @@ fn upsert_asset_state_impl(config: CollateralAssetConfig, metrics: AssetMetrics)
     insert_collateral_asset_impl(config);
 
     insert_asset_metrics_impl(asset_id, metrics);
+}
+
+/// Refreshes the metadata (decimals, fee, symbol) of an already registered ICRC asset.
+///
+/// This method is gated to canister controllers.
+#[update(guard = "caller_is_controller")]
+pub async fn refresh_icrc_asset_metadata(
+    params: RefreshIcrcAssetMetadataParams,
+) -> RefreshIcrcAssetMetadataResult {
+    let res: Result<(), RefreshIcrcAssetMetadataError> = (async {
+        let RefreshIcrcAssetMetadataParams { asset_id } = params;
+
+        let mut config = COLLATERAL_ASSETS
+            .with(|assets| assets.borrow().get(&asset_id).cloned())
+            .ok_or(RefreshIcrcAssetMetadataError::AssetNotFound)?;
+
+        if !matches!(config.asset, Asset::Icrc(_)) {
+            return Err(RefreshIcrcAssetMetadataError::NotAnIcrcAsset);
+        }
+
+        let handler = get_handler(&config.asset).map_err(|e| {
+            RefreshIcrcAssetMetadataError::Common(CommonError::Internal(format!("{e:?}")))
+        })?;
+
+        let AssetHandler::Icrc(icrc_handler) = &handler else {
+            return Err(RefreshIcrcAssetMetadataError::Common(
+                CommonError::Internal("Expected ICRC handler".to_owned()),
+            ));
+        };
+
+        let metadata = icrc_handler
+            .get_metadata(&config.asset)
+            .await
+            .map_err(|e| {
+                RefreshIcrcAssetMetadataError::Common(CommonError::Internal(format!("{e:?}")))
+            })?;
+
+        config.symbol = metadata.symbol;
+        config.decimals = metadata.decimals;
+
+        insert_collateral_asset_impl(config);
+
+        ASSET_METRICS.with(|m| {
+            if let Some(metrics) = m.borrow_mut().get_mut(&asset_id) {
+                metrics.latest_transfer_fee = Some(metadata.fee);
+                metrics.last_updated_ns = Some(now_ns());
+            }
+        });
+
+        Ok(())
+    })
+    .await;
+
+    res.into()
 }
 
 fn insert_collateral_asset_impl(config: CollateralAssetConfig) {

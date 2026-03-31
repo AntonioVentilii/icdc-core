@@ -39,3 +39,10 @@ pub enum UpdateCollateralAllowedDomainsError {
     AssetNotFound,
     InvalidAllowedBalanceDomains,
 }
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub enum RefreshIcrcAssetMetadataError {
+    Common(CommonError),
+    AssetNotFound,
+    NotAnIcrcAsset,
+}

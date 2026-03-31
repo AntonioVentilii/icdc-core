@@ -466,6 +466,16 @@ type Price = record {
 	// The numeric component of the price.
 	decimal : DecimalValue
 };
+type RefreshIcrcAssetMetadataError = variant {
+	AssetNotFound;
+	NotAnIcrcAsset;
+	Common : CommonError
+};
+type RefreshIcrcAssetMetadataParams = record { asset_id : text };
+type RefreshIcrcAssetMetadataResult = variant {
+	Ok;
+	Err : RefreshIcrcAssetMetadataError
+};
 type RegisterIcrcAssetError = variant {
 	// `allowed_balance_domains` was empty or could not be normalized.
 	InvalidAllowedBalanceDomains;
@@ -935,6 +945,12 @@ service : (Config) -> {
 	//
 	// Returns 1.0 USD (vUSD) for every full set of N outcome positions provided.
 	redeem_complete_set : (text, int) -> (SubmitMatchedTradeResult);
+	// Refreshes the metadata (decimals, fee, symbol) of an already registered ICRC asset.
+	//
+	// This method is gated to canister controllers.
+	refresh_icrc_asset_metadata : (RefreshIcrcAssetMetadataParams) -> (
+		RefreshIcrcAssetMetadataResult
+	);
 	// Automatically registers an ICRC asset by fetching its metadata from the ledger.
 	//
 	// This method is gated to canister controllers.

@@ -63,3 +63,8 @@ pub struct UpdateDomainPolicyParams {
     pub domain: BalanceDomain,
     pub policy: DomainPolicy,
 }
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct RefreshIcrcAssetMetadataParams {
+    pub asset_id: AssetId,
+}
