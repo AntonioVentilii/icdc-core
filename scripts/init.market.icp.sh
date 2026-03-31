@@ -23,6 +23,30 @@ echo "My Identity: $MY_IDENTITY"
 echo "My Principal: $MY_PRINCIPAL"
 echo "My Account ID: $MY_ACCOUNT_ID"
 
+TOKEN=${TOKEN:-TESTICP}
+
+if [[ "$TOKEN" == "ICP" ]]; then
+  TARGET_SYMBOL=$ICP_SYMBOL
+  TARGET_LEDGER=$ICP_LEDGER
+  TARGET_DECIMALS=$ICP_DECIMALS
+  TARGET_FEE=$DEFAULT_LEDGER_FEE
+  TARGET_DOMAIN="opt variant { Settlement }"
+elif [[ "$TOKEN" == "TICRC1" ]]; then
+  TARGET_SYMBOL=$TICRC1_SYMBOL
+  TARGET_LEDGER=$TICRC1_LEDGER
+  TARGET_DECIMALS=$TICRC1_DECIMALS
+  TARGET_FEE=$DEFAULT_LEDGER_FEE
+  TARGET_DOMAIN="opt variant { Playground }"
+else
+  TARGET_SYMBOL=$TESTICP_SYMBOL
+  TARGET_LEDGER=$TESTICP_LEDGER
+  TARGET_DECIMALS=$TESTICP_DECIMALS
+  TARGET_FEE=$DEFAULT_LEDGER_FEE
+  TARGET_DOMAIN="opt variant { Playground }"
+fi
+
+echo "Using token: $TARGET_SYMBOL (${TARGET_DOMAIN})"
+
 ## --- 1. FETCH ACTIVE MARKETS FROM REGISTRY ---
 echo "Fetching active markets from Registry..."
 NOW_NS=$(date +%s%N)
@@ -165,16 +189,16 @@ echo "Found $NUM_SCALAR scalar markets and $NUM_CATEGORICAL_OUTCOMES categorical
 SCALAR_MARKETS=$(sort -u "$TMP_SCALAR" 2>/dev/null || true)
 
 # --- 2. THRESHOLD ---
-# Estimate margin in USD terms, then convert to VXP base units.
+# Estimate margin in USD terms, then convert to base units.
 # For binary/categorical products, total system margin per contract is ~1 USD,
 # so we scale by `ORDER_QTY` (contracts/units per order).
-REQ_VXP=$(echo "$TOTAL_UNITS * $NUM_ORDERS_PER_SIDE * 2 * $ORDER_QTY * $ORDER_VALUE_USD * $WIGGLE_ROOM" | bc)
-REQ_BASE_UNITS=$(echo "scale=0; $REQ_VXP * (10^$VICI_XP_DECIMALS) / 1" | bc | cut -d'.' -f1)
-echo "Required $VICI_XP_SYMBOL: $REQ_VXP whole tokens ($REQ_BASE_UNITS ledger base units)"
+REQ_TOKENS=$(echo "$TOTAL_UNITS * $NUM_ORDERS_PER_SIDE * 2 * $ORDER_QTY * $ORDER_VALUE_USD * $WIGGLE_ROOM" | bc)
+REQ_BASE_UNITS=$(echo "scale=0; $REQ_TOKENS * (10^$TARGET_DECIMALS) / 1" | bc | cut -d'.' -f1)
+echo "Required $TARGET_SYMBOL: $REQ_TOKENS whole tokens ($REQ_BASE_UNITS ledger base units)"
 
 # --- 3. BALANCE & FAUCET ---
 echo "Checking balance..."
-if ! BAL_RES=$(dfx canister call "$VICI_XP_LEDGER" icrc1_balance_of "(record { owner = principal \"$MY_PRINCIPAL\" })" --network "$NETWORK" 2>/dev/null); then
+if ! BAL_RES=$(dfx canister call "$TARGET_LEDGER" icrc1_balance_of "(record { owner = principal \"$MY_PRINCIPAL\" })" --network "$NETWORK" 2>/dev/null); then
   echo "Warning: Balance check failed."
   CUR_BAL_BASE=0
 else
@@ -182,10 +206,28 @@ else
 fi
 echo "Current balance: $CUR_BAL_BASE base units"
 
-if [[ "$CUR_BAL_BASE" -lt "$REQ_BASE_UNITS" ]]; then
-  echo "Error: Current balance ($CUR_BAL_BASE base units) is less than required ($REQ_BASE_UNITS base units). Please ensure you have sufficient $VICI_XP_SYMBOL tokens."
-  exit 1
-fi
+while [[ "$CUR_BAL_BASE" -lt "$REQ_BASE_UNITS" ]]; do
+  echo "Current balance ($CUR_BAL_BASE) is less than required ($REQ_BASE_UNITS). Please ensure you have sufficient $TARGET_SYMBOL tokens."
+  # The faucet might not support VXP directly via transfer_icp, so we just wait or the user provides it.
+  dfx identity use default
+  if [[ -n "$MY_ACCOUNT_ID" ]]; then
+    dfx canister call "$FAUCET_CANISTER" transfer_icp "(\"$MY_ACCOUNT_ID\")" --network "$NETWORK"
+  else
+    echo "Error: Could not determine Account ID for $MY_PRINCIPAL. Falling back to principal..."
+    dfx canister call "$FAUCET_CANISTER" transfer_icrc1 "(principal \"$MY_PRINCIPAL\")" --network "$NETWORK"
+  fi
+  dfx identity use "$MY_IDENTITY"
+
+  echo "Waiting 5 seconds for balance to update..."
+  sleep 5
+
+  # Re-check balance
+  if ! BAL_RES=$(dfx canister call "$TARGET_LEDGER" icrc1_balance_of "(record { owner = principal \"$MY_PRINCIPAL\" })" --network "$NETWORK" 2>/dev/null); then
+    echo "Warning: Balance check failed during retry loop."
+  else
+    CUR_BAL_BASE=$(echo "$BAL_RES" | grep -oE '[0-9_]+ : nat' | head -n1 | awk '{print $1}' | tr -d '_')
+  fi
+done
 
 echo "Balance sufficient ($CUR_BAL_BASE base units)."
 
@@ -194,15 +236,15 @@ echo "Depositing collateral to Clearing..."
 DID=$(openssl rand -hex 8)
 
 # Deduct ledger fees: one for icrc2_approve and one for icrc2_transfer_from
-LEDGER_FEE=$VICI_XP_TRANSFER_FEE
+LEDGER_FEE=$TARGET_FEE
 APPROVE_AMOUNT=$((CUR_BAL_BASE - LEDGER_FEE))
 DEPOSIT_AMOUNT=$((CUR_BAL_BASE - 2 * LEDGER_FEE))
 
 [[ "$APPROVE_AMOUNT" -lt 0 ]] && APPROVE_AMOUNT=0
 [[ "$DEPOSIT_AMOUNT" -lt 0 ]] && DEPOSIT_AMOUNT=0
 
-echo "  Approving Clearing to spend $APPROVE_AMOUNT base units of $VICI_XP_SYMBOL..."
-dfx canister call "$VICI_XP_LEDGER" icrc2_approve "(record {
+echo "  Approving Clearing to spend $APPROVE_AMOUNT base units of $TARGET_SYMBOL..."
+dfx canister call "$TARGET_LEDGER" icrc2_approve "(record {
     amount = $APPROVE_AMOUNT : nat; 
     spender = record { owner = principal \"$CLEARING_CANISTER\" };
 })" --network "$NETWORK"
@@ -210,9 +252,9 @@ dfx canister call "$VICI_XP_LEDGER" icrc2_approve "(record {
 echo "  Executing deposit_collateral on Clearing..."
 dfx canister call clearing deposit_collateral "(record { 
     amount = $DEPOSIT_AMOUNT : nat; 
-    asset_id = \"$VICI_XP_SYMBOL\"; 
+    asset_id = \"$TARGET_SYMBOL\"; 
     deposit_id = \"$DID\"; 
-    domain = opt variant { ViciXp };
+    domain = $TARGET_DOMAIN;
 })" --network "$NETWORK"
 
 # --- 5. PLACE ORDERS ---
