@@ -262,8 +262,8 @@ fn basic_matched_trade() {
         GetAccountStateResult::Ok(resp) => {
             assert_eq!(
                 resp.state.get_cash_balance_usd(BalanceDomain::Settlement),
-                -50_000_000, // Cost of trade
-                "Buyer cash should be negative $5000"
+                0, // Cost of trade
+                "Buyer cash should be zero"
             );
             assert_eq!(
                 resp.total_equity_usd, 147_000_000,
@@ -288,8 +288,8 @@ fn basic_matched_trade() {
         GetAccountStateResult::Ok(resp) => {
             assert_eq!(
                 resp.state.get_cash_balance_usd(BalanceDomain::Settlement),
-                -50_000_000, // Margin requirement (Full Collateral)
-                "Seller cash should be negative $5000"
+                0, // Margin requirement (Full Collateral)
+                "Seller cash should be zero"
             );
             assert_eq!(
                 resp.total_equity_usd, 147_000_000,

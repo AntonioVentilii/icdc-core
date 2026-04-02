@@ -277,8 +277,10 @@ pub(crate) fn prepare_settlement_impl(
 
                 let p_fee = calculate_settlement_fee(payoff_u128, protocol_fee_ratio);
 
-                let cashflow: i128 =
-                    (payoff_u128.cast_signed()) - (i_fee.cast_signed()) - (p_fee.cast_signed());
+                let cashflow: i128 = (payoff_u128.cast_signed())
+                    - (pos.reserved_margin_usd.cast_signed())
+                    - (i_fee.cast_signed())
+                    - (p_fee.cast_signed());
 
                 total_insurance_fee += i_fee;
                 total_protocol_fee += p_fee;
