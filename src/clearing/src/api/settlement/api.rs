@@ -485,7 +485,7 @@ mod tests {
                     series_id: series_id.clone(),
                     outcome_id: None,
                     net_qty: 1,
-                    reserved_margin_usd: 10,
+                    reserved_margin_usd: 100_000,
                 },
             );
         });
@@ -519,8 +519,8 @@ mod tests {
             total_collateral_usd,
         }) = result
         {
-            assert_eq!(total_net_payoff, 1_000_000); // 100 USD
-            assert_eq!(total_collateral_usd, 900_000); // 90 USD post-settlement
+            assert_eq!(total_net_payoff, 900_000); // 100 USD payoff - 10 USD margin
+            assert_eq!(total_collateral_usd, 800_000); // -10 initial + 100 payoff - 10 margin = 80 USD
         } else {
             panic!("Expected SolvencyViolation, got {result:?}");
         }
@@ -569,7 +569,7 @@ mod tests {
                     series_id: series_id.clone(),
                     outcome_id: None,
                     net_qty: 1,
-                    reserved_margin_usd: 10,
+                    reserved_margin_usd: 100_000,
                 },
             );
         });
@@ -598,7 +598,7 @@ mod tests {
         // fees are in USD base units (`USD_DECIMALS`).
         assert_eq!(plan.insurance_fee_usd, 500);
         assert_eq!(plan.fee_usd, 250);
-        assert_eq!(plan.positions[0].cashflow_usd, 500_000 - 500 - 250);
+        assert_eq!(plan.positions[0].cashflow_usd, 500_000 - 100_000 - 500 - 250);
 
         // Verify position WAS REMOVED
         POSITIONS.with(|pos: &RefCell<BTreeMap<_, _>>| {
@@ -875,7 +875,7 @@ mod tests {
                     series_id: series_id.clone(),
                     outcome_id: None,
                     net_qty: 1,
-                    reserved_margin_usd: 10,
+                    reserved_margin_usd: 100_000,
                 },
             );
         });
@@ -913,7 +913,7 @@ mod tests {
         assert_eq!(plan.fee_usd, 10_000); // 1% of 1_000_000
         assert_eq!(
             plan.positions[0].cashflow_usd,
-            1_000_000 - 10_000 - 10_000 // 980_000
+            1_000_000 - 100_000 - 10_000 - 10_000 // Payoff - Margin - Fees = 880,000
         );
 
         // Cleanup

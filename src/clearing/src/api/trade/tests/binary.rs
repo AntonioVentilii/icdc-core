@@ -67,10 +67,10 @@ fn binary_lifecycle_scenario() {
     settle_series_checked(&series, &SettlementInput::Price(Price::new(100_000_000, 8)));
 
     // Final Balances:
-    // Buyer: $10 (unchanged cash) + 10 * $1.00 (payoff) = $20.00 = 200,000 (scaled to 4 USD
-    // decimals) Seller: $20 (unchanged cash) + 10 * $0 (payoff) = $20.00 = 200,000
-    verify_cash_balance(buyer, 200_000);
-    verify_cash_balance(seller, 200_000);
+    // Buyer: 100k initial + (100k payoff - 30k margin) = 170k
+    // Seller: 200k initial + (0k payoff - 70k margin) = 130k
+    verify_cash_balance(buyer, 170_000);
+    verify_cash_balance(seller, 130_000);
 }
 
 #[test]
@@ -123,8 +123,8 @@ fn binary_settle_no() {
     settle_series_checked(&series, &SettlementInput::Price(Price::new(0, 8)));
 
     // Final Balances:
-    // Buyer: $10 (unchanged cash) + 10 * $0 (payoff) = $10.00 = 100,000 (scaled to 4 USD decimals)
-    // Seller: $20 (unchanged cash) + 10 * $1.00 (payoff for short on loss) = $30.00 = 300,000
-    verify_cash_balance(buyer, 100_000);
-    verify_cash_balance(seller, 300_000);
+    // Buyer: 100k initial + (0 payoff - 30k margin) = 70k
+    // Seller: 200k initial + (100k payoff - 70k margin) = 230k
+    verify_cash_balance(buyer, 70_000);
+    verify_cash_balance(seller, 230_000);
 }

@@ -144,8 +144,8 @@ fn categorical_lifecycle_scenario() {
 
     settle_series_checked(&series, &SettlementInput::Outcome(outcome_a.clone()));
 
-    verify_cash_balance(buyer, 200_000); // 100k + 100k payoff
-    verify_cash_balance(seller, 206_667); // 206,667 + 0 payoff
+    verify_cash_balance(buyer, 160_000); // 100k initial + (100k payoff - 40k margin)
+    verify_cash_balance(seller, 140_001); // 206,667 post-trade - 66,666 margin release
 
     verify_position_qty(buyer, &series_id, Some(&outcome_a.clone()), 0);
     verify_position_qty(seller, &series_id, Some(&outcome_b.clone()), 0);
@@ -218,10 +218,10 @@ fn categorical_short_settlement() {
     settle_series_checked(&series, &SettlementInput::Outcome(outcome_b.clone()));
 
     // Results:
-    // Buyer (Long A): receives 0. Final = 100k + 0 = 100k.
-    // Seller (Short A): receives 1.0 payoff. Final = 100k + 100k = 200k.
-    verify_cash_balance(buyer, 100_000);
-    verify_cash_balance(seller, 200_000);
+    // Buyer (Long A): receives 0. Final = 100k - 40k = 60k.
+    // Seller (Short A): receives 1.0 payoff. Final = 100k + (100k - 60k) = 140k.
+    verify_cash_balance(buyer, 60_000);
+    verify_cash_balance(seller, 140_000);
 }
 
 #[test]
@@ -286,8 +286,8 @@ fn categorical_short_loss() {
     settle_series_checked(&series, &SettlementInput::Outcome(outcome_a.clone()));
 
     // Results:
-    // Buyer (Long A): receives 1.0 payoff. Final = 100k + 100k = 200k.
-    // Seller (Short A): receives 0. Final = 100k + 0 = 100k.
-    verify_cash_balance(buyer, 200_000);
-    verify_cash_balance(seller, 100_000);
+    // Buyer (Long A): receives 1.0 payoff. Final = 100k + (100k - 40k) = 160k.
+    // Seller (Short A): receives 0. Final = 100k - 60k = 40k.
+    verify_cash_balance(buyer, 160_000);
+    verify_cash_balance(seller, 40_000);
 }
