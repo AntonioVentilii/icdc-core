@@ -24,6 +24,13 @@ pub const MAX_SERIES_TITLE_LEN: usize = 128;
 /// Maximum length of a series description in characters.
 pub const MAX_SERIES_DESCRIPTION_LEN: usize = 1024;
 
+/// Maximum length of a social reward title in characters.
+pub const MAX_REWARD_TITLE_LEN: usize = 64;
+/// Maximum length of a social reward description in characters.
+pub const MAX_REWARD_DESCRIPTION_LEN: usize = 1024;
+/// Maximum length of a URL (icon/banner) in characters.
+pub const MAX_ICON_URL_LEN: usize = 256;
+
 /// Default insurance fund fee ratio in basis points (10 bps = 0.1%).
 pub const DEFAULT_INSURANCE_FEE_RATIO: u16 = 10;
 /// Default protocol fee ratio in basis points (5 bps = 0.05%).

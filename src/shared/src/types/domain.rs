@@ -26,6 +26,8 @@ pub enum BalanceDomain {
     Settlement,
     /// VICI XP (loyalty points) — segregated from Playground test assets.
     ViciXp,
+    /// Non-monetary social bets (e.g., betting a pizza).
+    Social,
 }
 
 /// Building an [`AllowedBalanceDomains`] failed (e.g. empty input).

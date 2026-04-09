@@ -106,6 +106,8 @@ type AssetWorth = record {
 type BalanceDomain = variant {
 	// VICI XP (loyalty points) — segregated from Playground test assets.
 	ViciXp;
+	// Non-monetary social bets (e.g., betting a pizza).
+	Social;
 	// Testnet / sandbox collateral (e.g. TESTICP, Sepolia) — not real funds.
 	Playground;
 	// Real collateralized trading (e.g., using ckUSDC, ICP).
@@ -381,7 +383,7 @@ type NativeEvmAsset = record {
 	// The EVM chain where this native asset is used.
 	chain_id : nat64
 };
-type NonMonetaryUnit = variant { Points };
+type NonMonetaryUnit = variant { Points; Social : SocialReward };
 // Metadata for a specific outcome in a categorical market.
 type Outcome = record {
 	// The unique identifier of the outcome.
@@ -626,6 +628,14 @@ type SettlementStatusView = record {
 };
 // Represents the side of an order or trade.
 type Side = variant { Buy; Sell };
+type SocialReward = record {
+	// A short title for the reward (e.g., "Pizza 🍕").
+	title : text;
+	// An optional detailed description of the reward.
+	description : opt text;
+	// An optional icon URL for the reward.
+	icon_url : opt text
+};
 // Represents structured statistics for the clearing system.
 type Stats = record {
 	// Total number of unique margin accounts.

@@ -1,6 +1,6 @@
 use core::cell::RefCell;
 
-use shared::types::Series;
+use shared::types::{BalanceDomain, Series};
 
 use crate::{
     api::trade::errors::TradeError,
@@ -155,6 +155,10 @@ pub(crate) fn execute_trade_impl(
     ACCOUNT_STATES.with(|accounts| {
         let accounts = accounts.borrow();
         let domain = series.balance_domain;
+
+        if domain == BalanceDomain::Social {
+            return Ok(());
+        }
 
         // 1. Validate Buyer
         // We check if the post-trade equity covers the target reserved margin.

@@ -520,7 +520,8 @@ mod tests {
         }) = result
         {
             assert_eq!(total_net_payoff, 900_000); // 100 USD payoff - 10 USD margin
-            assert_eq!(total_collateral_usd, 800_000); // -10 initial + 100 payoff - 10 margin = 80 USD
+            assert_eq!(total_collateral_usd, 800_000); // -10 initial + 100 payoff - 10 margin = 80
+                                                       // USD
         } else {
             panic!("Expected SolvencyViolation, got {result:?}");
         }
@@ -598,7 +599,10 @@ mod tests {
         // fees are in USD base units (`USD_DECIMALS`).
         assert_eq!(plan.insurance_fee_usd, 500);
         assert_eq!(plan.fee_usd, 250);
-        assert_eq!(plan.positions[0].cashflow_usd, 500_000 - 100_000 - 500 - 250);
+        assert_eq!(
+            plan.positions[0].cashflow_usd,
+            500_000 - 100_000 - 500 - 250
+        );
 
         // Verify position WAS REMOVED
         POSITIONS.with(|pos: &RefCell<BTreeMap<_, _>>| {

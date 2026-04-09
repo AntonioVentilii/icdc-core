@@ -154,6 +154,7 @@ impl Series {
             BalanceDomain::Playground => hasher.update(b"PLAYGROUND"),
             BalanceDomain::Settlement => hasher.update(b"SETTLEMENT"),
             BalanceDomain::ViciXp => hasher.update(b"VICI_XP"),
+            BalanceDomain::Social => hasher.update(b"SOCIAL"),
         }
 
         // Explicit field separators to avoid ambiguity
@@ -227,6 +228,12 @@ pub enum SeriesError {
     Unauthorized,
     /// Returned when the provided payout unit is not supported by the protocol.
     UnsupportedPayoutUnit,
+    /// Social reward title exceeds limit.
+    RewardTitleTooLong,
+    /// Social reward description exceeds limit.
+    RewardDescriptionTooLong,
+    /// Social reward icon URL exceeds limit.
+    RewardIconUrlTooLong,
 }
 
 /// Input parameters for registering a new derivative series.

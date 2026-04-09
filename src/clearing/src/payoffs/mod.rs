@@ -8,7 +8,7 @@ use candid::CandidType;
 use serde::{Deserialize, Serialize};
 use shared::{
     constants::USD_DECIMALS,
-    types::{OutcomeId, PayoffType, Price, Series, SettlementInput},
+    types::{BalanceDomain, OutcomeId, PayoffType, Price, Series, SettlementInput},
 };
 pub(crate) use types::RoundingMode;
 pub(crate) use utils::scale_price;
@@ -41,6 +41,10 @@ pub fn get_unit_payoff(
     outcome_id: &Option<OutcomeId>,
     settlement: &SettlementInput,
 ) -> Result<u128, PayoffError> {
+    if series.balance_domain == BalanceDomain::Social {
+        return Ok(0);
+    }
+
     let asset_decimals = u32::from(USD_DECIMALS);
 
     match series.payoff_type {
@@ -192,6 +196,10 @@ pub fn get_required_margin(
     qty: i128,
     _outcome_id: &Option<OutcomeId>,
 ) -> Result<u128, PayoffError> {
+    if series.balance_domain == BalanceDomain::Social {
+        return Ok(0);
+    }
+
     let abs_qty = qty.unsigned_abs();
     let asset_decimals = u32::from(USD_DECIMALS);
 

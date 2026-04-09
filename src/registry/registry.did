@@ -66,6 +66,8 @@ type Asset = variant {
 type BalanceDomain = variant {
 	// VICI XP (loyalty points) — segregated from Playground test assets.
 	ViciXp;
+	// Non-monetary social bets (e.g., betting a pizza).
+	Social;
 	// Testnet / sandbox collateral (e.g. TESTICP, Sepolia) — not real funds.
 	Playground;
 	// Real collateralized trading (e.g., using ckUSDC, ICP).
@@ -226,7 +228,7 @@ type NativeEvmAsset = record {
 	// The EVM chain where this native asset is used.
 	chain_id : nat64
 };
-type NonMonetaryUnit = variant { Points };
+type NonMonetaryUnit = variant { Points; Social : SocialReward };
 // Represents an authorised price oracle group.
 type Oracle = record {
 	// The principal identifier of the oracle's manager (defaults to creator).
@@ -352,16 +354,22 @@ type Series = record {
 };
 // Errors that can occur during series-related operations.
 type SeriesError = variant {
+	// Social reward description exceeds limit.
+	RewardDescriptionTooLong;
 	// Returned when the provided description exceeds the maximum allowed length.
 	DescriptionTooLong;
 	// Returned when the provided title exceeds the maximum allowed length.
 	TitleTooLong;
+	// Social reward icon URL exceeds limit.
+	RewardIconUrlTooLong;
 	// Returned when the caller is not authorized to add a series.
 	Unauthorized;
 	// Returned when the provided payout unit is not supported by the protocol.
 	UnsupportedPayoutUnit;
 	// Returned when attempting to add a series that already exists.
-	SeriesAlreadyExists
+	SeriesAlreadyExists;
+	// Social reward title exceeds limit.
+	RewardTitleTooLong
 };
 // A paginated page of registered series.
 type SeriesPage = record {
@@ -369,6 +377,14 @@ type SeriesPage = record {
 	next_cursor : opt text;
 	// The list of series in this page.
 	items : vec Series
+};
+type SocialReward = record {
+	// A short title for the reward (e.g., "Pizza 🍕").
+	title : text;
+	// An optional detailed description of the reward.
+	description : opt text;
+	// An optional icon URL for the reward.
+	icon_url : opt text
 };
 // A single trading access policy attached to a derivative series.
 //
