@@ -112,6 +112,74 @@ type Description = record {
 	// The mandatory plain text description.
 	plain : text
 };
+// A multi-tenant organizational entity for dApps using the clearing layer.
+//
+// Engines allow dApps to autonomously manage their own creators, oracle
+// admins, and other roles without being canister controllers. Each Engine
+// has a set of admins who can grant roles to principals, subject to the
+// `allowed_roles` constraint set by the canister controllers at registration.
+type Engine = record {
+	// The principal that performed the last mutation.
+	updated_by : principal;
+	// The principal that registered this Engine (a canister controller).
+	creator : principal;
+	// Unique identifier assigned at creation.
+	engine_id : text;
+	// A human-readable name for the Engine (e.g., "Vici App").
+	name : text;
+	// An optional description of the Engine's purpose.
+	description : opt text;
+	// Timestamp of the last mutation in nanoseconds since UNIX epoch.
+	updated_at_ns : nat64;
+	// Timestamp of engine creation in nanoseconds since UNIX epoch.
+	created_at_ns : nat64;
+	// An optional icon/avatar URL for the Engine.
+	icon_url : opt text;
+	// Principals with administrative privileges on this Engine.
+	// Admins can grant/revoke roles and manage other admins.
+	// The creator is implicitly an admin.
+	admins : vec principal;
+	// The subset of [`EngineRole`] variants this Engine is allowed to grant.
+	// Set by the canister controller at registration time. Admins cannot
+	// grant roles outside this set.
+	allowed_roles : vec EngineRole;
+	// Audit trail of all active role grants.
+	role_grants : vec RoleGrant;
+	// Optional per-engine override for social market rate limits.
+	social_limits : opt SocialLimits
+};
+// Errors that can occur during Engine-related operations.
+type EngineError = variant {
+	// The principal already has this role in this Engine.
+	RoleAlreadyGranted;
+	// The specified Engine ID does not exist.
+	EngineNotFound;
+	// An Engine with this name already exists.
+	EngineAlreadyExists;
+	// Cannot remove the Engine creator as an admin.
+	CannotRemoveCreator;
+	// The requested role is not in the Engine's `allowed_roles`.
+	RoleNotAllowed;
+	// The principal does not have this role in this Engine.
+	RoleNotGranted;
+	// The caller is not authorized for this operation.
+	Unauthorized;
+	// The Engine name exceeds the maximum allowed length.
+	NameTooLong
+};
+// The result of an Engine mutation operation.
+type EngineResult = variant { Ok; Err : EngineError };
+// Roles that can be granted to principals within an Engine.
+//
+// This is a fixed enum extended over time at the protocol level.
+// Engines declare which subset of roles they are allowed to grant
+// via [`Engine::allowed_roles`].
+type EngineRole = variant {
+	// Can register oracles and manage their metadata and principals.
+	OracleAdmin;
+	// Can create series via `add_series` and fork series via `fork_series`.
+	Creator
+};
 // Represents an ERC-20 token on a specific EVM chain.
 type ErcToken = record {
 	// The number of decimals the token uses (e.g., 18 for ETH, 6 for USDC).
@@ -122,6 +190,32 @@ type ErcToken = record {
 	chain_id : nat64
 };
 type FiatUnit = variant { Chf; Eur; Gbp; Usd };
+// Input parameters for forking (cloning) an existing series into a restricted circle.
+//
+// The forked series inherits all defining parameters from the source series but
+// gets a distinct ID (via the `forked_from` hash component) and carries a reference
+// back to the original.
+type ForkSeriesParams = record {
+	// The source series to fork.
+	source_series_id : text;
+	// Optional title override. Falls back to the source series title.
+	title : opt text;
+	// Optional description override. Falls back to the source series description.
+	description : opt Description;
+	// Trading access policies for the forked series. Must be `Restricted`.
+	trading_access : vec TradingAccess
+};
+// Input parameters for granting a role within an Engine.
+//
+// Only Engine admins or canister controllers may grant roles.
+type GrantEngineRoleParams = record {
+	// The principal receiving the role.
+	"principal" : principal;
+	// The Engine in which to grant the role.
+	engine_id : text;
+	// The role to grant.
+	role : EngineRole
+};
 // A trading group (closed circle).
 //
 // Groups are the building blocks of restricted trading access.
@@ -307,6 +401,34 @@ type Price = record {
 	// The numeric component of the price.
 	decimal : DecimalValue
 };
+// Input parameters for registering a new Engine.
+//
+// Only canister controllers may call `register_engine`.
+type RegisterEngineParams = record {
+	// A human-readable name for the Engine.
+	name : text;
+	// An optional description.
+	description : opt text;
+	// An optional icon URL.
+	icon_url : opt text;
+	// Initial admin principals. The caller is always added as an admin.
+	admins : vec principal;
+	// The set of roles this Engine is allowed to grant.
+	allowed_roles : vec EngineRole
+};
+// The result of a `register_engine` operation.
+type RegisterEngineResult = variant { Ok : text; Err : EngineError };
+// An audit record of a role grant within an Engine.
+type RoleGrant = record {
+	// The principal that received the role.
+	"principal" : principal;
+	// The granted role.
+	role : EngineRole;
+	// Timestamp of the grant in nanoseconds since UNIX epoch.
+	granted_at_ns : nat64;
+	// The principal that performed the grant.
+	granted_by : principal
+};
 // Defines a specific derivative series (contract).
 type Series = record {
 	// A short, descriptive title for the series.
@@ -317,6 +439,9 @@ type Series = record {
 	creator : principal;
 	// The mathematical payoff model used for this series.
 	payoff_type : PayoffType;
+	// The Engine that created this series, if any.
+	// `None` for series created directly by a canister controller.
+	engine_id : opt text;
 	// The unit in which the contract payoff is expressed.
 	payout_unit : PayoutUnit;
 	// Expiry timestamp in nanoseconds since UNIX epoch.
@@ -350,24 +475,38 @@ type Series = record {
 	// The domain this market belongs to (e.g. Playground, Settlement).
 	balance_domain : BalanceDomain;
 	// The identifier of the oracle providing the settlement data.
-	oracle_source : text
+	oracle_source : text;
+	// If this series was forked from another, the source series ID.
+	forked_from : opt text
 };
 // Errors that can occur during series-related operations.
 type SeriesError = variant {
 	// Social reward description exceeds limit.
 	RewardDescriptionTooLong;
+	// The caller has reached the maximum number of social markets allowed per user.
+	SocialMaxPerUserReached;
 	// Returned when the provided description exceeds the maximum allowed length.
 	DescriptionTooLong;
 	// Returned when the provided title exceeds the maximum allowed length.
 	TitleTooLong;
 	// Social reward icon URL exceeds limit.
 	RewardIconUrlTooLong;
+	// Social markets require a `NonMonetary` payout unit.
+	SocialMarketRequiresNonMonetaryPayout;
+	// Social markets must have `Restricted` trading access.
+	SocialMarketMustBeRestricted;
 	// Returned when the caller is not authorized to add a series.
 	Unauthorized;
+	// Forked series must have `Restricted` trading access.
+	ForkMustBeRestricted;
 	// Returned when the provided payout unit is not supported by the protocol.
 	UnsupportedPayoutUnit;
+	// The caller has exceeded the hourly social market creation limit.
+	SocialRateLimitExceeded;
 	// Returned when attempting to add a series that already exists.
 	SeriesAlreadyExists;
+	// The source series specified in a fork does not exist.
+	SourceSeriesNotFound;
 	// Social reward title exceeds limit.
 	RewardTitleTooLong
 };
@@ -377,6 +516,13 @@ type SeriesPage = record {
 	next_cursor : opt text;
 	// The list of series in this page.
 	items : vec Series
+};
+// Configurable rate limits for social (non-monetary) market creation.
+type SocialLimits = record {
+	// Maximum social markets any single user may create within a rolling hour.
+	max_per_hour : nat64;
+	// Maximum total social markets any single user may create (lifetime).
+	max_per_user : nat64
 };
 type SocialReward = record {
 	// A short title for the reward (e.g., "Pizza 🍕").
@@ -422,6 +568,35 @@ type TradingAccess = variant {
 		// The group IDs whose members are allowed to trade.
 		groups : vec text
 	}
+};
+// Input parameters for managing Engine admins (adding or removing).
+type UpdateEngineAdminsParams = record {
+	// The Engine to modify.
+	engine_id : text;
+	// Principals to add or remove as admins.
+	principals : vec principal
+};
+// Input parameters for updating the allowed roles of an Engine.
+//
+// Only canister controllers may call this.
+type UpdateEngineAllowedRolesParams = record {
+	// The Engine to update.
+	engine_id : text;
+	// The new set of allowed roles. Replaces the existing set entirely.
+	allowed_roles : vec EngineRole
+};
+// Input parameters for updating an existing Engine's metadata.
+//
+// Only Engine admins or canister controllers may call `update_engine`.
+type UpdateEngineParams = record {
+	// The Engine to update.
+	engine_id : text;
+	// New name, or `None` to keep the current name.
+	name : opt text;
+	// New description: `None` = keep, `Some(None)` = clear, `Some(Some(..))` = set.
+	description : opt opt text;
+	// New icon URL: `None` = keep, `Some(None)` = clear, `Some(Some(..))` = set.
+	icon_url : opt opt text
 };
 // Input parameters for adding or removing group admins.
 //
@@ -470,10 +645,8 @@ type UpdateTradingAccessParams = record {
 	trading_access : vec TradingAccess
 };
 service : {
-	// Authorizes a list of principals to create new derivative series.
-	//
-	// This method is gated to canister controllers.
-	add_authorized_creators : (vec principal) -> ();
+	// Adds admin principals to an Engine. Engine admins or controllers may call this.
+	add_engine_admins : (UpdateEngineAdminsParams) -> (EngineResult);
 	// Adds one or more principals to an existing group's admin set.
 	//
 	// Duplicate principals are silently ignored (the admin set is a `BTreeSet`).
@@ -501,19 +674,16 @@ service : {
 	// Group admin (creator, explicit admin, or canister controller).
 	add_group_members : (UpdateGroupAdminsParams) -> (GroupResult);
 	// Registers a new price oracle in the registry.
+	//
+	// Controllers and Engine `OracleAdmin` role holders may register oracles.
 	add_oracle : (AddOracleParams) -> (OracleResult);
 	// Adds a new derivative series to the registry.
 	//
-	// This method generates a canonical [`SeriesId`] for the provided parameters.
-	// If the series already exists, it returns an error.
+	// Authorization is tiered:
 	//
-	// # Arguments
-	// * `params` - The defining parameters for the new series.
-	//
-	// # Returns
-	// * [`AddSeriesResult::Ok`] containing the new [`SeriesId`] on success.
-	// * [`AddSeriesResult::Err`] with [`SeriesError::SeriesAlreadyExists`] if the series is already
-	// registered.
+	// 1. **Creators** (controllers + Engine `Creator` role holders): may create any series.
+	// 2. **Any authenticated user**: may create **social** markets (`BalanceDomain::Social` +
+	// `NonMonetary` payout) with `Restricted` trading access, subject to per-user rate limits.
 	add_series : (AddSeriesParams) -> (AddSeriesResult);
 	// Creates a new trading group (closed circle).
 	//
@@ -546,6 +716,15 @@ service : {
 	//
 	// Group admin (creator, explicit admin, or canister controller).
 	delete_group : (text) -> (GroupResult);
+	// Forks (clones) an existing series into a new restricted-access market.
+	//
+	// The forked series inherits all defining parameters from the source but gets a
+	// distinct ID and carries a `forked_from` reference back to the original.
+	//
+	// Only controllers and Engine Creators may fork series.
+	fork_series : (ForkSeriesParams) -> (AddSeriesResult);
+	// Retrieves an Engine by its ID.
+	get_engine : (text) -> (opt Engine) query;
 	// Retrieves a group by its ID, returning `None` if it does not exist.
 	//
 	// # Access
@@ -555,16 +734,14 @@ service : {
 	// Retrieves the details of a specific oracle by its ID.
 	get_oracle : (text) -> (opt Oracle) query;
 	// Retrieves a specific [`Series`] by its [`SeriesId`].
-	//
-	// # Arguments
-	// * `series_id` - The unique identifier of the series to retrieve.
-	//
-	// # Returns
-	// * `Some(Series)` if the series exists in the registry.
-	// * `None` otherwise.
 	get_series : (text) -> (opt Series) query;
-	// Checks if a principal is authorized to create derivative series.
-	is_authorized_creator : (principal) -> (bool) query;
+	// Returns the current rate limits for social market creation.
+	get_social_limits : () -> (SocialLimits) query;
+	// Grants a role to a principal within an Engine.
+	//
+	// The role must be in the Engine's `allowed_roles` set. Only Engine admins
+	// or controllers may grant roles.
+	grant_engine_role : (GrantEngineRoleParams) -> (EngineResult);
 	// Checks whether a principal is a member of a specific group.
 	//
 	// Returns `false` if the group does not exist or if the principal is not a member.
@@ -597,10 +774,8 @@ service : {
 	// Public query — any caller. Called by the clearing canister during
 	// `submit_limit_order` / `submit_market_order` for restricted series.
 	is_trading_authorized : (principal, text) -> (bool) query;
-	// Returns a list of all principals currently authorized to create series.
-	//
-	// This method is gated to canister controllers.
-	list_authorized_creators : () -> (vec principal) query;
+	// Lists all registered Engines.
+	list_engines : () -> (vec Engine) query;
 	// Lists all registered groups, optionally filtered by creator principal.
 	//
 	// # Arguments
@@ -617,11 +792,15 @@ service : {
 	// Returns a paginated page of registered derivative series, optionally filtered.
 	list_series_with : (ListSeriesParams) -> (SeriesPage) query;
 	// Adds or removes authorised principals for an oracle.
-	manage_oracle_principals : (ManageOraclePrincipalsParams) -> (OracleResult);
-	// Removes authorization from a list of principals, preventing them from creating new series.
 	//
-	// This method is gated to canister controllers.
-	remove_authorized_creators : (vec principal) -> ();
+	// Controllers, the oracle's manager, and Engine `OracleAdmin` role holders may manage principals.
+	manage_oracle_principals : (ManageOraclePrincipalsParams) -> (OracleResult);
+	// Registers a new Engine. Only canister controllers may call this.
+	register_engine : (RegisterEngineParams) -> (RegisterEngineResult);
+	// Removes admin principals from an Engine. Engine admins or controllers may call this.
+	//
+	// The Engine creator cannot be removed as an admin.
+	remove_engine_admins : (UpdateEngineAdminsParams) -> (EngineResult);
 	// Removes one or more principals from an existing group's admin set.
 	//
 	// Principals that are not currently admins are silently ignored.
@@ -650,6 +829,20 @@ service : {
 	//
 	// Group admin (creator, explicit admin, or canister controller).
 	remove_group_members : (UpdateGroupAdminsParams) -> (GroupResult);
+	// Revokes a role from a principal within an Engine.
+	//
+	// Only Engine admins or controllers may revoke roles.
+	revoke_engine_role : (GrantEngineRoleParams) -> (EngineResult);
+	// Updates the rate limits for social (non-monetary) market creation.
+	//
+	// This method is gated to canister controllers.
+	set_social_limits : (SocialLimits) -> ();
+	// Updates an Engine's metadata. Engine admins or controllers may call this.
+	update_engine : (UpdateEngineParams) -> (EngineResult);
+	// Updates the allowed roles for an Engine. Only controllers may call this.
+	update_engine_allowed_roles : (UpdateEngineAllowedRolesParams) -> (
+		EngineResult
+	);
 	// Updates a group's metadata (name, description, icon URL).
 	//
 	// Fields set to `None` are left unchanged. For `description` and `icon_url`,
@@ -666,6 +859,8 @@ service : {
 	// Group admin (creator, explicit admin, or canister controller).
 	update_group : (UpdateGroupParams) -> (GroupResult);
 	// Updates the metadata of an existing oracle.
+	//
+	// Controllers, the oracle's manager, and Engine `OracleAdmin` role holders may update metadata.
 	update_oracle_metadata : (UpdateOracleMetadataParams) -> (OracleResult);
 	// Atomically replaces the trading access policies on an existing series.
 	//
