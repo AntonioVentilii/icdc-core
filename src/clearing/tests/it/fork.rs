@@ -3,7 +3,7 @@ use shared::types::{
     engine::EngineRole,
     groups::GroupId,
     series::{AddSeriesResult, ForkSeriesParams, SeriesError},
-    BalanceDomain, Series, SeriesId, TradingAccess,
+    BalanceDomain, Description, Series, SeriesId, TradingAccess,
 };
 
 use crate::utils::{
@@ -148,5 +148,168 @@ fn fork_nonexistent_source() {
     assert!(
         matches!(res, AddSeriesResult::Err(SeriesError::SourceSeriesNotFound)),
         "Fork of nonexistent source should fail"
+    );
+}
+
+#[test]
+fn multiple_forks_from_same_source_produce_unique_ids() {
+    let setup = TestSetup::default();
+
+    let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
+    setup.pic.tick();
+
+    let group = GroupId::from("grp_multi".to_owned());
+    let access = || {
+        vec![TradingAccess::Restricted {
+            groups: vec![group.clone()],
+        }]
+    };
+
+    let fork1 = setup.fork_binary_series(setup.controller, &source_id, access());
+    let AddSeriesResult::Ok(fork1_id) = fork1 else {
+        panic!("Fork 1 failed");
+    };
+    setup.pic.tick();
+
+    let fork2 = setup.fork_binary_series(setup.controller, &source_id, access());
+    let AddSeriesResult::Ok(fork2_id) = fork2 else {
+        panic!("Fork 2 failed");
+    };
+
+    assert_ne!(fork1_id, fork2_id, "Multiple forks must produce unique IDs");
+    assert_ne!(fork1_id, source_id);
+    assert_ne!(fork2_id, source_id);
+}
+
+#[test]
+fn fork_empty_trading_access_rejected() {
+    let setup = TestSetup::default();
+
+    let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
+    setup.pic.tick();
+
+    let fork_params = ForkSeriesParams {
+        source_series_id: source_id,
+        title: None,
+        description: None,
+        trading_access: vec![],
+    };
+
+    let res_bytes = setup
+        .pic
+        .update_call(
+            setup.registry.canister_id(),
+            setup.controller,
+            "fork_series",
+            encode_one(fork_params).unwrap(),
+        )
+        .expect("fork_series call failed");
+
+    let res: AddSeriesResult = decode_one(&res_bytes).unwrap();
+    assert!(
+        matches!(res, AddSeriesResult::Err(SeriesError::ForkMustBeRestricted)),
+        "Empty trading_access should be rejected for forks"
+    );
+}
+
+#[test]
+fn fork_mixed_open_and_restricted_rejected() {
+    let setup = TestSetup::default();
+
+    let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
+    setup.pic.tick();
+
+    let fork_params = ForkSeriesParams {
+        source_series_id: source_id,
+        title: None,
+        description: None,
+        trading_access: vec![
+            TradingAccess::Open,
+            TradingAccess::Restricted {
+                groups: vec![GroupId::from("grp_mixed".to_owned())],
+            },
+        ],
+    };
+
+    let res_bytes = setup
+        .pic
+        .update_call(
+            setup.registry.canister_id(),
+            setup.controller,
+            "fork_series",
+            encode_one(fork_params).unwrap(),
+        )
+        .expect("fork_series call failed");
+
+    let res: AddSeriesResult = decode_one(&res_bytes).unwrap();
+    assert!(
+        matches!(res, AddSeriesResult::Err(SeriesError::ForkMustBeRestricted)),
+        "Mixed Open+Restricted should be rejected for forks"
+    );
+}
+
+#[test]
+fn fork_title_too_long_rejected() {
+    let setup = TestSetup::default();
+
+    let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
+    setup.pic.tick();
+
+    let fork_params = ForkSeriesParams {
+        source_series_id: source_id,
+        title: Some("x".repeat(129)),
+        description: None,
+        trading_access: vec![TradingAccess::Restricted {
+            groups: vec![GroupId::from("grp_title".to_owned())],
+        }],
+    };
+
+    let res_bytes = setup
+        .pic
+        .update_call(
+            setup.registry.canister_id(),
+            setup.controller,
+            "fork_series",
+            encode_one(fork_params).unwrap(),
+        )
+        .expect("fork_series call failed");
+
+    let res: AddSeriesResult = decode_one(&res_bytes).unwrap();
+    assert!(
+        matches!(res, AddSeriesResult::Err(SeriesError::TitleTooLong)),
+        "Fork with title > 128 chars should be rejected"
+    );
+}
+
+#[test]
+fn fork_description_too_long_rejected() {
+    let setup = TestSetup::default();
+
+    let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
+    setup.pic.tick();
+
+    let fork_params = ForkSeriesParams {
+        source_series_id: source_id,
+        title: None,
+        description: Some(Description::plain("y".repeat(1025))),
+        trading_access: vec![TradingAccess::Restricted {
+            groups: vec![GroupId::from("grp_desc".to_owned())],
+        }],
+    };
+
+    let res_bytes = setup
+        .pic
+        .update_call(
+            setup.registry.canister_id(),
+            setup.controller,
+            "fork_series",
+            encode_one(fork_params).unwrap(),
+        )
+        .expect("fork_series call failed");
+
+    let res: AddSeriesResult = decode_one(&res_bytes).unwrap();
+    assert!(
+        matches!(res, AddSeriesResult::Err(SeriesError::DescriptionTooLong)),
+        "Fork with description > 1024 chars should be rejected"
     );
 }

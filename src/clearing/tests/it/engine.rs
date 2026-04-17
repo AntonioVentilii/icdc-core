@@ -1,8 +1,8 @@
 use candid::{decode_one, encode_one, Principal};
 use shared::types::{
     engine::{
-        Engine, EngineError, EngineResult, EngineRole, GrantEngineRoleParams,
-        RevokeEngineRoleParams, UpdateEngineAdminsParams,
+        Engine, EngineError, EngineResult, EngineRole, GrantEngineRoleParams, RegisterEngineParams,
+        RegisterEngineResult, RevokeEngineRoleParams, UpdateEngineAdminsParams, UpdateEngineParams,
     },
     series::{AddSeriesParams, AddSeriesResult, SeriesError},
     BalanceDomain, Description, PayoffType, PayoutUnit,
@@ -197,4 +197,196 @@ fn list_engines() {
     assert_eq!(engines.len(), 2);
     assert_eq!(engines[0].name, "Engine A");
     assert_eq!(engines[1].name, "Engine B");
+}
+
+// --- Error / edge-case tests ---
+
+#[test]
+fn double_grant_returns_role_already_granted() {
+    let setup = TestSetup::default();
+    let user = test_user(66);
+
+    let engine_id = setup.register_engine("Double Grant", vec![EngineRole::Creator]);
+    setup.grant_engine_role(&engine_id, user, EngineRole::Creator);
+    setup.pic.tick();
+
+    let res: EngineResult = setup
+        .registry
+        .update(
+            setup.controller,
+            "grant_engine_role",
+            (GrantEngineRoleParams {
+                engine_id,
+                principal: user,
+                role: EngineRole::Creator,
+            },),
+        )
+        .unwrap();
+
+    assert!(
+        matches!(res, EngineResult::Err(EngineError::RoleAlreadyGranted)),
+        "Double grant should return RoleAlreadyGranted"
+    );
+}
+
+#[test]
+fn revoke_without_grant_returns_role_not_granted() {
+    let setup = TestSetup::default();
+    let user = test_user(67);
+
+    let engine_id = setup.register_engine("Revoke No Grant", vec![EngineRole::Creator]);
+
+    let res: EngineResult = setup
+        .registry
+        .update(
+            setup.controller,
+            "revoke_engine_role",
+            (RevokeEngineRoleParams {
+                engine_id,
+                principal: user,
+                role: EngineRole::Creator,
+            },),
+        )
+        .unwrap();
+
+    assert!(
+        matches!(res, EngineResult::Err(EngineError::RoleNotGranted)),
+        "Revoke without prior grant should return RoleNotGranted"
+    );
+}
+
+#[test]
+fn register_engine_name_too_long() {
+    let setup = TestSetup::default();
+
+    let long_name = "x".repeat(129);
+
+    let res: RegisterEngineResult = setup
+        .registry
+        .update(
+            setup.controller,
+            "register_engine",
+            (RegisterEngineParams {
+                name: long_name,
+                description: None,
+                icon_url: None,
+                admins: vec![],
+                allowed_roles: vec![EngineRole::Creator],
+            },),
+        )
+        .unwrap();
+
+    assert!(
+        matches!(res, RegisterEngineResult::Err(EngineError::NameTooLong)),
+        "Engine name over 128 chars should be rejected"
+    );
+}
+
+#[test]
+fn remove_engine_admins_cannot_remove_creator() {
+    let setup = TestSetup::default();
+
+    let engine_id = setup.register_engine("Creator Protect", vec![EngineRole::Creator]);
+
+    let res: EngineResult = setup
+        .registry
+        .update(
+            setup.controller,
+            "remove_engine_admins",
+            (UpdateEngineAdminsParams {
+                engine_id,
+                principals: vec![setup.controller],
+            },),
+        )
+        .unwrap();
+
+    assert!(
+        matches!(res, EngineResult::Err(EngineError::CannotRemoveCreator)),
+        "Removing the Engine creator as admin should be rejected"
+    );
+}
+
+#[test]
+fn update_engine_metadata() {
+    let setup = TestSetup::default();
+
+    let engine_id = setup.register_engine("Original Name", vec![EngineRole::Creator]);
+
+    let res: EngineResult = setup
+        .registry
+        .update(
+            setup.controller,
+            "update_engine",
+            (UpdateEngineParams {
+                engine_id: engine_id.clone(),
+                name: Some("Updated Name".to_owned()),
+                description: Some(Some("A description".to_owned())),
+                icon_url: None,
+            },),
+        )
+        .unwrap();
+    assert!(matches!(res, EngineResult::Ok));
+    setup.pic.tick();
+
+    let engine: Option<Engine> = setup
+        .registry
+        .query(setup.controller, "get_engine", (engine_id,))
+        .unwrap();
+
+    let engine = engine.expect("Engine should exist");
+    assert_eq!(engine.name, "Updated Name");
+    assert_eq!(engine.description, Some("A description".to_owned()));
+}
+
+#[test]
+fn update_engine_name_too_long() {
+    let setup = TestSetup::default();
+
+    let engine_id = setup.register_engine("Short Name", vec![EngineRole::Creator]);
+
+    let res: EngineResult = setup
+        .registry
+        .update(
+            setup.controller,
+            "update_engine",
+            (UpdateEngineParams {
+                engine_id,
+                name: Some("x".repeat(129)),
+                description: None,
+                icon_url: None,
+            },),
+        )
+        .unwrap();
+
+    assert!(
+        matches!(res, EngineResult::Err(EngineError::NameTooLong)),
+        "update_engine with name > 128 chars should be rejected"
+    );
+}
+
+#[test]
+fn non_admin_cannot_grant_role() {
+    let setup = TestSetup::default();
+    let random_user = test_user(68);
+    let target = test_user(69);
+
+    let engine_id = setup.register_engine("No Access", vec![EngineRole::Creator]);
+
+    let res: EngineResult = setup
+        .registry
+        .update(
+            random_user,
+            "grant_engine_role",
+            (GrantEngineRoleParams {
+                engine_id,
+                principal: target,
+                role: EngineRole::Creator,
+            },),
+        )
+        .unwrap();
+
+    assert!(
+        matches!(res, EngineResult::Err(EngineError::Unauthorized)),
+        "Non-admin should not be able to grant roles"
+    );
 }

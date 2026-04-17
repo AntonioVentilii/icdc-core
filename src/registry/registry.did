@@ -499,6 +499,8 @@ type SeriesError = variant {
 	Unauthorized;
 	// Forked series must have `Restricted` trading access.
 	ForkMustBeRestricted;
+	// The caller has reached the maximum number of forks for this source series.
+	ForkLimitReached;
 	// Returned when the provided payout unit is not supported by the protocol.
 	UnsupportedPayoutUnit;
 	// The caller has exceeded the hourly social market creation limit.

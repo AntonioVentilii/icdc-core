@@ -139,8 +139,10 @@ sequenceDiagram
     Registry->>Registry: Verify caller is Controller or Engine Creator
     Registry->>Registry: Verify trading_access is all Restricted
     Registry->>Registry: Read source series
+    Registry->>Registry: Count existing forks by this caller for this source
+    Registry->>Registry: Enforce per-user fork limit (max 100)
     Registry->>Registry: Copy defining params from source
-    Registry->>Registry: Generate ID with forked_from in hash (V4)
+    Registry->>Registry: Generate ID with forked_from + caller + index in hash (V4)
     Registry->>Registry: Store with forked_from = Some(source_id)
     Registry-->>Creator: Ok(new_series_id)
 ```
@@ -148,9 +150,10 @@ sequenceDiagram
 The forked series:
 
 - Inherits all defining parameters (underlying, expiry, payoff type, strike, payout unit, outcomes, oracle source).
-- Gets a distinct ID because the `forked_from` field is included in the V4 hash.
+- Gets a distinct ID because `forked_from`, the caller principal, and a per-caller monotonic fork index are all included in the V4 hash. This allows multiple forks of the same source by the same or different callers.
 - Must have `Restricted` trading access (enforcing that forks create closed circles).
 - Allows optional title/description overrides.
+- Limited to **100 forks per user per source series** (`MAX_FORKS_PER_SOURCE_PER_USER`).
 
 ## Registry API (Engines)
 

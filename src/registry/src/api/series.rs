@@ -4,7 +4,9 @@ use candid::Principal;
 use ic_cdk::api::{msg_caller, time};
 use ic_cdk_macros::{query, update};
 use shared::{
-    constants::{HOUR_NS, MAX_SERIES_DESCRIPTION_LEN, MAX_SERIES_TITLE_LEN},
+    constants::{
+        HOUR_NS, MAX_FORKS_PER_SOURCE_PER_USER, MAX_SERIES_DESCRIPTION_LEN, MAX_SERIES_TITLE_LEN,
+    },
     types::{
         series::{
             AddSeriesParams, AddSeriesResult, ForkSeriesParams, ListSeriesParams, PaginationParams,
@@ -147,6 +149,8 @@ fn add_series_impl(
         outcomes: outcomes.as_deref(),
         oracle_source: &oracle_source,
         forked_from: None,
+        fork_caller: None,
+        fork_index: None,
     });
 
     let series = Series {
@@ -214,66 +218,78 @@ pub fn fork_series(params: ForkSeriesParams) -> AddSeriesResult {
 }
 
 fn fork_series_impl(params: ForkSeriesParams, caller: Principal, now: u64) -> AddSeriesResult {
-    let source = SERIES_STORE.with(|store| store.borrow().get(&params.source_series_id).cloned());
-
-    let Some(source) = source else {
-        return Err(SeriesError::SourceSeriesNotFound).into();
-    };
-
-    let title = params.title.unwrap_or_else(|| source.title.clone());
-    let description = params
-        .description
-        .unwrap_or_else(|| source.description.clone());
-
-    if title.chars().count() > MAX_SERIES_TITLE_LEN {
-        return Err(SeriesError::TitleTooLong).into();
-    }
-    if description.plain.chars().count() > MAX_SERIES_DESCRIPTION_LEN {
-        return Err(SeriesError::DescriptionTooLong).into();
-    }
-
-    let series_id = Series::generate_id(&SeriesIdParams {
-        underlying: &source.underlying,
-        balance_domain: source.balance_domain,
-        expiry_ns: source.expiry_ns,
-        payoff_type: &source.payoff_type,
-        strike: source.strike.as_ref(),
-        price_precision: source.price_precision,
-        payout_unit: &source.payout_unit,
-        outcomes: source.outcomes.as_deref(),
-        oracle_source: &source.oracle_source,
-        forked_from: Some(&source.series_id),
-    });
-
-    let series = Series {
-        series_id: series_id.clone(),
-        underlying: source.underlying,
-        balance_domain: source.balance_domain,
-        expiry_ns: source.expiry_ns,
-        payoff_type: source.payoff_type,
-        strike: source.strike,
-        price_precision: source.price_precision,
-        payout_unit: source.payout_unit,
-        outcomes: source.outcomes,
-        oracle_source: source.oracle_source,
-        creator: caller,
-        created_at_ns: now,
-        title,
-        description,
-        icon_url: source.icon_url,
-        banner_url: source.banner_url,
-        trading_access: params.trading_access,
-        engine_id: None,
-        forked_from: Some(source.series_id),
-    };
-
     SERIES_STORE
         .with(|store| {
             let mut store = store.borrow_mut();
 
+            let source = store
+                .get(&params.source_series_id)
+                .cloned()
+                .ok_or(SeriesError::SourceSeriesNotFound)?;
+
+            let title = params.title.unwrap_or_else(|| source.title.clone());
+            let description = params
+                .description
+                .unwrap_or_else(|| source.description.clone());
+
+            if title.chars().count() > MAX_SERIES_TITLE_LEN {
+                return Err(SeriesError::TitleTooLong);
+            }
+            if description.plain.chars().count() > MAX_SERIES_DESCRIPTION_LEN {
+                return Err(SeriesError::DescriptionTooLong);
+            }
+
+            let fork_index = store
+                .values()
+                .filter(|s| {
+                    s.forked_from.as_ref() == Some(&source.series_id) && s.creator == caller
+                })
+                .count() as u64;
+
+            if fork_index >= MAX_FORKS_PER_SOURCE_PER_USER {
+                return Err(SeriesError::ForkLimitReached);
+            }
+
+            let series_id = Series::generate_id(&SeriesIdParams {
+                underlying: &source.underlying,
+                balance_domain: source.balance_domain,
+                expiry_ns: source.expiry_ns,
+                payoff_type: &source.payoff_type,
+                strike: source.strike.as_ref(),
+                price_precision: source.price_precision,
+                payout_unit: &source.payout_unit,
+                outcomes: source.outcomes.as_deref(),
+                oracle_source: &source.oracle_source,
+                forked_from: Some(&source.series_id),
+                fork_caller: Some(&caller),
+                fork_index: Some(fork_index),
+            });
+
             if store.contains_key(&series_id) {
                 return Err(SeriesError::SeriesAlreadyExists);
             }
+
+            let series = Series {
+                series_id: series_id.clone(),
+                underlying: source.underlying,
+                balance_domain: source.balance_domain,
+                expiry_ns: source.expiry_ns,
+                payoff_type: source.payoff_type,
+                strike: source.strike,
+                price_precision: source.price_precision,
+                payout_unit: source.payout_unit,
+                outcomes: source.outcomes,
+                oracle_source: source.oracle_source,
+                creator: caller,
+                created_at_ns: now,
+                title,
+                description,
+                icon_url: source.icon_url,
+                banner_url: source.banner_url,
+                trading_access: params.trading_access,
+                engine_id: None,
+                forked_from: Some(source.series_id),
+            };
 
             store.insert(series_id.clone(), series);
             Ok(series_id)
@@ -357,7 +373,7 @@ pub fn list_series(pagination: PaginationParams) -> SeriesPage {
 mod tests {
     use candid::Principal;
     use shared::{
-        constants::HOUR_NS,
+        constants::{HOUR_NS, MAX_FORKS_PER_SOURCE_PER_USER},
         types::{
             groups::GroupId, BalanceDomain, Description, FiatUnit, NonMonetaryUnit, PayoffType,
             PayoutUnit, SocialLimits, SocialReward, TradingAccess,
@@ -523,6 +539,105 @@ mod tests {
             res,
             AddSeriesResult::Err(SeriesError::SourceSeriesNotFound)
         ));
+    }
+
+    #[test]
+    fn multiple_forks_from_same_source_produce_unique_ids() {
+        cleanup();
+        let caller = test_principal(1);
+        let group = GroupId::from("grp_multi".to_owned());
+
+        let res = add_as_creator(base_params(), caller, 1_000_000_000);
+        let AddSeriesResult::Ok(source_id) = res else {
+            panic!("Expected Ok");
+        };
+
+        let fork1 = fork_series_impl(
+            ForkSeriesParams {
+                source_series_id: source_id.clone(),
+                title: Some("Fork 1".to_owned()),
+                description: None,
+                trading_access: vec![TradingAccess::Restricted {
+                    groups: vec![group.clone()],
+                }],
+            },
+            caller,
+            2_000_000_000,
+        );
+        let AddSeriesResult::Ok(fork1_id) = fork1 else {
+            panic!("Fork 1 failed");
+        };
+
+        let fork2 = fork_series_impl(
+            ForkSeriesParams {
+                source_series_id: source_id.clone(),
+                title: Some("Fork 2".to_owned()),
+                description: None,
+                trading_access: vec![TradingAccess::Restricted {
+                    groups: vec![group],
+                }],
+            },
+            caller,
+            3_000_000_000,
+        );
+        let AddSeriesResult::Ok(fork2_id) = fork2 else {
+            panic!("Fork 2 failed");
+        };
+
+        assert_ne!(fork1_id, fork2_id, "Multiple forks must produce unique IDs");
+        assert_ne!(fork1_id, source_id);
+        assert_ne!(fork2_id, source_id);
+    }
+
+    #[test]
+    fn fork_limit_per_user_per_source() {
+        cleanup();
+        let caller = test_principal(1);
+        let group = GroupId::from("grp_limit".to_owned());
+
+        let res = add_as_creator(base_params(), caller, 1_000_000_000);
+        let AddSeriesResult::Ok(source_id) = res else {
+            panic!("Expected Ok");
+        };
+
+        for i in 0..MAX_FORKS_PER_SOURCE_PER_USER {
+            let fork_res = fork_series_impl(
+                ForkSeriesParams {
+                    source_series_id: source_id.clone(),
+                    title: None,
+                    description: None,
+                    trading_access: vec![TradingAccess::Restricted {
+                        groups: vec![group.clone()],
+                    }],
+                },
+                caller,
+                2_000_000_000 + i,
+            );
+            assert!(
+                matches!(fork_res, AddSeriesResult::Ok(_)),
+                "Fork {i} should succeed"
+            );
+        }
+
+        let over_limit = fork_series_impl(
+            ForkSeriesParams {
+                source_series_id: source_id,
+                title: None,
+                description: None,
+                trading_access: vec![TradingAccess::Restricted {
+                    groups: vec![group],
+                }],
+            },
+            caller,
+            9_000_000_000,
+        );
+        assert!(
+            matches!(
+                over_limit,
+                AddSeriesResult::Err(SeriesError::ForkLimitReached)
+            ),
+            "Should reject fork beyond limit"
+        );
     }
 
     // --- Social tier ---

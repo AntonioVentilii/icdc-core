@@ -150,8 +150,9 @@ impl Series {
     ///
     /// The ID is computed using a SHA-256 hash of all defining parameters,
     /// ensuring that identical series have the same ID while preventing collisions.
-    /// When `forked_from` is present, uses V4 domain separator to guarantee
-    /// distinct IDs from the source series.
+    /// When `forked_from` is present, uses V4 domain separator and additionally
+    /// hashes `fork_caller` and `fork_index` to guarantee distinct IDs across
+    /// multiple forks of the same source by the same or different callers.
     #[must_use]
     pub fn generate_id(params: &SeriesIdParams<'_>) -> SeriesId {
         let mut hasher = Sha256::new();
@@ -213,6 +214,16 @@ impl Series {
         if let Some(source) = params.forked_from {
             hasher.update(b"|FORKED_FROM|");
             hasher.update(source.as_str().as_bytes());
+
+            if let Some(caller) = params.fork_caller {
+                hasher.update(b"|FORK_CALLER|");
+                hasher.update(caller.as_slice());
+            }
+
+            if let Some(index) = params.fork_index {
+                hasher.update(b"|FORK_INDEX|");
+                hasher.update(index.to_be_bytes());
+            }
         }
 
         let series_id = encode(hasher.finalize());
@@ -233,6 +244,11 @@ pub struct SeriesIdParams<'a> {
     pub oracle_source: &'a str,
     pub balance_domain: BalanceDomain,
     pub forked_from: Option<&'a SeriesId>,
+    /// The principal that created the fork. Required when `forked_from` is `Some`.
+    pub fork_caller: Option<&'a Principal>,
+    /// A per-caller monotonic index to distinguish multiple forks of the same source.
+    /// Required when `forked_from` is `Some`.
+    pub fork_index: Option<u64>,
 }
 
 /// Errors that can occur during series-related operations.
@@ -266,6 +282,8 @@ pub enum SeriesError {
     SourceSeriesNotFound,
     /// Forked series must have `Restricted` trading access.
     ForkMustBeRestricted,
+    /// The caller has reached the maximum number of forks for this source series.
+    ForkLimitReached,
 }
 
 /// Input parameters for registering a new derivative series.
@@ -551,6 +569,8 @@ mod tests {
             oracle_source,
             balance_domain: BalanceDomain::Settlement,
             forked_from: None,
+            fork_caller: None,
+            fork_index: None,
         });
 
         let id2 = Series::generate_id(&SeriesIdParams {
@@ -564,6 +584,8 @@ mod tests {
             oracle_source,
             balance_domain: BalanceDomain::Settlement,
             forked_from: None,
+            fork_caller: None,
+            fork_index: None,
         });
 
         assert_eq!(id1, id2);
@@ -589,6 +611,8 @@ mod tests {
             oracle_source,
             balance_domain: BalanceDomain::Settlement,
             forked_from: None,
+            fork_caller: None,
+            fork_index: None,
         });
 
         let id2 = Series::generate_id(&SeriesIdParams {
@@ -602,6 +626,8 @@ mod tests {
             oracle_source,
             balance_domain: BalanceDomain::Settlement,
             forked_from: None,
+            fork_caller: None,
+            fork_index: None,
         });
 
         assert_ne!(id1, id2);
@@ -627,6 +653,8 @@ mod tests {
             oracle_source,
             balance_domain: BalanceDomain::Settlement,
             forked_from: None,
+            fork_caller: None,
+            fork_index: None,
         });
 
         let id2 = Series::generate_id(&SeriesIdParams {
@@ -640,6 +668,8 @@ mod tests {
             oracle_source,
             balance_domain: BalanceDomain::Settlement,
             forked_from: None,
+            fork_caller: None,
+            fork_index: None,
         });
 
         assert_ne!(id1, id2);
@@ -654,6 +684,7 @@ mod tests {
         let precision = 8;
         let payout_unit = PayoutUnit::usd();
         let oracle_source = "coingecko";
+        let caller = Principal::from_slice(&[1]);
 
         let original = Series::generate_id(&SeriesIdParams {
             underlying,
@@ -666,6 +697,8 @@ mod tests {
             oracle_source,
             balance_domain: BalanceDomain::Settlement,
             forked_from: None,
+            fork_caller: None,
+            fork_index: None,
         });
 
         let forked = Series::generate_id(&SeriesIdParams {
@@ -679,9 +712,136 @@ mod tests {
             oracle_source,
             balance_domain: BalanceDomain::Settlement,
             forked_from: Some(&original),
+            fork_caller: Some(&caller),
+            fork_index: Some(0),
         });
 
         assert_ne!(original, forked);
+    }
+
+    #[test]
+    fn multiple_forks_produce_distinct_ids() {
+        let underlying = "ICP";
+        let expiry = 1_735_689_600;
+        let payoff_type = PayoffType::Call;
+        let strike = Some(Price::new(100, 8));
+        let precision = 8;
+        let payout_unit = PayoutUnit::usd();
+        let oracle_source = "coingecko";
+        let caller = Principal::from_slice(&[1]);
+
+        let original = Series::generate_id(&SeriesIdParams {
+            underlying,
+            expiry_ns: expiry,
+            payoff_type: &payoff_type,
+            strike: strike.as_ref(),
+            price_precision: precision,
+            payout_unit: &payout_unit,
+            outcomes: None,
+            oracle_source,
+            balance_domain: BalanceDomain::Settlement,
+            forked_from: None,
+            fork_caller: None,
+            fork_index: None,
+        });
+
+        let fork_0 = Series::generate_id(&SeriesIdParams {
+            underlying,
+            expiry_ns: expiry,
+            payoff_type: &payoff_type,
+            strike: strike.as_ref(),
+            price_precision: precision,
+            payout_unit: &payout_unit,
+            outcomes: None,
+            oracle_source,
+            balance_domain: BalanceDomain::Settlement,
+            forked_from: Some(&original),
+            fork_caller: Some(&caller),
+            fork_index: Some(0),
+        });
+
+        let fork_1 = Series::generate_id(&SeriesIdParams {
+            underlying,
+            expiry_ns: expiry,
+            payoff_type: &payoff_type,
+            strike: strike.as_ref(),
+            price_precision: precision,
+            payout_unit: &payout_unit,
+            outcomes: None,
+            oracle_source,
+            balance_domain: BalanceDomain::Settlement,
+            forked_from: Some(&original),
+            fork_caller: Some(&caller),
+            fork_index: Some(1),
+        });
+
+        assert_ne!(
+            fork_0, fork_1,
+            "Different fork indices must produce different IDs"
+        );
+    }
+
+    #[test]
+    fn different_callers_produce_distinct_fork_ids() {
+        let underlying = "ICP";
+        let expiry = 1_735_689_600;
+        let payoff_type = PayoffType::Call;
+        let strike = Some(Price::new(100, 8));
+        let precision = 8;
+        let payout_unit = PayoutUnit::usd();
+        let oracle_source = "coingecko";
+        let alice = Principal::from_slice(&[1]);
+        let bob = Principal::from_slice(&[2]);
+
+        let original = Series::generate_id(&SeriesIdParams {
+            underlying,
+            expiry_ns: expiry,
+            payoff_type: &payoff_type,
+            strike: strike.as_ref(),
+            price_precision: precision,
+            payout_unit: &payout_unit,
+            outcomes: None,
+            oracle_source,
+            balance_domain: BalanceDomain::Settlement,
+            forked_from: None,
+            fork_caller: None,
+            fork_index: None,
+        });
+
+        let fork_alice = Series::generate_id(&SeriesIdParams {
+            underlying,
+            expiry_ns: expiry,
+            payoff_type: &payoff_type,
+            strike: strike.as_ref(),
+            price_precision: precision,
+            payout_unit: &payout_unit,
+            outcomes: None,
+            oracle_source,
+            balance_domain: BalanceDomain::Settlement,
+            forked_from: Some(&original),
+            fork_caller: Some(&alice),
+            fork_index: Some(0),
+        });
+
+        let fork_bob = Series::generate_id(&SeriesIdParams {
+            underlying,
+            expiry_ns: expiry,
+            payoff_type: &payoff_type,
+            strike: strike.as_ref(),
+            price_precision: precision,
+            payout_unit: &payout_unit,
+            outcomes: None,
+            oracle_source,
+            balance_domain: BalanceDomain::Settlement,
+            forked_from: Some(&original),
+            fork_caller: Some(&bob),
+            fork_index: Some(0),
+        });
+
+        assert_ne!(
+            fork_alice, fork_bob,
+            "Different callers must produce different fork IDs"
+        );
     }
 
     #[test]
