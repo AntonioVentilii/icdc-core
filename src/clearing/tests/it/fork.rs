@@ -3,7 +3,7 @@ use shared::types::{
     engine::EngineRole,
     groups::GroupId,
     series::{AddSeriesResult, ForkSeriesParams, SeriesError},
-    Series, SeriesId, TradingAccess,
+    BalanceDomain, Series, SeriesId, TradingAccess,
 };
 
 use crate::utils::{
@@ -16,8 +16,7 @@ use crate::utils::{
 fn fork_series_creates_distinct_restricted_series() {
     let setup = TestSetup::default();
 
-    let source_id =
-        setup.add_binary_series("ICP", 50_000, shared::types::BalanceDomain::Settlement);
+    let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
     setup.pic.tick();
 
     let group = GroupId::from("grp_fork_1".to_owned());
@@ -56,8 +55,7 @@ fn engine_creator_can_fork() {
     setup.grant_engine_role(&engine_id, creator, EngineRole::Creator);
     setup.pic.tick();
 
-    let source_id =
-        setup.add_binary_series("BTC", 100_000, shared::types::BalanceDomain::Settlement);
+    let source_id = setup.add_binary_series("BTC", 100_000, BalanceDomain::Settlement);
     setup.pic.tick();
 
     let group = GroupId::from("grp_fork_2".to_owned());
@@ -77,8 +75,7 @@ fn non_creator_cannot_fork() {
     let setup = TestSetup::default();
     let random_user = test_user(71);
 
-    let source_id =
-        setup.add_binary_series("ICP", 50_000, shared::types::BalanceDomain::Settlement);
+    let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
     setup.pic.tick();
 
     let group = GroupId::from("grp_fork_3".to_owned());
@@ -97,8 +94,7 @@ fn non_creator_cannot_fork() {
 fn fork_must_be_restricted() {
     let setup = TestSetup::default();
 
-    let source_id =
-        setup.add_binary_series("ICP", 50_000, shared::types::BalanceDomain::Settlement);
+    let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
     setup.pic.tick();
 
     let fork_params = ForkSeriesParams {

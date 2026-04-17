@@ -18,7 +18,8 @@ use clearing::{
 use icrc_ledger_types::icrc2::approve::ApproveArgs;
 use shared::types::{
     engine::{
-        EngineId, EngineRole, GrantEngineRoleParams, RegisterEngineParams, RegisterEngineResult,
+        EngineId, EngineResult, EngineRole, GrantEngineRoleParams, RegisterEngineParams,
+        RegisterEngineResult,
     },
     evm::NativeEvmAsset,
     series::{AddSeriesParams, AddSeriesResult, ForkSeriesParams},
@@ -393,7 +394,7 @@ impl TradeHelperTrait for TestSetup {
     }
 
     fn grant_engine_role(&self, engine_id: &EngineId, principal: Principal, role: EngineRole) {
-        let res: shared::types::engine::EngineResult = self
+        let res: EngineResult = self
             .registry
             .update(
                 self.controller,
@@ -407,8 +408,8 @@ impl TradeHelperTrait for TestSetup {
             .unwrap();
 
         match res {
-            shared::types::engine::EngineResult::Ok => {}
-            shared::types::engine::EngineResult::Err(e) => {
+            EngineResult::Ok => {}
+            EngineResult::Err(e) => {
                 panic!("grant_engine_role failed: {e:?}")
             }
         }

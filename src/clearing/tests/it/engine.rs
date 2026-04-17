@@ -1,8 +1,8 @@
 use candid::{decode_one, encode_one, Principal};
 use shared::types::{
     engine::{
-        EngineError, EngineResult, EngineRole, GrantEngineRoleParams, RevokeEngineRoleParams,
-        UpdateEngineAdminsParams,
+        Engine, EngineError, EngineResult, EngineRole, GrantEngineRoleParams,
+        RevokeEngineRoleParams, UpdateEngineAdminsParams,
     },
     series::{AddSeriesParams, AddSeriesResult, SeriesError},
     BalanceDomain, Description, PayoffType, PayoutUnit,
@@ -189,7 +189,7 @@ fn list_engines() {
     setup.register_engine("Engine B", vec![EngineRole::OracleAdmin]);
     setup.pic.tick();
 
-    let engines: Vec<shared::types::Engine> = setup
+    let engines: Vec<Engine> = setup
         .registry
         .query(setup.controller, "list_engines", ())
         .unwrap();
