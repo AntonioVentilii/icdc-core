@@ -7,18 +7,24 @@ use shared::types::oracle::{
 };
 
 use crate::{
-    guards::{caller_is_controller, caller_is_not_anonymous},
+    guards::{caller_is_not_anonymous, is_engine_oracle_admin},
     memory::ORACLE_STORE,
     utils::canonical_id_part,
 };
 
 /// Registers a new price oracle in the registry.
-#[update(guard = "caller_is_controller")]
+///
+/// Controllers and Engine `OracleAdmin` role holders may register oracles.
+#[update(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn add_oracle(params: AddOracleParams) -> OracleResult {
-    let result: Result<(), OracleError> = {
-        let caller = msg_caller();
+    let caller = msg_caller();
 
+    if !is_engine_oracle_admin(&caller) {
+        return Err(OracleError::UnauthorizedOracleManager).into();
+    }
+
+    let result: Result<(), OracleError> = {
         let oracle_id = canonical_id_part(&params.oracle_id);
 
         ORACLE_STORE.with(|store| {
@@ -45,6 +51,8 @@ pub fn add_oracle(params: AddOracleParams) -> OracleResult {
 }
 
 /// Updates the metadata of an existing oracle.
+///
+/// Controllers, the oracle's manager, and Engine `OracleAdmin` role holders may update metadata.
 #[update(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn update_oracle_metadata(params: UpdateOracleMetadataParams) -> OracleResult {
@@ -57,7 +65,10 @@ pub fn update_oracle_metadata(params: UpdateOracleMetadataParams) -> OracleResul
                 .get_mut(&params.oracle_id)
                 .ok_or(OracleError::OracleNotFound)?;
 
-            if !is_controller(&caller) && caller != oracle.manager {
+            if !is_controller(&caller)
+                && caller != oracle.manager
+                && !is_engine_oracle_admin(&caller)
+            {
                 return Err(OracleError::UnauthorizedOracleManager);
             }
 
@@ -70,6 +81,8 @@ pub fn update_oracle_metadata(params: UpdateOracleMetadataParams) -> OracleResul
 }
 
 /// Adds or removes authorised principals for an oracle.
+///
+/// Controllers, the oracle's manager, and Engine `OracleAdmin` role holders may manage principals.
 #[update(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn manage_oracle_principals(params: ManageOraclePrincipalsParams) -> OracleResult {
@@ -82,7 +95,10 @@ pub fn manage_oracle_principals(params: ManageOraclePrincipalsParams) -> OracleR
                 .get_mut(&params.oracle_id)
                 .ok_or(OracleError::OracleNotFound)?;
 
-            if !is_controller(&caller) && caller != oracle.manager {
+            if !is_controller(&caller)
+                && caller != oracle.manager
+                && !is_engine_oracle_admin(&caller)
+            {
                 return Err(OracleError::UnauthorizedOracleManager);
             }
 

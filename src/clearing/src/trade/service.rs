@@ -372,6 +372,8 @@ mod tests {
             banner_url: None,
             balance_domain: BalanceDomain::Settlement,
             trading_access: vec![],
+            engine_id: None,
+            forked_from: None,
         };
 
         // Initialize state
@@ -450,6 +452,8 @@ mod tests {
             banner_url: None,
             balance_domain: BalanceDomain::Settlement,
             trading_access: vec![],
+            engine_id: None,
+            forked_from: None,
         };
 
         let params = ExecuteTradeParams {

@@ -3,9 +3,12 @@ use hex::encode;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::types::{
-    description::Description, domain::BalanceDomain, groups::TradingAccess, payout::PayoutUnit,
-    price::Price,
+use crate::{
+    constants::{DEFAULT_SOCIAL_MAX_PER_HOUR, DEFAULT_SOCIAL_MAX_PER_USER},
+    types::{
+        description::Description, domain::BalanceDomain, engine::EngineId, groups::TradingAccess,
+        payout::PayoutUnit, price::Price,
+    },
 };
 
 /// A unique identifier for a derivative series.
@@ -136,18 +139,29 @@ pub struct Series {
     /// - `[Restricted { groups }]` → only group members may trade.
     /// - Multiple policies can coexist (e.g. `[Open, Restricted { groups }]`).
     pub trading_access: Vec<TradingAccess>,
+    /// The Engine that created this series, if any.
+    /// `None` for series created directly by a canister controller.
+    pub engine_id: Option<EngineId>,
+    /// If this series was forked from another, the source series ID.
+    pub forked_from: Option<SeriesId>,
 }
 impl Series {
     /// Generates a unique [`SeriesId`] based on the contract parameters.
     ///
     /// The ID is computed using a SHA-256 hash of all defining parameters,
     /// ensuring that identical series have the same ID while preventing collisions.
+    /// When `forked_from` is present, uses V4 domain separator to guarantee
+    /// distinct IDs from the source series.
     #[must_use]
     pub fn generate_id(params: &SeriesIdParams<'_>) -> SeriesId {
         let mut hasher = Sha256::new();
 
-        // 🔐 Domain separator (versioned for future upgrades)
-        hasher.update(b"DERIV_SERIES_V3");
+        let version = if params.forked_from.is_some() {
+            b"DERIV_SERIES_V4" as &[u8]
+        } else {
+            b"DERIV_SERIES_V3" as &[u8]
+        };
+        hasher.update(version);
 
         hasher.update(b"|DOMAIN|");
         match params.balance_domain {
@@ -196,6 +210,11 @@ impl Series {
         hasher.update(b"|ORACLE|");
         hasher.update(params.oracle_source.as_bytes());
 
+        if let Some(source) = params.forked_from {
+            hasher.update(b"|FORKED_FROM|");
+            hasher.update(source.as_str().as_bytes());
+        }
+
         let series_id = encode(hasher.finalize());
 
         series_id.into()
@@ -213,6 +232,7 @@ pub struct SeriesIdParams<'a> {
     pub outcomes: Option<&'a [Outcome]>,
     pub oracle_source: &'a str,
     pub balance_domain: BalanceDomain,
+    pub forked_from: Option<&'a SeriesId>,
 }
 
 /// Errors that can occur during series-related operations.
@@ -234,6 +254,18 @@ pub enum SeriesError {
     RewardDescriptionTooLong,
     /// Social reward icon URL exceeds limit.
     RewardIconUrlTooLong,
+    /// Social markets must have `Restricted` trading access.
+    SocialMarketMustBeRestricted,
+    /// Social markets require a `NonMonetary` payout unit.
+    SocialMarketRequiresNonMonetaryPayout,
+    /// The caller has exceeded the hourly social market creation limit.
+    SocialRateLimitExceeded,
+    /// The caller has reached the maximum number of social markets allowed per user.
+    SocialMaxPerUserReached,
+    /// The source series specified in a fork does not exist.
+    SourceSeriesNotFound,
+    /// Forked series must have `Restricted` trading access.
+    ForkMustBeRestricted,
 }
 
 /// Input parameters for registering a new derivative series.
@@ -274,6 +306,23 @@ pub struct AddSeriesParams {
     ///
     /// If the caller passes an empty list, `add_series` will fill it with `[Open]`.
     /// Policies can be updated after creation via `update_trading_access`.
+    pub trading_access: Vec<TradingAccess>,
+}
+
+/// Input parameters for forking (cloning) an existing series into a restricted circle.
+///
+/// The forked series inherits all defining parameters from the source series but
+/// gets a distinct ID (via the `forked_from` hash component) and carries a reference
+/// back to the original.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct ForkSeriesParams {
+    /// The source series to fork.
+    pub source_series_id: SeriesId,
+    /// Optional title override. Falls back to the source series title.
+    pub title: Option<String>,
+    /// Optional description override. Falls back to the source series description.
+    pub description: Option<Description>,
+    /// Trading access policies for the forked series. Must be `Restricted`.
     pub trading_access: Vec<TradingAccess>,
 }
 
@@ -454,6 +503,24 @@ pub struct SeriesPage {
     pub next_cursor: Option<SeriesId>,
 }
 
+/// Configurable rate limits for social (non-monetary) market creation.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct SocialLimits {
+    /// Maximum social markets any single user may create within a rolling hour.
+    pub max_per_hour: u64,
+    /// Maximum total social markets any single user may create (lifetime).
+    pub max_per_user: u64,
+}
+
+impl Default for SocialLimits {
+    fn default() -> Self {
+        Self {
+            max_per_hour: DEFAULT_SOCIAL_MAX_PER_HOUR,
+            max_per_user: DEFAULT_SOCIAL_MAX_PER_USER,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use candid::Principal;
@@ -466,7 +533,7 @@ mod tests {
     #[test]
     fn generate_series_id_consistency() {
         let underlying = "ICP";
-        let expiry = 1735689600;
+        let expiry = 1_735_689_600;
         let payoff_type = PayoffType::Call;
         let strike = Some(Price::new(100, 8));
         let precision = 8;
@@ -483,6 +550,7 @@ mod tests {
             outcomes: None,
             oracle_source,
             balance_domain: BalanceDomain::Settlement,
+            forked_from: None,
         });
 
         let id2 = Series::generate_id(&SeriesIdParams {
@@ -495,6 +563,7 @@ mod tests {
             outcomes: None,
             oracle_source,
             balance_domain: BalanceDomain::Settlement,
+            forked_from: None,
         });
 
         assert_eq!(id1, id2);
@@ -519,6 +588,7 @@ mod tests {
             outcomes: None,
             oracle_source,
             balance_domain: BalanceDomain::Settlement,
+            forked_from: None,
         });
 
         let id2 = Series::generate_id(&SeriesIdParams {
@@ -531,6 +601,7 @@ mod tests {
             outcomes: None,
             oracle_source,
             balance_domain: BalanceDomain::Settlement,
+            forked_from: None,
         });
 
         assert_ne!(id1, id2);
@@ -555,6 +626,7 @@ mod tests {
             outcomes: None,
             oracle_source,
             balance_domain: BalanceDomain::Settlement,
+            forked_from: None,
         });
 
         let id2 = Series::generate_id(&SeriesIdParams {
@@ -567,31 +639,73 @@ mod tests {
             outcomes: None,
             oracle_source,
             balance_domain: BalanceDomain::Settlement,
+            forked_from: None,
         });
 
         assert_ne!(id1, id2);
     }
 
     #[test]
+    fn forked_series_has_different_id() {
+        let underlying = "ICP";
+        let expiry = 1_735_689_600;
+        let payoff_type = PayoffType::Call;
+        let strike = Some(Price::new(100, 8));
+        let precision = 8;
+        let payout_unit = PayoutUnit::usd();
+        let oracle_source = "coingecko";
+
+        let original = Series::generate_id(&SeriesIdParams {
+            underlying,
+            expiry_ns: expiry,
+            payoff_type: &payoff_type,
+            strike: strike.as_ref(),
+            price_precision: precision,
+            payout_unit: &payout_unit,
+            outcomes: None,
+            oracle_source,
+            balance_domain: BalanceDomain::Settlement,
+            forked_from: None,
+        });
+
+        let forked = Series::generate_id(&SeriesIdParams {
+            underlying,
+            expiry_ns: expiry,
+            payoff_type: &payoff_type,
+            strike: strike.as_ref(),
+            price_precision: precision,
+            payout_unit: &payout_unit,
+            outcomes: None,
+            oracle_source,
+            balance_domain: BalanceDomain::Settlement,
+            forked_from: Some(&original),
+        });
+
+        assert_ne!(original, forked);
+    }
+
+    #[test]
     fn series_with_metadata() {
         let series = Series {
-            series_id: SeriesId::from("test".to_string()),
-            underlying: "ICP".to_string(),
-            expiry_ns: 1735689600,
+            series_id: SeriesId::from("test".to_owned()),
+            underlying: "ICP".to_owned(),
+            expiry_ns: 1_735_689_600,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(100, 8)),
             price_precision: 8,
             payout_unit: PayoutUnit::usd(),
             outcomes: None,
-            oracle_source: "coingecko".to_string(),
+            oracle_source: "coingecko".to_owned(),
             creator: Principal::anonymous(),
-            created_at_ns: 1700000000,
-            title: "Long ICP Call".to_string(),
+            created_at_ns: 1_700_000_000,
+            title: "Long ICP Call".to_owned(),
             description: Description::plain("A vanilla call option on ICP"),
             icon_url: None,
             banner_url: None,
             balance_domain: BalanceDomain::Settlement,
             trading_access: vec![TradingAccess::Open],
+            engine_id: None,
+            forked_from: None,
         };
 
         assert_eq!(series.title, "Long ICP Call");

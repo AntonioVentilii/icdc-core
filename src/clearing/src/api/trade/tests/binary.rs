@@ -29,6 +29,8 @@ fn binary_lifecycle_scenario() {
         banner_url: None,
         balance_domain: BalanceDomain::Settlement,
         trading_access: vec![],
+        engine_id: None,
+        forked_from: None,
     };
 
     setup_test_state(vec![
@@ -97,6 +99,8 @@ fn binary_settle_no() {
         banner_url: None,
         balance_domain: BalanceDomain::Settlement,
         trading_access: vec![],
+        engine_id: None,
+        forked_from: None,
     };
 
     setup_test_state(vec![(seller, 200_000), (buyer, 100_000)]);

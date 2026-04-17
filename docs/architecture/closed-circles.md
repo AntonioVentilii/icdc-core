@@ -138,13 +138,30 @@ Key design decisions:
 
 **"Group admin"** means: canister controller, group creator, or a principal in the group's `admins` set.
 
+## Engine Integration
+
+The Engine model (see [engines.md](engines.md)) replaces the flat creator/forker allowlists. Series creation and forking are now authorized through Engine roles:
+
+| Authorization Tier     | Can create open markets? | Can fork (restricted)? | Can create social markets? |
+| ---------------------- | ------------------------ | ---------------------- | -------------------------- |
+| Controller             | Yes                      | Yes                    | Yes                        |
+| Engine Creator         | Yes                      | Yes                    | Yes                        |
+| Any authenticated user | No                       | No                     | Yes (rate-limited)         |
+
+The `fork_series` endpoint provides on-chain traceability for forked series. Each fork:
+
+- Inherits all defining parameters from the source.
+- Gets a distinct ID (V4 domain separator includes `forked_from`).
+- Must have `Restricted` trading access (creating a closed circle).
+- Records `forked_from: Some(source_series_id)` for audit.
+
 ## vici-app Roles
 
 | Role                   | Permissions                                                          |
 | ---------------------- | -------------------------------------------------------------------- |
 | `CONTROLLER` / `ADMIN` | All permissions including `CREATE_GROUP` and `MANAGE_TRADING_ACCESS` |
 | `GROUP_CREATOR`        | `CREATE_GROUP` — can create and manage groups                        |
-| `CREATOR`              | `CREATE_MARKET` — cannot manage trading access (admin does that)     |
+| `ENGINE_CREATOR`       | `CREATE_MARKET`, `FORK_MARKET` — via Engine role grants              |
 
 ## Future Extensions
 
