@@ -15,6 +15,10 @@ type AddSeriesParams = record {
 	strike : opt Price;
 	// The payoff model for the series.
 	payoff_type : PayoffType;
+	// The Engine on whose behalf this series is created.
+	// Controllers may omit this (`None`). Non-controller callers must provide
+	// a valid `EngineId` on which they hold the `Creator` role.
+	engine_id : opt text;
 	// The unit in which the contract payoff is expressed.
 	payout_unit : PayoutUnit;
 	// Expiry timestamp in nanoseconds since UNIX epoch.
@@ -44,11 +48,7 @@ type AddSeriesParams = record {
 	// The balance domain this series belongs to.
 	balance_domain : BalanceDomain;
 	// The price oracle identifier (case-insensitive, e.g., "Coingecko").
-	oracle_source : text;
-	// The Engine on whose behalf this series is created.
-	// Controllers may omit this. Non-controller callers must provide
-	// a valid EngineId on which they hold the Creator role.
-	engine_id : opt text
+	oracle_source : text
 };
 // The result of an [`add_series`] operation.
 type AddSeriesResult = variant {
@@ -179,9 +179,18 @@ type EngineResult = variant { Ok; Err : EngineError };
 // Engines declare which subset of roles they are allowed to grant
 // via [`Engine::allowed_roles`].
 type EngineRole = variant {
-	// Can register oracles and manage their metadata and principals.
+	// Can register oracles and manage their metadata and principals
+	// **registry-wide** (not scoped to a specific engine).
+	//
+	// Oracles are shared infrastructure consumed by series across multiple
+	// engines, so `OracleAdmin` intentionally grants global oracle management.
+	// Engine-scoped oracle ownership can be added later by introducing an
+	// `engine_id` field on the `Oracle` struct if needed.
 	OracleAdmin;
 	// Can create series via `add_series` and fork series via `fork_series`.
+	//
+	// Series creation/forking requires the caller to specify the `engine_id`
+	// on which they hold this role.
 	Creator
 };
 // Represents an ERC-20 token on a specific EVM chain.
@@ -204,14 +213,14 @@ type ForkSeriesParams = record {
 	source_series_id : text;
 	// Optional title override. Falls back to the source series title.
 	title : opt text;
+	// The Engine on whose behalf this fork is created.
+	// Controllers may omit this (`None`). Non-controller callers must provide
+	// a valid `EngineId` on which they hold the `Creator` role.
+	engine_id : opt text;
 	// Optional description override. Falls back to the source series description.
 	description : opt Description;
 	// Trading access policies for the forked series. Must be `Restricted`.
-	trading_access : vec TradingAccess;
-	// The Engine on whose behalf this fork is created.
-	// Controllers may omit this. Non-controller callers must provide
-	// a valid EngineId on which they hold the Creator role.
-	engine_id : opt text
+	trading_access : vec TradingAccess
 };
 // Input parameters for granting a role within an Engine.
 //
@@ -222,17 +231,6 @@ type GrantEngineRoleParams = record {
 	// The Engine in which to grant the role.
 	engine_id : text;
 	// The role to grant.
-	role : EngineRole
-};
-// Input parameters for revoking a role within an Engine.
-//
-// Only Engine admins or canister controllers may revoke roles.
-type RevokeEngineRoleParams = record {
-	// The principal losing the role.
-	"principal" : principal;
-	// The Engine in which to revoke the role.
-	engine_id : text;
-	// The role to revoke.
 	role : EngineRole
 };
 // A trading group (closed circle).
@@ -512,14 +510,16 @@ type SeriesError = variant {
 	RewardIconUrlTooLong;
 	// Social markets require a `NonMonetary` payout unit.
 	SocialMarketRequiresNonMonetaryPayout;
+	// The caller has reached the maximum number of forks for this source series.
+	ForkLimitReached;
 	// Social markets must have `Restricted` trading access.
 	SocialMarketMustBeRestricted;
+	// Non-controller callers must specify an `engine_id` for non-social markets.
+	EngineIdRequired;
 	// Returned when the caller is not authorized to add a series.
 	Unauthorized;
 	// Forked series must have `Restricted` trading access.
 	ForkMustBeRestricted;
-	// The caller has reached the maximum number of forks for this source series.
-	ForkLimitReached;
 	// Returned when the provided payout unit is not supported by the protocol.
 	UnsupportedPayoutUnit;
 	// The caller has exceeded the hourly social market creation limit.
@@ -531,9 +531,7 @@ type SeriesError = variant {
 	// Social reward title exceeds limit.
 	RewardTitleTooLong;
 	// The specified Engine does not exist or the caller does not hold the required role on it.
-	EngineRoleNotHeld;
-	// Non-controller callers must specify an engine_id for non-social markets.
-	EngineIdRequired
+	EngineRoleNotHeld
 };
 // A paginated page of registered series.
 type SeriesPage = record {
@@ -706,8 +704,10 @@ service : {
 	//
 	// Authorization is tiered:
 	//
-	// 1. **Creators** (controllers + Engine `Creator` role holders): may create any series.
-	// 2. **Any authenticated user**: may create **social** markets (`BalanceDomain::Social` +
+	// 1. **Controllers**: may create any series with or without `engine_id`.
+	// 2. **Engine Creators**: must provide `engine_id` referencing an Engine where they hold the
+	// `Creator` role.
+	// 3. **Any authenticated user**: may create **social** markets (`BalanceDomain::Social` +
 	// `NonMonetary` payout) with `Restricted` trading access, subject to per-user rate limits.
 	add_series : (AddSeriesParams) -> (AddSeriesResult);
 	// Creates a new trading group (closed circle).
@@ -746,7 +746,8 @@ service : {
 	// The forked series inherits all defining parameters from the source but gets a
 	// distinct ID and carries a `forked_from` reference back to the original.
 	//
-	// Only controllers and Engine Creators may fork series.
+	// Controllers may fork without `engine_id`. Non-controller callers must provide
+	// an `engine_id` on which they hold the `Creator` role.
 	fork_series : (ForkSeriesParams) -> (AddSeriesResult);
 	// Retrieves an Engine by its ID.
 	get_engine : (text) -> (opt Engine) query;
@@ -857,7 +858,7 @@ service : {
 	// Revokes a role from a principal within an Engine.
 	//
 	// Only Engine admins or controllers may revoke roles.
-	revoke_engine_role : (RevokeEngineRoleParams) -> (EngineResult);
+	revoke_engine_role : (GrantEngineRoleParams) -> (EngineResult);
 	// Updates the rate limits for social (non-monetary) market creation.
 	//
 	// This method is gated to canister controllers.
