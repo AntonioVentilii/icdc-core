@@ -31,6 +31,16 @@ pub fn register_engine(params: RegisterEngineParams) -> RegisterEngineResult {
         return Err(EngineError::NameTooLong).into();
     }
 
+    let name_taken = ENGINE_STORE.with(|store| {
+        store
+            .borrow()
+            .values()
+            .any(|engine| engine.name == params.name)
+    });
+    if name_taken {
+        return Err(EngineError::EngineAlreadyExists).into();
+    }
+
     let engine_id = NEXT_ENGINE_ID.with(|id| {
         let mut id = id.borrow_mut();
         let current = *id;
@@ -73,18 +83,30 @@ pub fn update_engine(params: UpdateEngineParams) -> EngineResult {
     ENGINE_STORE
         .with(|store| {
             let mut store = store.borrow_mut();
-            let engine = store
-                .get_mut(&params.engine_id)
-                .ok_or(EngineError::EngineNotFound)?;
 
-            if !is_engine_admin(engine, &caller) {
-                return Err(EngineError::Unauthorized);
+            {
+                let engine = store
+                    .get(&params.engine_id)
+                    .ok_or(EngineError::EngineNotFound)?;
+                if !is_engine_admin(engine, &caller) {
+                    return Err(EngineError::Unauthorized);
+                }
+                if let Some(ref name) = params.name {
+                    if name.chars().count() > MAX_ENGINE_NAME_LEN {
+                        return Err(EngineError::NameTooLong);
+                    }
+                    let conflict = store
+                        .iter()
+                        .any(|(id, e)| id != &params.engine_id && e.name == *name);
+                    if conflict {
+                        return Err(EngineError::EngineAlreadyExists);
+                    }
+                }
             }
 
+            let engine = store.get_mut(&params.engine_id).unwrap();
+
             if let Some(name) = params.name {
-                if name.chars().count() > MAX_ENGINE_NAME_LEN {
-                    return Err(EngineError::NameTooLong);
-                }
                 engine.name = name;
             }
 

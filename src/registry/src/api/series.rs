@@ -118,11 +118,6 @@ fn add_series_impl(
             if !is_all_restricted(&trading_access) {
                 return Err(SeriesError::SocialMarketMustBeRestricted).into();
             }
-            if let PayoutUnit::NonMonetary(NonMonetaryUnit::Social(ref reward)) = payout_unit {
-                if let Err(e) = reward.validate() {
-                    return Err(e).into();
-                }
-            }
             if let Err(e) = check_social_rate_limits(&caller, now) {
                 return Err(e).into();
             }
@@ -130,6 +125,12 @@ fn add_series_impl(
     }
 
     // --- Common validation ---
+
+    if let PayoutUnit::NonMonetary(NonMonetaryUnit::Social(ref reward)) = payout_unit {
+        if let Err(e) = reward.validate() {
+            return Err(e).into();
+        }
+    }
 
     if title.chars().count() > MAX_SERIES_TITLE_LEN {
         return Err(SeriesError::TitleTooLong).into();

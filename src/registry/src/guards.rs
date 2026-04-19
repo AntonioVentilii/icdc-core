@@ -24,28 +24,32 @@ pub fn caller_is_controller() -> Result<(), String> {
     }
 }
 
-/// Returns `true` if the principal holds the given role in **any** registered Engine.
+/// Returns `true` if the principal holds the given role in **any** registered Engine
+/// whose `allowed_roles` still includes that role.
 #[must_use]
 pub fn has_engine_role(principal: &Principal, role: &EngineRole) -> bool {
     ENGINE_STORE.with(|store| {
         store.borrow().values().any(|engine| {
-            engine
-                .role_grants
-                .iter()
-                .any(|grant| &grant.principal == principal && &grant.role == role)
+            engine.allowed_roles.contains(role)
+                && engine
+                    .role_grants
+                    .iter()
+                    .any(|grant| &grant.principal == principal && &grant.role == role)
         })
     })
 }
 
-/// Returns `true` if the principal holds the given role on a **specific** Engine.
+/// Returns `true` if the principal holds the given role on a **specific** Engine
+/// whose `allowed_roles` still includes that role.
 #[must_use]
 pub fn has_engine_role_on(principal: &Principal, role: &EngineRole, engine_id: &EngineId) -> bool {
     ENGINE_STORE.with(|store| {
         store.borrow().get(engine_id).is_some_and(|engine| {
-            engine
-                .role_grants
-                .iter()
-                .any(|grant| &grant.principal == principal && &grant.role == role)
+            engine.allowed_roles.contains(role)
+                && engine
+                    .role_grants
+                    .iter()
+                    .any(|grant| &grant.principal == principal && &grant.role == role)
         })
     })
 }

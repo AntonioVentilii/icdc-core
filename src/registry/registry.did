@@ -224,6 +224,17 @@ type GrantEngineRoleParams = record {
 	// The role to grant.
 	role : EngineRole
 };
+// Input parameters for revoking a role within an Engine.
+//
+// Only Engine admins or canister controllers may revoke roles.
+type RevokeEngineRoleParams = record {
+	// The principal losing the role.
+	"principal" : principal;
+	// The Engine in which to revoke the role.
+	engine_id : text;
+	// The role to revoke.
+	role : EngineRole
+};
 // A trading group (closed circle).
 //
 // Groups are the building blocks of restricted trading access.
@@ -846,7 +857,7 @@ service : {
 	// Revokes a role from a principal within an Engine.
 	//
 	// Only Engine admins or controllers may revoke roles.
-	revoke_engine_role : (GrantEngineRoleParams) -> (EngineResult);
+	revoke_engine_role : (RevokeEngineRoleParams) -> (EngineResult);
 	// Updates the rate limits for social (non-monetary) market creation.
 	//
 	// This method is gated to canister controllers.

@@ -12,18 +12,25 @@ echo "Principal: $PRINCIPAL"
 
 # 1. Register default engine with Creator + OracleAdmin roles
 echo "Registering default engine..."
-dfx canister call registry register_engine "(record {
+REGISTER_RESULT=$(dfx canister call registry register_engine "(record {
     name = \"Default\";
     description = null;
     icon_url = null;
     admins = vec { principal \"$PRINCIPAL\" };
     allowed_roles = vec { variant { Creator }; variant { OracleAdmin } }
-})" --network "$NETWORK" >/dev/null
+})" --network "$NETWORK")
+
+ENGINE_ID=$(echo "$REGISTER_RESULT" | grep -oP '"[^"]*"' | head -1 | tr -d '"')
+if [ -z "$ENGINE_ID" ]; then
+  echo "ERROR: Failed to register engine. Response: $REGISTER_RESULT"
+  exit 1
+fi
+echo "Registered engine: $ENGINE_ID"
 
 # 2. Grant Creator role to deploying principal
 echo "Granting Creator role..."
 dfx canister call registry grant_engine_role "(record {
-    engine_id = \"eng_0\";
+    engine_id = \"$ENGINE_ID\";
     principal = principal \"$PRINCIPAL\";
     role = variant { Creator }
 })" --network "$NETWORK" >/dev/null
