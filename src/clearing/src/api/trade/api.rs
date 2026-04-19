@@ -514,13 +514,11 @@ pub(crate) fn validate_no_arbitrage(
     );
 
     match series.payoff_type {
-        PayoffType::Binary => {
-            if price_usd > limit_usd {
-                return Err(TradeError::ArbitrageLimitExceeded {
-                    sum_usd: price_usd,
-                    limit_usd,
-                });
-            }
+        PayoffType::Binary if price_usd > limit_usd => {
+            return Err(TradeError::ArbitrageLimitExceeded {
+                sum_usd: price_usd,
+                limit_usd,
+            });
         }
         PayoffType::Categorical => {
             let outcomes = series.outcomes.as_ref().ok_or_else(|| {
