@@ -100,10 +100,21 @@ fn add_series_impl(
         engine_id,
     } = params;
 
-    // --- Tier-specific validation ---
+    // --- Social-domain invariants (apply regardless of tier) ---
 
     let is_social_market = balance_domain == BalanceDomain::Social
         && matches!(payout_unit, PayoutUnit::NonMonetary(_));
+
+    if balance_domain == BalanceDomain::Social {
+        if !matches!(payout_unit, PayoutUnit::NonMonetary(_)) {
+            return Err(SeriesError::SocialMarketRequiresNonMonetaryPayout).into();
+        }
+        if !is_all_restricted(&trading_access) {
+            return Err(SeriesError::SocialMarketMustBeRestricted).into();
+        }
+    }
+
+    // --- Tier-specific validation ---
 
     match &tier {
         CreationTier::Creator => {
@@ -112,12 +123,6 @@ fn add_series_impl(
             }
         }
         CreationTier::Social => {
-            if !matches!(payout_unit, PayoutUnit::NonMonetary(_)) {
-                return Err(SeriesError::SocialMarketRequiresNonMonetaryPayout).into();
-            }
-            if !is_all_restricted(&trading_access) {
-                return Err(SeriesError::SocialMarketMustBeRestricted).into();
-            }
             if let Err(e) = check_social_rate_limits(&caller, now) {
                 return Err(e).into();
             }
