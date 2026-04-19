@@ -7,6 +7,11 @@ use candid::Principal;
 use ic_cdk::export_candid;
 use ic_cdk_macros::{post_upgrade, pre_upgrade};
 pub use shared::types::{
+    engine::{
+        Engine, EngineError, EngineId, EngineResult, EngineRole, GrantEngineRoleParams,
+        RegisterEngineParams, RegisterEngineResult, RevokeEngineRoleParams, RoleGrant,
+        UpdateEngineAdminsParams, UpdateEngineAllowedRolesParams, UpdateEngineParams,
+    },
     groups::{
         CreateGroupParams, CreateGroupResult, Group, GroupError, GroupId, GroupResult,
         UpdateGroupAdminsParams, UpdateGroupMembersParams, UpdateGroupParams,
@@ -17,8 +22,8 @@ pub use shared::types::{
         UpdateOracleMetadataParams,
     },
     series::{
-        AddSeriesParams, AddSeriesResult, ListSeriesParams, PaginationParams, Series, SeriesError,
-        SeriesId, SeriesPage,
+        AddSeriesParams, AddSeriesResult, ForkSeriesParams, ListSeriesParams, PaginationParams,
+        Series, SeriesError, SeriesId, SeriesPage, SocialLimits,
     },
     TradingAccess,
 };

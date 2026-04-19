@@ -17,10 +17,14 @@ use clearing::{
 };
 use icrc_ledger_types::icrc2::approve::ApproveArgs;
 use shared::types::{
+    engine::{
+        EngineId, EngineResult, EngineRole, GrantEngineRoleParams, RegisterEngineParams,
+        RegisterEngineResult,
+    },
     evm::NativeEvmAsset,
-    series::{AddSeriesParams, AddSeriesResult},
+    series::{AddSeriesParams, AddSeriesResult, ForkSeriesParams},
     Asset, AssetMetrics, BalanceDomain, CollateralAssetConfig, DecimalValue, Description,
-    PayoffType, PayoutUnit, Price, SeriesId,
+    PayoffType, PayoutUnit, Price, SeriesId, TradingAccess,
 };
 
 use super::{
@@ -75,6 +79,15 @@ pub trait TradeHelperTrait {
         qty: i128,
         price_value: u128,
     ) -> SubmitMatchedTradeResult;
+    fn register_engine(&self, name: &str, allowed_roles: Vec<EngineRole>) -> EngineId;
+    fn grant_engine_role(&self, engine_id: &EngineId, principal: Principal, role: EngineRole);
+    fn fork_binary_series(
+        &self,
+        caller: Principal,
+        source_id: &SeriesId,
+        trading_access: Vec<TradingAccess>,
+        engine_id: Option<EngineId>,
+    ) -> AddSeriesResult;
 }
 
 impl TradeHelperTrait for TestSetup {
@@ -210,6 +223,7 @@ impl TradeHelperTrait for TestSetup {
             icon_url: None,
             banner_url: None,
             trading_access: vec![],
+            engine_id: None,
         };
 
         let res_bytes = self
@@ -357,5 +371,77 @@ impl TradeHelperTrait for TestSetup {
                 },),
             )
             .unwrap()
+    }
+
+    fn register_engine(&self, name: &str, allowed_roles: Vec<EngineRole>) -> EngineId {
+        let res: RegisterEngineResult = self
+            .registry
+            .update(
+                self.controller,
+                "register_engine",
+                (RegisterEngineParams {
+                    name: name.to_owned(),
+                    description: None,
+                    icon_url: None,
+                    admins: vec![self.controller],
+                    allowed_roles,
+                },),
+            )
+            .unwrap();
+
+        match res {
+            RegisterEngineResult::Ok(id) => id,
+            RegisterEngineResult::Err(e) => panic!("register_engine failed: {e:?}"),
+        }
+    }
+
+    fn grant_engine_role(&self, engine_id: &EngineId, principal: Principal, role: EngineRole) {
+        let res: EngineResult = self
+            .registry
+            .update(
+                self.controller,
+                "grant_engine_role",
+                (GrantEngineRoleParams {
+                    engine_id: engine_id.clone(),
+                    principal,
+                    role,
+                },),
+            )
+            .unwrap();
+
+        match res {
+            EngineResult::Ok => {}
+            EngineResult::Err(e) => {
+                panic!("grant_engine_role failed: {e:?}")
+            }
+        }
+    }
+
+    fn fork_binary_series(
+        &self,
+        caller: Principal,
+        source_id: &SeriesId,
+        trading_access: Vec<TradingAccess>,
+        engine_id: Option<EngineId>,
+    ) -> AddSeriesResult {
+        let fork_params = ForkSeriesParams {
+            source_series_id: source_id.clone(),
+            title: None,
+            description: None,
+            trading_access,
+            engine_id,
+        };
+
+        let res_bytes = self
+            .pic
+            .update_call(
+                self.registry.canister_id(),
+                caller,
+                "fork_series",
+                encode_one(fork_params).unwrap(),
+            )
+            .expect("Registry fork_series call failed");
+
+        decode_one(&res_bytes).unwrap_or_else(|_| panic!("Failed to decode fork_series result"))
     }
 }

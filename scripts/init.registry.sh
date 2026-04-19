@@ -10,11 +10,32 @@ echo "Initializing ICDC Registry on network: $NETWORK"
 echo "Registry: $REGISTRY_CANISTER"
 echo "Principal: $PRINCIPAL"
 
-# 1. Add authorized creators
-echo "Authorizing principal as series creator..."
-dfx canister call registry add_authorized_creators "(vec { principal \"$PRINCIPAL\" })" --network "$NETWORK" >/dev/null
+# 1. Register default engine with Creator + OracleAdmin roles
+echo "Registering default engine..."
+REGISTER_RESULT=$(dfx canister call registry register_engine "(record {
+    name = \"Default\";
+    description = null;
+    icon_url = null;
+    admins = vec { principal \"$PRINCIPAL\" };
+    allowed_roles = vec { variant { Creator }; variant { OracleAdmin } }
+})" --network "$NETWORK")
 
-# 2. Add Oracle
+ENGINE_ID=$(echo "$REGISTER_RESULT" | grep -Eo '"[^"]*"' | head -1 | tr -d '"')
+if [ -z "$ENGINE_ID" ]; then
+  echo "ERROR: Failed to register engine. Response: $REGISTER_RESULT"
+  exit 1
+fi
+echo "Registered engine: $ENGINE_ID"
+
+# 2. Grant Creator role to deploying principal
+echo "Granting Creator role..."
+dfx canister call registry grant_engine_role "(record {
+    engine_id = \"$ENGINE_ID\";
+    principal = principal \"$PRINCIPAL\";
+    role = variant { Creator }
+})" --network "$NETWORK" >/dev/null
+
+# 3. Add Oracle
 echo "Adding TRADE_ORACLE..."
 # Ignore "OracleAlreadyExists"
 dfx canister call registry add_oracle "(record { 
