@@ -31,6 +31,14 @@ pub const MAX_REWARD_DESCRIPTION_LEN: usize = 1024;
 /// Maximum length of a URL (icon/banner) in characters.
 pub const MAX_ICON_URL_LEN: usize = 256;
 
+/// Default maximum number of social markets a single user may create per hour.
+pub const DEFAULT_SOCIAL_MAX_PER_HOUR: u64 = 1_000;
+/// Default maximum total social markets a single user may create (lifetime).
+pub const DEFAULT_SOCIAL_MAX_PER_USER: u64 = 50;
+
+/// Maximum number of forks a single user may create from the same source series.
+pub const MAX_FORKS_PER_SOURCE_PER_USER: u64 = 100;
+
 /// Default insurance fund fee ratio in basis points (10 bps = 0.1%).
 pub const DEFAULT_INSURANCE_FEE_RATIO: u16 = 10;
 /// Default protocol fee ratio in basis points (5 bps = 0.05%).

@@ -470,6 +470,8 @@ mod tests {
             icon_url: None,
             banner_url: None,
             trading_access: vec![],
+            engine_id: None,
+            forked_from: None,
         };
 
         // Settlement price 200 → Call payoff = 200 - 100 = 100 USD per unit.
@@ -556,6 +558,8 @@ mod tests {
             icon_url: None,
             banner_url: None,
             trading_access: vec![],
+            engine_id: None,
+            forked_from: None,
         };
 
         let settlement_price = Price::new(150, 0); // payoff 50 per unit
@@ -864,6 +868,8 @@ mod tests {
             banner_url: None,
             balance_domain: BalanceDomain::Settlement,
             trading_access: vec![],
+            engine_id: None,
+            forked_from: None,
         };
 
         // Settlement price 200 → gross payoff = 200 - 100 = 100 USD (4-decimal units)

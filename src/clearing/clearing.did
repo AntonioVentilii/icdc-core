@@ -505,6 +505,9 @@ type Series = record {
 	creator : principal;
 	// The mathematical payoff model used for this series.
 	payoff_type : PayoffType;
+	// The Engine that created this series, if any.
+	// `None` for series created directly by a canister controller.
+	engine_id : opt text;
 	// The unit in which the contract payoff is expressed.
 	payout_unit : PayoutUnit;
 	// Expiry timestamp in nanoseconds since UNIX epoch.
@@ -538,7 +541,9 @@ type Series = record {
 	// The domain this market belongs to (e.g. Playground, Settlement).
 	balance_domain : BalanceDomain;
 	// The identifier of the oracle providing the settlement data.
-	oracle_source : text
+	oracle_source : text;
+	// If this series was forked from another, the source series ID.
+	forked_from : opt text
 };
 // Input parameters for initiating a series settlement.
 type SettleSeriesParams = record {

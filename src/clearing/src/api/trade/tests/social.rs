@@ -40,6 +40,8 @@ fn social_trade_scenario() {
         banner_url: None,
         balance_domain: BalanceDomain::Social,
         trading_access: vec![],
+        engine_id: None,
+        forked_from: None,
     };
 
     // SETUP: Users have ZERO balance

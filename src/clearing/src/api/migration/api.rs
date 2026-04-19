@@ -304,6 +304,8 @@ mod tests {
             banner_url: None,
             balance_domain: domain,
             trading_access: vec![],
+            engine_id: None,
+            forked_from: None,
         };
         SERIES.with(|s| s.borrow_mut().insert(series_id.clone(), series));
     }
