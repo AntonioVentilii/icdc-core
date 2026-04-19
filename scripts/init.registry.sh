@@ -20,7 +20,7 @@ REGISTER_RESULT=$(dfx canister call registry register_engine "(record {
     allowed_roles = vec { variant { Creator }; variant { OracleAdmin } }
 })" --network "$NETWORK")
 
-ENGINE_ID=$(echo "$REGISTER_RESULT" | grep -oP '"[^"]*"' | head -1 | tr -d '"')
+ENGINE_ID=$(echo "$REGISTER_RESULT" | grep -Eo '"[^"]*"' | head -1 | tr -d '"')
 if [ -z "$ENGINE_ID" ]; then
   echo "ERROR: Failed to register engine. Response: $REGISTER_RESULT"
   exit 1
