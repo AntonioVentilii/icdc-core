@@ -33,19 +33,19 @@ jobs:
         run: npm run build
 
       - name: Upload clearing.wasm.gz
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: clearing.wasm.gz
           path: ./target/wasm32-unknown-unknown/release/clearing.wasm.gz
 
       - name: Upload registry.wasm.gz
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: registry.wasm.gz
           path: ./target/wasm32-unknown-unknown/release/registry.wasm.gz
 
       - name: Upload minter.wasm.gz
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: minter.wasm.gz
           path: ./target/wasm32-unknown-unknown/release/minter.wasm.gz
@@ -56,25 +56,25 @@ jobs:
           gzip -c target/ic/index.wasm > target/ic/index.wasm.gz
 
       - name: Upload ledger.wasm.gz
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: ledger.wasm.gz
           path: ./target/ic/ledger.wasm.gz
 
       - name: Upload index.wasm.gz
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: index.wasm.gz
           path: ./target/ic/index.wasm.gz
 
       - name: Upload ledger.did
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: ledger.did
           path: ./target/ic/ledger.did
 
       - name: Upload index.did
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: index.did
           path: ./target/ic/index.did
@@ -104,7 +104,7 @@ jobs:
           persist-credentials: false
 
       - name: 'Upload ${{ matrix.name }}'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: ${{ matrix.name }}
           path: ./src/${{ matrix.target }}/${{ matrix.name }}
