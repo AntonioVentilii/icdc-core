@@ -1,6 +1,6 @@
 use candid::Principal;
 use ic_cdk::api::{is_controller, msg_caller};
-use shared::types::EngineRole;
+use shared::types::{EngineId, EngineRole};
 
 use crate::memory::ENGINE_STORE;
 
@@ -29,6 +29,19 @@ pub fn caller_is_controller() -> Result<(), String> {
 pub fn has_engine_role(principal: &Principal, role: &EngineRole) -> bool {
     ENGINE_STORE.with(|store| {
         store.borrow().values().any(|engine| {
+            engine
+                .role_grants
+                .iter()
+                .any(|grant| &grant.principal == principal && &grant.role == role)
+        })
+    })
+}
+
+/// Returns `true` if the principal holds the given role on a **specific** Engine.
+#[must_use]
+pub fn has_engine_role_on(principal: &Principal, role: &EngineRole, engine_id: &EngineId) -> bool {
+    ENGINE_STORE.with(|store| {
+        store.borrow().get(engine_id).is_some_and(|engine| {
             engine
                 .role_grants
                 .iter()

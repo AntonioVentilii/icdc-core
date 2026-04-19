@@ -86,6 +86,7 @@ pub trait TradeHelperTrait {
         caller: Principal,
         source_id: &SeriesId,
         trading_access: Vec<TradingAccess>,
+        engine_id: Option<EngineId>,
     ) -> AddSeriesResult;
 }
 
@@ -222,6 +223,7 @@ impl TradeHelperTrait for TestSetup {
             icon_url: None,
             banner_url: None,
             trading_access: vec![],
+            engine_id: None,
         };
 
         let res_bytes = self
@@ -420,12 +422,14 @@ impl TradeHelperTrait for TestSetup {
         caller: Principal,
         source_id: &SeriesId,
         trading_access: Vec<TradingAccess>,
+        engine_id: Option<EngineId>,
     ) -> AddSeriesResult {
         let fork_params = ForkSeriesParams {
             source_series_id: source_id.clone(),
             title: None,
             description: None,
             trading_access,
+            engine_id,
         };
 
         let res_bytes = self

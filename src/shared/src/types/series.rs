@@ -284,6 +284,10 @@ pub enum SeriesError {
     ForkMustBeRestricted,
     /// The caller has reached the maximum number of forks for this source series.
     ForkLimitReached,
+    /// The specified Engine does not exist or the caller does not hold the required role on it.
+    EngineRoleNotHeld,
+    /// Non-controller callers must specify an `engine_id` for non-social markets.
+    EngineIdRequired,
 }
 
 /// Input parameters for registering a new derivative series.
@@ -325,6 +329,10 @@ pub struct AddSeriesParams {
     /// If the caller passes an empty list, `add_series` will fill it with `[Open]`.
     /// Policies can be updated after creation via `update_trading_access`.
     pub trading_access: Vec<TradingAccess>,
+    /// The Engine on whose behalf this series is created.
+    /// Controllers may omit this (`None`). Non-controller callers must provide
+    /// a valid `EngineId` on which they hold the `Creator` role.
+    pub engine_id: Option<EngineId>,
 }
 
 /// Input parameters for forking (cloning) an existing series into a restricted circle.
@@ -342,6 +350,10 @@ pub struct ForkSeriesParams {
     pub description: Option<Description>,
     /// Trading access policies for the forked series. Must be `Restricted`.
     pub trading_access: Vec<TradingAccess>,
+    /// The Engine on whose behalf this fork is created.
+    /// Controllers may omit this (`None`). Non-controller callers must provide
+    /// a valid `EngineId` on which they hold the `Creator` role.
+    pub engine_id: Option<EngineId>,
 }
 
 /// Parameters for paginating results.

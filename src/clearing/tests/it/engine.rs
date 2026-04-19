@@ -1,11 +1,12 @@
 use candid::{decode_one, encode_one, Principal};
 use shared::types::{
     engine::{
-        Engine, EngineError, EngineResult, EngineRole, GrantEngineRoleParams, RegisterEngineParams,
-        RegisterEngineResult, RevokeEngineRoleParams, UpdateEngineAdminsParams, UpdateEngineParams,
+        Engine, EngineError, EngineId, EngineResult, EngineRole, GrantEngineRoleParams,
+        RegisterEngineParams, RegisterEngineResult, RevokeEngineRoleParams,
+        UpdateEngineAdminsParams, UpdateEngineParams,
     },
     series::{AddSeriesParams, AddSeriesResult, SeriesError},
-    BalanceDomain, Description, PayoffType, PayoutUnit,
+    BalanceDomain, Description, PayoffType, PayoutUnit, Series,
 };
 
 use crate::utils::{
@@ -14,7 +15,11 @@ use crate::utils::{
     trade_helper::TradeHelperTrait as _,
 };
 
-fn add_series_as(setup: &TestSetup, caller: Principal) -> AddSeriesResult {
+fn add_series_as(
+    setup: &TestSetup,
+    caller: Principal,
+    engine_id: Option<EngineId>,
+) -> AddSeriesResult {
     let params = AddSeriesParams {
         underlying: "ETH".to_owned(),
         balance_domain: BalanceDomain::Settlement,
@@ -30,6 +35,7 @@ fn add_series_as(setup: &TestSetup, caller: Principal) -> AddSeriesResult {
         icon_url: None,
         banner_url: None,
         trading_access: vec![],
+        engine_id,
     };
 
     let res_bytes = setup
@@ -58,7 +64,7 @@ fn engine_lifecycle_register_grant_create() {
     setup.grant_engine_role(&engine_id, creator_principal, EngineRole::Creator);
     setup.pic.tick();
 
-    let res = add_series_as(&setup, creator_principal);
+    let res = add_series_as(&setup, creator_principal, Some(engine_id));
     assert!(
         matches!(res, AddSeriesResult::Ok(_)),
         "Engine creator should be able to create series"
@@ -70,10 +76,10 @@ fn non_engine_user_rejected() {
     let setup = TestSetup::default();
     let random_user = test_user(61);
 
-    let res = add_series_as(&setup, random_user);
+    let res = add_series_as(&setup, random_user, None);
     assert!(
-        matches!(res, AddSeriesResult::Err(SeriesError::Unauthorized)),
-        "Non-engine user should be rejected"
+        matches!(res, AddSeriesResult::Err(SeriesError::EngineIdRequired)),
+        "Non-controller without engine_id should be rejected"
     );
 }
 
@@ -131,7 +137,7 @@ fn engine_admin_can_grant_roles() {
             admin,
             "grant_engine_role",
             (GrantEngineRoleParams {
-                engine_id,
+                engine_id: engine_id.clone(),
                 principal: creator,
                 role: EngineRole::Creator,
             },),
@@ -140,7 +146,7 @@ fn engine_admin_can_grant_roles() {
     assert!(matches!(res, EngineResult::Ok));
     setup.pic.tick();
 
-    let res = add_series_as(&setup, creator);
+    let res = add_series_as(&setup, creator, Some(engine_id));
     assert!(
         matches!(res, AddSeriesResult::Ok(_)),
         "Creator granted by admin should work"
@@ -156,7 +162,7 @@ fn revoke_role_removes_access() {
     setup.grant_engine_role(&engine_id, creator, EngineRole::Creator);
     setup.pic.tick();
 
-    let r1 = add_series_as(&setup, creator);
+    let r1 = add_series_as(&setup, creator, Some(engine_id.clone()));
     assert!(matches!(r1, AddSeriesResult::Ok(_)));
 
     let res: EngineResult = setup
@@ -165,7 +171,7 @@ fn revoke_role_removes_access() {
             setup.controller,
             "revoke_engine_role",
             (RevokeEngineRoleParams {
-                engine_id,
+                engine_id: engine_id.clone(),
                 principal: creator,
                 role: EngineRole::Creator,
             },),
@@ -174,9 +180,9 @@ fn revoke_role_removes_access() {
     assert!(matches!(res, EngineResult::Ok));
     setup.pic.tick();
 
-    let r2 = add_series_as(&setup, creator);
+    let r2 = add_series_as(&setup, creator, Some(engine_id));
     assert!(
-        matches!(r2, AddSeriesResult::Err(SeriesError::Unauthorized)),
+        matches!(r2, AddSeriesResult::Err(SeriesError::EngineRoleNotHeld)),
         "Revoked user should be rejected"
     );
 }
@@ -388,5 +394,65 @@ fn non_admin_cannot_grant_role() {
     assert!(
         matches!(res, EngineResult::Err(EngineError::Unauthorized)),
         "Non-admin should not be able to grant roles"
+    );
+}
+
+#[test]
+fn engine_creator_with_correct_engine_id_creates_series() {
+    let setup = TestSetup::default();
+    let creator = test_user(90);
+
+    let engine_id = setup.register_engine("EID Engine", vec![EngineRole::Creator]);
+    setup.grant_engine_role(&engine_id, creator, EngineRole::Creator);
+    setup.pic.tick();
+
+    let res = add_series_as(&setup, creator, Some(engine_id.clone()));
+    let AddSeriesResult::Ok(series_id) = res else {
+        panic!("Creator with correct engine_id should succeed");
+    };
+
+    let series: Option<Series> = setup
+        .registry
+        .query(setup.controller, "get_series", (series_id,))
+        .unwrap();
+
+    let series = series.expect("Series should exist");
+    assert_eq!(
+        series.engine_id,
+        Some(engine_id),
+        "Series should carry the engine_id it was created with"
+    );
+}
+
+#[test]
+fn engine_creator_with_wrong_engine_id_rejected() {
+    let setup = TestSetup::default();
+    let creator = test_user(91);
+
+    let engine_a = setup.register_engine("Engine A", vec![EngineRole::Creator]);
+    let engine_b = setup.register_engine("Engine B", vec![EngineRole::Creator]);
+    setup.grant_engine_role(&engine_a, creator, EngineRole::Creator);
+    setup.pic.tick();
+
+    let res = add_series_as(&setup, creator, Some(engine_b));
+    assert!(
+        matches!(res, AddSeriesResult::Err(SeriesError::EngineRoleNotHeld)),
+        "Creator on engine A should be rejected for engine B"
+    );
+}
+
+#[test]
+fn non_controller_without_engine_id_rejected_for_non_social() {
+    let setup = TestSetup::default();
+    let creator = test_user(92);
+
+    let engine_id = setup.register_engine("No EID Engine", vec![EngineRole::Creator]);
+    setup.grant_engine_role(&engine_id, creator, EngineRole::Creator);
+    setup.pic.tick();
+
+    let res = add_series_as(&setup, creator, None);
+    assert!(
+        matches!(res, AddSeriesResult::Err(SeriesError::EngineIdRequired)),
+        "Non-controller without engine_id should be rejected for non-social market"
     );
 }

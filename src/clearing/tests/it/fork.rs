@@ -24,7 +24,7 @@ fn fork_series_creates_distinct_restricted_series() {
         groups: vec![group],
     }];
 
-    let fork_res = setup.fork_binary_series(setup.controller, &source_id, trading_access);
+    let fork_res = setup.fork_binary_series(setup.controller, &source_id, trading_access, None);
 
     let fork_id = match fork_res {
         AddSeriesResult::Ok(id) => id,
@@ -63,7 +63,7 @@ fn engine_creator_can_fork() {
         groups: vec![group],
     }];
 
-    let fork_res = setup.fork_binary_series(creator, &source_id, trading_access);
+    let fork_res = setup.fork_binary_series(creator, &source_id, trading_access, Some(engine_id));
     assert!(
         matches!(fork_res, AddSeriesResult::Ok(_)),
         "Engine creator should be able to fork"
@@ -83,10 +83,13 @@ fn non_creator_cannot_fork() {
         groups: vec![group],
     }];
 
-    let fork_res = setup.fork_binary_series(random_user, &source_id, trading_access);
+    let fork_res = setup.fork_binary_series(random_user, &source_id, trading_access, None);
     assert!(
-        matches!(fork_res, AddSeriesResult::Err(SeriesError::Unauthorized)),
-        "Non-creator should be rejected"
+        matches!(
+            fork_res,
+            AddSeriesResult::Err(SeriesError::EngineIdRequired)
+        ),
+        "Non-controller without engine_id should be rejected"
     );
 }
 
@@ -102,6 +105,7 @@ fn fork_must_be_restricted() {
         title: None,
         description: None,
         trading_access: vec![TradingAccess::Open],
+        engine_id: None,
     };
 
     let res_bytes = setup
@@ -132,6 +136,7 @@ fn fork_nonexistent_source() {
         trading_access: vec![TradingAccess::Restricted {
             groups: vec![GroupId::from("grp_1".to_owned())],
         }],
+        engine_id: None,
     };
 
     let res_bytes = setup
@@ -165,13 +170,13 @@ fn multiple_forks_from_same_source_produce_unique_ids() {
         }]
     };
 
-    let fork1 = setup.fork_binary_series(setup.controller, &source_id, access());
+    let fork1 = setup.fork_binary_series(setup.controller, &source_id, access(), None);
     let AddSeriesResult::Ok(fork1_id) = fork1 else {
         panic!("Fork 1 failed");
     };
     setup.pic.tick();
 
-    let fork2 = setup.fork_binary_series(setup.controller, &source_id, access());
+    let fork2 = setup.fork_binary_series(setup.controller, &source_id, access(), None);
     let AddSeriesResult::Ok(fork2_id) = fork2 else {
         panic!("Fork 2 failed");
     };
@@ -193,6 +198,7 @@ fn fork_empty_trading_access_rejected() {
         title: None,
         description: None,
         trading_access: vec![],
+        engine_id: None,
     };
 
     let res_bytes = setup
@@ -223,6 +229,7 @@ fn fork_mixed_open_and_restricted_rejected() {
         source_series_id: source_id,
         title: None,
         description: None,
+        engine_id: None,
         trading_access: vec![
             TradingAccess::Open,
             TradingAccess::Restricted {
@@ -262,6 +269,7 @@ fn fork_title_too_long_rejected() {
         trading_access: vec![TradingAccess::Restricted {
             groups: vec![GroupId::from("grp_title".to_owned())],
         }],
+        engine_id: None,
     };
 
     let res_bytes = setup
@@ -295,6 +303,7 @@ fn fork_description_too_long_rejected() {
         trading_access: vec![TradingAccess::Restricted {
             groups: vec![GroupId::from("grp_desc".to_owned())],
         }],
+        engine_id: None,
     };
 
     let res_bytes = setup
@@ -311,5 +320,101 @@ fn fork_description_too_long_rejected() {
     assert!(
         matches!(res, AddSeriesResult::Err(SeriesError::DescriptionTooLong)),
         "Fork with description > 1024 chars should be rejected"
+    );
+}
+
+#[test]
+fn fork_with_engine_id_propagates_to_series() {
+    let setup = TestSetup::default();
+    let creator = test_user(80);
+
+    let engine_id = setup.register_engine("Fork EID Engine", vec![EngineRole::Creator]);
+    setup.grant_engine_role(&engine_id, creator, EngineRole::Creator);
+    setup.pic.tick();
+
+    let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
+    setup.pic.tick();
+
+    let fork_res = setup.fork_binary_series(
+        creator,
+        &source_id,
+        vec![TradingAccess::Restricted {
+            groups: vec![GroupId::from("grp_eid".to_owned())],
+        }],
+        Some(engine_id.clone()),
+    );
+    let AddSeriesResult::Ok(fork_id) = fork_res else {
+        panic!("Fork with engine_id should succeed");
+    };
+
+    let forked: Option<Series> = setup
+        .registry
+        .query(setup.controller, "get_series", (fork_id,))
+        .unwrap();
+
+    let forked = forked.expect("Forked series should exist");
+    assert_eq!(
+        forked.engine_id,
+        Some(engine_id),
+        "Forked series should carry the engine_id"
+    );
+}
+
+#[test]
+fn fork_with_wrong_engine_id_rejected() {
+    let setup = TestSetup::default();
+    let creator = test_user(81);
+
+    let engine_a = setup.register_engine("Fork Eng A", vec![EngineRole::Creator]);
+    let engine_b = setup.register_engine("Fork Eng B", vec![EngineRole::Creator]);
+    setup.grant_engine_role(&engine_a, creator, EngineRole::Creator);
+    setup.pic.tick();
+
+    let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
+    setup.pic.tick();
+
+    let fork_res = setup.fork_binary_series(
+        creator,
+        &source_id,
+        vec![TradingAccess::Restricted {
+            groups: vec![GroupId::from("grp_wrong".to_owned())],
+        }],
+        Some(engine_b),
+    );
+    assert!(
+        matches!(
+            fork_res,
+            AddSeriesResult::Err(SeriesError::EngineRoleNotHeld)
+        ),
+        "Fork with wrong engine_id should be rejected"
+    );
+}
+
+#[test]
+fn fork_non_controller_without_engine_id_rejected() {
+    let setup = TestSetup::default();
+    let creator = test_user(82);
+
+    let engine_id = setup.register_engine("Fork No EID", vec![EngineRole::Creator]);
+    setup.grant_engine_role(&engine_id, creator, EngineRole::Creator);
+    setup.pic.tick();
+
+    let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
+    setup.pic.tick();
+
+    let fork_res = setup.fork_binary_series(
+        creator,
+        &source_id,
+        vec![TradingAccess::Restricted {
+            groups: vec![GroupId::from("grp_noeid".to_owned())],
+        }],
+        None,
+    );
+    assert!(
+        matches!(
+            fork_res,
+            AddSeriesResult::Err(SeriesError::EngineIdRequired)
+        ),
+        "Non-controller without engine_id should be rejected"
     );
 }

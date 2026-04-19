@@ -25,7 +25,7 @@ flowchart TD
 
     subgraph registry [Registry Canister]
         EngineStore["ENGINE_STORE"]
-        Guards["is_engine_creator / is_engine_oracle_admin"]
+        Guards["has_engine_role_on / is_engine_oracle_admin"]
         SeriesAPI["add_series / fork_series"]
         OracleAPI["add_oracle / manage_oracle_principals"]
     end
@@ -67,8 +67,8 @@ Authorization is checked from most privileged to least:
 
 1. **Controller** -- can do everything, including registering Engines and setting `allowed_roles`.
 2. **Engine Admin** -- can grant/revoke roles within their Engine (subject to `allowed_roles`), manage other admins, and update Engine metadata.
-3. **Engine Creator** -- can create series (`add_series`) and fork series (`fork_series`). Cannot manage oracles.
-4. **Engine OracleAdmin** -- can register oracles (`add_oracle`) and manage oracle metadata and principals.
+3. **Engine Creator** -- can create series (`add_series`) and fork series (`fork_series`). Must specify the `engine_id` they hold the `Creator` role on. Cannot manage oracles.
+4. **Engine `OracleAdmin`** -- can register oracles (`add_oracle`) and manage oracle metadata and principals **registry-wide** (see [Design Note: `OracleAdmin` scope](#design-note-oracleadmin-scope)).
 5. **Any authenticated user** -- can create social (non-monetary) markets with `Restricted` trading access, subject to rate limits.
 
 ## Data Model
@@ -126,6 +126,16 @@ When a controller registers an Engine, they specify which roles the Engine's adm
 
 This prevents privilege escalation: an Engine cannot grant roles beyond what the controller explicitly permits.
 
+## Design Note: `OracleAdmin` scope
+
+The `OracleAdmin` role grants **registry-wide** oracle management, not management scoped to a specific Engine.
+
+**Rationale**: Oracles are shared infrastructure consumed by series across multiple Engines. A single oracle (e.g., "Chainlink ETH/USD") may serve series created by many different Engines, so scoping oracle management per-engine would create unnecessary fragmentation and operational overhead.
+
+**Current behaviour**: Any principal holding `OracleAdmin` on _any_ Engine can call `add_oracle`, `update_oracle_metadata`, and `manage_oracle_principals` for _any_ oracle in the registry.
+
+**Future extensibility**: If per-engine oracle ownership is needed (e.g., an Engine wants exclusive control over its custom oracle), the `Oracle` struct can be extended with an optional `engine_id` field. This would allow `OracleAdmin` holders to be restricted to managing only oracles owned by their Engine, while leaving `engine_id: None` oracles as globally managed.
+
 ## Fork Series
 
 The `fork_series` endpoint creates a copy of an existing series with a distinct ID and a `forked_from` reference:
@@ -135,8 +145,8 @@ sequenceDiagram
     participant Creator
     participant Registry
 
-    Creator->>Registry: fork_series(source_id, trading_access)
-    Registry->>Registry: Verify caller is Controller or Engine Creator
+    Creator->>Registry: fork_series(source_id, trading_access, engine_id)
+    Registry->>Registry: Verify caller is Controller or holds Creator on engine_id
     Registry->>Registry: Verify trading_access is all Restricted
     Registry->>Registry: Read source series
     Registry->>Registry: Count existing forks by this caller for this source
@@ -184,7 +194,16 @@ No manual intervention is needed. Existing series remain unchanged; new fields (
 
 ## Series Fields
 
-Two new optional fields on `Series`:
+Two optional fields on `Series`:
 
-- `engine_id: Option<EngineId>` -- the Engine that created this series (currently always `None`; reserved for future per-engine attribution).
+- `engine_id: Option<EngineId>` -- the Engine on whose behalf this series was created. Populated when the caller supplies `engine_id` in `AddSeriesParams` or `ForkSeriesParams`. Controllers may omit it; non-controller Engine Creators must provide it.
 - `forked_from: Option<SeriesId>` -- if this series was forked, the source series ID.
+
+### `engine_id` authorization flow
+
+| Caller type    | `engine_id` param | Result                                                             |
+| -------------- | ----------------- | ------------------------------------------------------------------ |
+| Controller     | `None`            | Allowed, series has `engine_id: None`                              |
+| Controller     | `Some(id)`        | Allowed, series has `engine_id: Some(id)`                          |
+| Non-controller | `Some(id)`        | Verified: caller must hold `Creator` on that Engine                |
+| Non-controller | `None`            | Rejected with `EngineIdRequired` (unless creating a social market) |

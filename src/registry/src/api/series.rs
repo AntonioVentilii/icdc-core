@@ -1,7 +1,7 @@
 use core::ops::Bound;
 
 use candid::Principal;
-use ic_cdk::api::{msg_caller, time};
+use ic_cdk::api::{is_controller, msg_caller, time};
 use ic_cdk_macros::{query, update};
 use shared::{
     constants::{
@@ -12,12 +12,13 @@ use shared::{
             AddSeriesParams, AddSeriesResult, ForkSeriesParams, ListSeriesParams, PaginationParams,
             Series, SeriesError, SeriesPage,
         },
-        BalanceDomain, NonMonetaryUnit, PayoutUnit, SeriesId, SeriesIdParams, TradingAccess,
+        BalanceDomain, EngineRole, NonMonetaryUnit, PayoutUnit, SeriesId, SeriesIdParams,
+        TradingAccess,
     },
 };
 
 use crate::{
-    guards::{caller_is_not_anonymous, is_engine_creator},
+    guards::{caller_is_not_anonymous, has_engine_role_on},
     memory::{SERIES_STORE, SOCIAL_CREATION_LOG, SOCIAL_LIMITS},
     utils::canonical_id_part,
 };
@@ -42,23 +43,31 @@ fn is_all_restricted(trading_access: &[TradingAccess]) -> bool {
 ///
 /// Authorization is tiered:
 ///
-/// 1. **Creators** (controllers + Engine `Creator` role holders): may create any series.
-/// 2. **Any authenticated user**: may create **social** markets (`BalanceDomain::Social` +
+/// 1. **Controllers**: may create any series with or without `engine_id`.
+/// 2. **Engine Creators**: must provide `engine_id` referencing an Engine where they hold the
+///    `Creator` role.
+/// 3. **Any authenticated user**: may create **social** markets (`BalanceDomain::Social` +
 ///    `NonMonetary` payout) with `Restricted` trading access, subject to per-user rate limits.
 #[update(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn add_series(params: AddSeriesParams) -> AddSeriesResult {
     let caller = msg_caller();
+    let caller_is_ctrl = is_controller(&caller);
 
     let is_social_market = params.balance_domain == BalanceDomain::Social
         && matches!(params.payout_unit, PayoutUnit::NonMonetary(_));
 
-    let tier = if is_engine_creator(&caller) {
+    let tier = if caller_is_ctrl {
+        CreationTier::Creator
+    } else if let Some(ref eid) = params.engine_id {
+        if !has_engine_role_on(&caller, &EngineRole::Creator, eid) {
+            return Err(SeriesError::EngineRoleNotHeld).into();
+        }
         CreationTier::Creator
     } else if is_social_market {
         CreationTier::Social
     } else {
-        return Err(SeriesError::Unauthorized).into();
+        return Err(SeriesError::EngineIdRequired).into();
     };
 
     add_series_impl(params, caller, time(), &tier)
@@ -88,6 +97,7 @@ fn add_series_impl(
         icon_url,
         banner_url,
         trading_access,
+        engine_id,
     } = params;
 
     // --- Tier-specific validation ---
@@ -171,7 +181,7 @@ fn add_series_impl(
         icon_url,
         banner_url,
         trading_access,
-        engine_id: None,
+        engine_id,
         forked_from: None,
     };
 
@@ -199,15 +209,24 @@ fn add_series_impl(
 /// The forked series inherits all defining parameters from the source but gets a
 /// distinct ID and carries a `forked_from` reference back to the original.
 ///
-/// Only controllers and Engine Creators may fork series.
+/// Controllers may fork without `engine_id`. Non-controller callers must provide
+/// an `engine_id` on which they hold the `Creator` role.
 #[update(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn fork_series(params: ForkSeriesParams) -> AddSeriesResult {
     let caller = msg_caller();
     let now = time();
+    let caller_is_ctrl = is_controller(&caller);
 
-    if !is_engine_creator(&caller) {
-        return Err(SeriesError::Unauthorized).into();
+    if !caller_is_ctrl {
+        match params.engine_id {
+            Some(ref eid) => {
+                if !has_engine_role_on(&caller, &EngineRole::Creator, eid) {
+                    return Err(SeriesError::EngineRoleNotHeld).into();
+                }
+            }
+            None => return Err(SeriesError::EngineIdRequired).into(),
+        }
     }
 
     if !is_all_restricted(&params.trading_access) {
@@ -287,7 +306,7 @@ fn fork_series_impl(params: ForkSeriesParams, caller: Principal, now: u64) -> Ad
                 icon_url: source.icon_url,
                 banner_url: source.banner_url,
                 trading_access: params.trading_access,
-                engine_id: None,
+                engine_id: params.engine_id,
                 forked_from: Some(source.series_id),
             };
 
@@ -414,6 +433,7 @@ mod tests {
             icon_url: None,
             banner_url: None,
             trading_access: vec![],
+            engine_id: None,
         }
     }
 
@@ -440,6 +460,7 @@ mod tests {
             trading_access: vec![TradingAccess::Restricted {
                 groups: vec![group],
             }],
+            engine_id: None,
         }
     }
 
@@ -503,6 +524,7 @@ mod tests {
             trading_access: vec![TradingAccess::Restricted {
                 groups: vec![group],
             }],
+            engine_id: None,
         };
 
         let fork_res = fork_series_impl(fork_params, caller, 2_000_000_000);
@@ -532,6 +554,7 @@ mod tests {
             trading_access: vec![TradingAccess::Restricted {
                 groups: vec![GroupId::from("grp_1".to_owned())],
             }],
+            engine_id: None,
         };
 
         let res = fork_series_impl(fork_params, caller, 1_000_000_000);
@@ -560,6 +583,7 @@ mod tests {
                 trading_access: vec![TradingAccess::Restricted {
                     groups: vec![group.clone()],
                 }],
+                engine_id: None,
             },
             caller,
             2_000_000_000,
@@ -576,6 +600,7 @@ mod tests {
                 trading_access: vec![TradingAccess::Restricted {
                     groups: vec![group],
                 }],
+                engine_id: None,
             },
             caller,
             3_000_000_000,
@@ -609,6 +634,7 @@ mod tests {
                     trading_access: vec![TradingAccess::Restricted {
                         groups: vec![group.clone()],
                     }],
+                    engine_id: None,
                 },
                 caller,
                 2_000_000_000 + i,
@@ -627,6 +653,7 @@ mod tests {
                 trading_access: vec![TradingAccess::Restricted {
                     groups: vec![group],
                 }],
+                engine_id: None,
             },
             caller,
             9_000_000_000,

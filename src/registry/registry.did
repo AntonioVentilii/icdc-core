@@ -44,7 +44,11 @@ type AddSeriesParams = record {
 	// The balance domain this series belongs to.
 	balance_domain : BalanceDomain;
 	// The price oracle identifier (case-insensitive, e.g., "Coingecko").
-	oracle_source : text
+	oracle_source : text;
+	// The Engine on whose behalf this series is created.
+	// Controllers may omit this. Non-controller callers must provide
+	// a valid EngineId on which they hold the Creator role.
+	engine_id : opt text
 };
 // The result of an [`add_series`] operation.
 type AddSeriesResult = variant {
@@ -203,7 +207,11 @@ type ForkSeriesParams = record {
 	// Optional description override. Falls back to the source series description.
 	description : opt Description;
 	// Trading access policies for the forked series. Must be `Restricted`.
-	trading_access : vec TradingAccess
+	trading_access : vec TradingAccess;
+	// The Engine on whose behalf this fork is created.
+	// Controllers may omit this. Non-controller callers must provide
+	// a valid EngineId on which they hold the Creator role.
+	engine_id : opt text
 };
 // Input parameters for granting a role within an Engine.
 //
@@ -510,7 +518,11 @@ type SeriesError = variant {
 	// The source series specified in a fork does not exist.
 	SourceSeriesNotFound;
 	// Social reward title exceeds limit.
-	RewardTitleTooLong
+	RewardTitleTooLong;
+	// The specified Engine does not exist or the caller does not hold the required role on it.
+	EngineRoleNotHeld;
+	// Non-controller callers must specify an engine_id for non-social markets.
+	EngineIdRequired
 };
 // A paginated page of registered series.
 type SeriesPage = record {

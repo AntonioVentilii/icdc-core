@@ -43,8 +43,17 @@ impl fmt::Display for EngineId {
 )]
 pub enum EngineRole {
     /// Can create series via `add_series` and fork series via `fork_series`.
+    ///
+    /// Series creation/forking requires the caller to specify the `engine_id`
+    /// on which they hold this role.
     Creator,
-    /// Can register oracles and manage their metadata and principals.
+    /// Can register oracles and manage their metadata and principals
+    /// **registry-wide** (not scoped to a specific engine).
+    ///
+    /// Oracles are shared infrastructure consumed by series across multiple
+    /// engines, so `OracleAdmin` intentionally grants global oracle management.
+    /// Engine-scoped oracle ownership can be added later by introducing an
+    /// `engine_id` field on the `Oracle` struct if needed.
     OracleAdmin,
 }
 
