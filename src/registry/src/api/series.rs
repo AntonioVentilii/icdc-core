@@ -18,6 +18,7 @@ use shared::{
 };
 
 use crate::{
+    api::groups::can_principal_see_series,
     guards::{caller_is_not_anonymous, has_engine_role_on},
     memory::{SERIES_STORE, SOCIAL_CREATION_LOG, SOCIAL_LIMITS},
     utils::canonical_id_part,
@@ -215,8 +216,16 @@ fn add_series_impl(
 /// The forked series inherits all defining parameters from the source but gets a
 /// distinct ID and carries a `forked_from` reference back to the original.
 ///
-/// Controllers may fork without `engine_id`. Non-controller callers must provide
-/// an `engine_id` on which they hold the `Creator` role.
+/// Authorization is tiered, mirroring [`add_series`]:
+///
+/// 1. **Controllers**: may fork any series.
+/// 2. **Engine Creators**: must provide an `engine_id` on which they hold the `Creator` role.
+/// 3. **Any authenticated user**: may fork **social** source markets (`BalanceDomain::Social` +
+///    `NonMonetary` payout) into their own closed circle, subject to the same per-user rate limits
+///    as social market creation. This is the "Challenge your friends" flow.
+///
+/// In all cases the fork's `trading_access` must be fully `Restricted` — a fork
+/// never widens access.
 #[update(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn fork_series(params: ForkSeriesParams) -> AddSeriesResult {
@@ -224,102 +233,131 @@ pub fn fork_series(params: ForkSeriesParams) -> AddSeriesResult {
     let now = time();
     let caller_is_ctrl = is_controller(&caller);
 
-    if !caller_is_ctrl {
-        match params.engine_id {
-            Some(ref eid) => {
-                if !has_engine_role_on(&caller, &EngineRole::Creator, eid) {
-                    return Err(SeriesError::EngineRoleNotHeld).into();
-                }
-            }
-            None => return Err(SeriesError::EngineIdRequired).into(),
-        }
-    }
-
     if !is_all_restricted(&params.trading_access) {
         return Err(SeriesError::ForkMustBeRestricted).into();
     }
 
-    fork_series_impl(params, caller, now)
+    // Authorization tiering: resolve the tier before hitting the store.
+    // Rate limits for the Social tier are re-checked inside `fork_series_impl`
+    // so that unit tests exercising `_impl` directly still enforce them.
+    let tier = if caller_is_ctrl {
+        CreationTier::Creator
+    } else if let Some(ref eid) = params.engine_id {
+        if !has_engine_role_on(&caller, &EngineRole::Creator, eid) {
+            return Err(SeriesError::EngineRoleNotHeld).into();
+        }
+        CreationTier::Creator
+    } else {
+        // Non-controller, no engine_id: only permitted if the source is a
+        // social market.
+        let source_is_social = SERIES_STORE.with(|store| {
+            store.borrow().get(&params.source_series_id).map(|s| {
+                s.balance_domain == BalanceDomain::Social
+                    && matches!(s.payout_unit, PayoutUnit::NonMonetary(_))
+            })
+        });
+
+        match source_is_social {
+            Some(true) => CreationTier::Social,
+            Some(false) => return Err(SeriesError::EngineIdRequired).into(),
+            None => return Err(SeriesError::SourceSeriesNotFound).into(),
+        }
+    };
+
+    fork_series_impl(params, caller, now, &tier)
 }
 
-fn fork_series_impl(params: ForkSeriesParams, caller: Principal, now: u64) -> AddSeriesResult {
-    SERIES_STORE
-        .with(|store| {
-            let mut store = store.borrow_mut();
+fn fork_series_impl(
+    params: ForkSeriesParams,
+    caller: Principal,
+    now: u64,
+    tier: &CreationTier,
+) -> AddSeriesResult {
+    if matches!(tier, CreationTier::Social) {
+        if let Err(e) = check_social_rate_limits(&caller, now) {
+            return Err(e).into();
+        }
+    }
 
-            let source = store
-                .get(&params.source_series_id)
-                .cloned()
-                .ok_or(SeriesError::SourceSeriesNotFound)?;
+    let res: Result<SeriesId, SeriesError> = SERIES_STORE.with(|store| {
+        let mut store = store.borrow_mut();
 
-            let title = params.title.unwrap_or_else(|| source.title.clone());
-            let description = params
-                .description
-                .unwrap_or_else(|| source.description.clone());
+        let source = store
+            .get(&params.source_series_id)
+            .cloned()
+            .ok_or(SeriesError::SourceSeriesNotFound)?;
 
-            if title.chars().count() > MAX_SERIES_TITLE_LEN {
-                return Err(SeriesError::TitleTooLong);
-            }
-            if description.plain.chars().count() > MAX_SERIES_DESCRIPTION_LEN {
-                return Err(SeriesError::DescriptionTooLong);
-            }
+        let title = params.title.unwrap_or_else(|| source.title.clone());
+        let description = params
+            .description
+            .unwrap_or_else(|| source.description.clone());
 
-            let fork_index = store
-                .values()
-                .filter(|s| {
-                    s.forked_from.as_ref() == Some(&source.series_id) && s.creator == caller
-                })
-                .count() as u64;
+        if title.chars().count() > MAX_SERIES_TITLE_LEN {
+            return Err(SeriesError::TitleTooLong);
+        }
+        if description.plain.chars().count() > MAX_SERIES_DESCRIPTION_LEN {
+            return Err(SeriesError::DescriptionTooLong);
+        }
 
-            if fork_index >= MAX_FORKS_PER_SOURCE_PER_USER {
-                return Err(SeriesError::ForkLimitReached);
-            }
+        let fork_index = store
+            .values()
+            .filter(|s| s.forked_from.as_ref() == Some(&source.series_id) && s.creator == caller)
+            .count() as u64;
 
-            let series_id = Series::generate_id(&SeriesIdParams {
-                underlying: &source.underlying,
-                balance_domain: source.balance_domain,
-                expiry_ns: source.expiry_ns,
-                payoff_type: &source.payoff_type,
-                strike: source.strike.as_ref(),
-                price_precision: source.price_precision,
-                payout_unit: &source.payout_unit,
-                outcomes: source.outcomes.as_deref(),
-                oracle_source: &source.oracle_source,
-                forked_from: Some(&source.series_id),
-                fork_caller: Some(&caller),
-                fork_index: Some(fork_index),
-            });
+        if fork_index >= MAX_FORKS_PER_SOURCE_PER_USER {
+            return Err(SeriesError::ForkLimitReached);
+        }
 
-            if store.contains_key(&series_id) {
-                return Err(SeriesError::SeriesAlreadyExists);
-            }
+        let series_id = Series::generate_id(&SeriesIdParams {
+            underlying: &source.underlying,
+            balance_domain: source.balance_domain,
+            expiry_ns: source.expiry_ns,
+            payoff_type: &source.payoff_type,
+            strike: source.strike.as_ref(),
+            price_precision: source.price_precision,
+            payout_unit: &source.payout_unit,
+            outcomes: source.outcomes.as_deref(),
+            oracle_source: &source.oracle_source,
+            forked_from: Some(&source.series_id),
+            fork_caller: Some(&caller),
+            fork_index: Some(fork_index),
+        });
 
-            let series = Series {
-                series_id: series_id.clone(),
-                underlying: source.underlying,
-                balance_domain: source.balance_domain,
-                expiry_ns: source.expiry_ns,
-                payoff_type: source.payoff_type,
-                strike: source.strike,
-                price_precision: source.price_precision,
-                payout_unit: source.payout_unit,
-                outcomes: source.outcomes,
-                oracle_source: source.oracle_source,
-                creator: caller,
-                created_at_ns: now,
-                title,
-                description,
-                icon_url: source.icon_url,
-                banner_url: source.banner_url,
-                trading_access: params.trading_access,
-                engine_id: params.engine_id,
-                forked_from: Some(source.series_id),
-            };
+        if store.contains_key(&series_id) {
+            return Err(SeriesError::SeriesAlreadyExists);
+        }
 
-            store.insert(series_id.clone(), series);
-            Ok(series_id)
-        })
-        .into()
+        let series = Series {
+            series_id: series_id.clone(),
+            underlying: source.underlying,
+            balance_domain: source.balance_domain,
+            expiry_ns: source.expiry_ns,
+            payoff_type: source.payoff_type,
+            strike: source.strike,
+            price_precision: source.price_precision,
+            payout_unit: source.payout_unit,
+            outcomes: source.outcomes,
+            oracle_source: source.oracle_source,
+            creator: caller,
+            created_at_ns: now,
+            title,
+            description,
+            icon_url: source.icon_url,
+            banner_url: source.banner_url,
+            trading_access: params.trading_access,
+            engine_id: params.engine_id,
+            forked_from: Some(source.series_id),
+        };
+
+        store.insert(series_id.clone(), series);
+        Ok(series_id)
+    });
+
+    if res.is_ok() && matches!(tier, CreationTier::Social) {
+        record_social_creation(&caller, now);
+    }
+
+    res.into()
 }
 
 /// Validates that the caller has not exceeded social market rate limits.
@@ -361,9 +399,34 @@ pub fn get_series(series_id: SeriesId) -> Option<Series> {
 }
 
 /// Returns a paginated page of registered derivative series, optionally filtered.
+///
+/// # Visibility
+///
+/// Results are scoped to what the caller is allowed to see. Restricted series
+/// are omitted unless the caller is a controller, the series creator, or a
+/// member of at least one group referenced by the series' `trading_access`.
+/// See [`can_principal_see_series`] for the full predicate.
 #[query]
 #[must_use]
 pub fn list_series_with(params: ListSeriesParams) -> SeriesPage {
+    list_series_with_impl(params, msg_caller())
+}
+
+/// Returns a paginated page of all registered derivative series visible to the caller.
+#[query]
+#[must_use]
+pub fn list_series(pagination: PaginationParams) -> SeriesPage {
+    let params = ListSeriesParams {
+        pagination: Some(pagination),
+        ..Default::default()
+    };
+
+    list_series_with_impl(params, msg_caller())
+}
+
+/// Implementation of `list_series_with` with an injectable caller for unit tests.
+#[must_use]
+fn list_series_with_impl(params: ListSeriesParams, caller: Principal) -> SeriesPage {
     SERIES_STORE.with(move |store| {
         let store = store.borrow();
 
@@ -374,7 +437,9 @@ pub fn list_series_with(params: ListSeriesParams) -> SeriesPage {
             None => store.range(..),
         };
 
-        let iter = range.filter(|(_, s)| params.matches(s));
+        let iter = range
+            .filter(|(_, s)| params.matches(s))
+            .filter(|(_, s)| can_principal_see_series(s, &caller));
 
         let (items, next_cursor) = PaginationParams::apply(params.pagination.as_ref(), iter);
 
@@ -382,33 +447,24 @@ pub fn list_series_with(params: ListSeriesParams) -> SeriesPage {
     })
 }
 
-/// Returns a paginated page of all registered derivative series.
-#[query]
-#[must_use]
-pub fn list_series(pagination: PaginationParams) -> SeriesPage {
-    let params = ListSeriesParams {
-        pagination: Some(pagination),
-        ..Default::default()
-    };
-
-    list_series_with(params)
-}
-
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use candid::Principal;
     use shared::{
         constants::{HOUR_NS, MAX_FORKS_PER_SOURCE_PER_USER},
         types::{
-            groups::GroupId, BalanceDomain, Description, FiatUnit, NonMonetaryUnit, PayoffType,
-            PayoutUnit, SocialLimits, SocialReward, TradingAccess,
+            groups::GroupId, BalanceDomain, Description, FiatUnit, Group, NonMonetaryUnit,
+            PayoffType, PayoutUnit, SocialLimits, SocialReward, TradingAccess,
         },
     };
 
-    use super::{add_series_impl, fork_series_impl, CreationTier};
+    use super::{add_series_impl, fork_series_impl, list_series_with_impl, CreationTier};
     use crate::{
-        memory::{SERIES_STORE, SOCIAL_CREATION_LOG, SOCIAL_LIMITS},
-        AddSeriesParams, AddSeriesResult, ForkSeriesParams, SeriesError, SeriesId,
+        memory::{GROUPS_STORE, SERIES_STORE, SOCIAL_CREATION_LOG, SOCIAL_LIMITS},
+        AddSeriesParams, AddSeriesResult, ForkSeriesParams, ListSeriesParams, PaginationParams,
+        SeriesError, SeriesId,
     };
 
     fn test_principal(id: u8) -> Principal {
@@ -421,6 +477,14 @@ mod tests {
 
     fn add_as_social(params: AddSeriesParams, caller: Principal, now: u64) -> AddSeriesResult {
         add_series_impl(params, caller, now, &CreationTier::Social)
+    }
+
+    fn fork_as_creator(params: ForkSeriesParams, caller: Principal, now: u64) -> AddSeriesResult {
+        fork_series_impl(params, caller, now, &CreationTier::Creator)
+    }
+
+    fn fork_as_social(params: ForkSeriesParams, caller: Principal, now: u64) -> AddSeriesResult {
+        fork_series_impl(params, caller, now, &CreationTier::Social)
     }
 
     fn base_params() -> AddSeriesParams {
@@ -474,6 +538,49 @@ mod tests {
         SOCIAL_CREATION_LOG.with(|l| l.borrow_mut().clear());
         SOCIAL_LIMITS.with(|l| *l.borrow_mut() = SocialLimits::default());
         SERIES_STORE.with(|s| s.borrow_mut().clear());
+        GROUPS_STORE.with(|s| s.borrow_mut().clear());
+    }
+
+    /// Inserts a group into `GROUPS_STORE` with the given members. Used by tests
+    /// to exercise visibility rules without going through the `create_group`
+    /// update entrypoint (which depends on `msg_caller()` / `time()`).
+    fn insert_group(group_id: GroupId, creator: Principal, members: &[Principal]) {
+        let mut member_set = BTreeSet::new();
+        for m in members {
+            member_set.insert(*m);
+        }
+        let group = Group {
+            group_id: group_id.clone(),
+            name: format!("test-{}", group_id.as_str()),
+            description: None,
+            icon_url: None,
+            creator,
+            admins: BTreeSet::new(),
+            members: member_set,
+            created_at_ns: 0,
+            updated_at_ns: 0,
+            updated_by: creator,
+        };
+        GROUPS_STORE.with(|s| {
+            s.borrow_mut().insert(group_id, group);
+        });
+    }
+
+    fn list_all_visible_to(caller: Principal) -> Vec<SeriesId> {
+        list_series_with_impl(
+            ListSeriesParams {
+                pagination: Some(PaginationParams {
+                    limit: None,
+                    cursor: None,
+                }),
+                ..Default::default()
+            },
+            caller,
+        )
+        .items
+        .into_iter()
+        .map(|s| s.series_id)
+        .collect()
     }
 
     // --- Creator tier ---
@@ -533,7 +640,7 @@ mod tests {
             engine_id: None,
         };
 
-        let fork_res = fork_series_impl(fork_params, caller, 2_000_000_000);
+        let fork_res = fork_as_creator(fork_params, caller, 2_000_000_000);
         let fork_id = match fork_res {
             AddSeriesResult::Ok(id) => id,
             AddSeriesResult::Err(e) => panic!("Fork failed: {e:?}"),
@@ -563,7 +670,7 @@ mod tests {
             engine_id: None,
         };
 
-        let res = fork_series_impl(fork_params, caller, 1_000_000_000);
+        let res = fork_as_creator(fork_params, caller, 1_000_000_000);
         assert!(matches!(
             res,
             AddSeriesResult::Err(SeriesError::SourceSeriesNotFound)
@@ -581,7 +688,7 @@ mod tests {
             panic!("Expected Ok");
         };
 
-        let fork1 = fork_series_impl(
+        let fork1 = fork_as_creator(
             ForkSeriesParams {
                 source_series_id: source_id.clone(),
                 title: Some("Fork 1".to_owned()),
@@ -598,7 +705,7 @@ mod tests {
             panic!("Fork 1 failed");
         };
 
-        let fork2 = fork_series_impl(
+        let fork2 = fork_as_creator(
             ForkSeriesParams {
                 source_series_id: source_id.clone(),
                 title: Some("Fork 2".to_owned()),
@@ -632,7 +739,7 @@ mod tests {
         };
 
         for i in 0..MAX_FORKS_PER_SOURCE_PER_USER {
-            let fork_res = fork_series_impl(
+            let fork_res = fork_as_creator(
                 ForkSeriesParams {
                     source_series_id: source_id.clone(),
                     title: None,
@@ -651,7 +758,7 @@ mod tests {
             );
         }
 
-        let over_limit = fork_series_impl(
+        let over_limit = fork_as_creator(
             ForkSeriesParams {
                 source_series_id: source_id,
                 title: None,
@@ -796,5 +903,160 @@ mod tests {
 
         let r2 = add_as_social(social_params(8001), bob, now);
         assert!(matches!(r2, AddSeriesResult::Ok(_)));
+    }
+
+    // --- Social-tier fork ---
+
+    #[test]
+    fn any_user_can_fork_social_market() {
+        cleanup();
+        let creator = test_principal(40);
+        let challenger = test_principal(41);
+        let group = GroupId::from("grp_challenge".to_owned());
+
+        let source_res = add_as_social(social_params(5000), creator, 1_000_000_000);
+        let AddSeriesResult::Ok(source_id) = source_res else {
+            panic!("source social create failed");
+        };
+
+        let fork_res = fork_as_social(
+            ForkSeriesParams {
+                source_series_id: source_id.clone(),
+                title: Some("Friends challenge".to_owned()),
+                description: None,
+                trading_access: vec![TradingAccess::Restricted {
+                    groups: vec![group],
+                }],
+                engine_id: None,
+            },
+            challenger,
+            2_000_000_000,
+        );
+        let AddSeriesResult::Ok(fork_id) = fork_res else {
+            panic!("social fork should succeed");
+        };
+
+        let forked = SERIES_STORE
+            .with(|s| s.borrow().get(&fork_id).cloned())
+            .unwrap();
+        assert_eq!(forked.forked_from, Some(source_id));
+        assert_eq!(forked.creator, challenger);
+    }
+
+    #[test]
+    fn social_fork_respects_hourly_rate_limit() {
+        cleanup();
+        let creator = test_principal(50);
+        let challenger = test_principal(51);
+        let group = GroupId::from("grp_rate".to_owned());
+
+        SOCIAL_LIMITS.with(|l| {
+            *l.borrow_mut() = SocialLimits {
+                max_per_hour: 1,
+                max_per_user: 100,
+            };
+        });
+
+        let source_res = add_as_social(social_params(6000), creator, 1_000_000_000);
+        let AddSeriesResult::Ok(source_id) = source_res else {
+            panic!("source create failed");
+        };
+
+        let r1 = fork_as_social(
+            ForkSeriesParams {
+                source_series_id: source_id.clone(),
+                title: None,
+                description: None,
+                trading_access: vec![TradingAccess::Restricted {
+                    groups: vec![group.clone()],
+                }],
+                engine_id: None,
+            },
+            challenger,
+            1_500_000_000,
+        );
+        assert!(matches!(r1, AddSeriesResult::Ok(_)));
+
+        let r2 = fork_as_social(
+            ForkSeriesParams {
+                source_series_id: source_id,
+                title: None,
+                description: None,
+                trading_access: vec![TradingAccess::Restricted {
+                    groups: vec![group],
+                }],
+                engine_id: None,
+            },
+            challenger,
+            1_500_000_001,
+        );
+        assert!(matches!(
+            r2,
+            AddSeriesResult::Err(SeriesError::SocialRateLimitExceeded)
+        ));
+    }
+
+    // --- list_series visibility ---
+
+    #[test]
+    fn list_series_hides_restricted_from_non_members() {
+        cleanup();
+        let alice = test_principal(10);
+        let bob = test_principal(11);
+        let stranger = test_principal(99);
+        let group_id = GroupId::from("grp_visibility".to_owned());
+        insert_group(group_id.clone(), alice, &[alice, bob]);
+
+        let open_res = add_as_creator(base_params(), alice, 1_000_000_000);
+        let AddSeriesResult::Ok(open_id) = open_res else {
+            panic!("open create failed");
+        };
+
+        let mut restricted_params = social_params(2000);
+        restricted_params.trading_access = vec![TradingAccess::Restricted {
+            groups: vec![group_id],
+        }];
+        let restricted_res = add_as_creator(restricted_params, alice, 1_500_000_000);
+        let AddSeriesResult::Ok(restricted_id) = restricted_res else {
+            panic!("restricted create failed");
+        };
+
+        let stranger_visible = list_all_visible_to(stranger);
+        assert!(stranger_visible.contains(&open_id));
+        assert!(!stranger_visible.contains(&restricted_id));
+
+        let member_visible = list_all_visible_to(bob);
+        assert!(member_visible.contains(&open_id));
+        assert!(member_visible.contains(&restricted_id));
+    }
+
+    #[test]
+    fn list_series_shows_restricted_to_creator_not_in_group() {
+        cleanup();
+        let creator = test_principal(20);
+        let member = test_principal(21);
+        let group_id = GroupId::from("grp_creator_visibility".to_owned());
+        insert_group(group_id.clone(), creator, &[member]);
+
+        let mut params = social_params(3000);
+        params.trading_access = vec![TradingAccess::Restricted {
+            groups: vec![group_id],
+        }];
+        let res = add_as_creator(params, creator, 1_000_000_000);
+        let AddSeriesResult::Ok(id) = res else {
+            panic!("create failed");
+        };
+
+        let creator_visible = list_all_visible_to(creator);
+        assert!(
+            creator_visible.contains(&id),
+            "creator must see their own restricted series even when not a group member"
+        );
+
+        let member_visible = list_all_visible_to(member);
+        assert!(member_visible.contains(&id));
+
+        let stranger_visible = list_all_visible_to(test_principal(99));
+        assert!(!stranger_visible.contains(&id));
     }
 }

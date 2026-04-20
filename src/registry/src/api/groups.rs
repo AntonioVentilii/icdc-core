@@ -9,7 +9,7 @@ use shared::types::{
         UpdateGroupAdminsParams, UpdateGroupMembersParams, UpdateGroupParams,
         UpdateTradingAccessParams,
     },
-    SeriesId, TradingAccess,
+    Series, SeriesId, TradingAccess,
 };
 
 use crate::{
@@ -405,6 +405,76 @@ pub fn is_group_member(group_id: GroupId, principal: Principal) -> bool {
 // ---------------------------------------------------------------------------
 // Trading access
 // ---------------------------------------------------------------------------
+
+/// Test-safe wrapper over [`is_controller`].
+///
+/// The real [`is_controller`] panics outside of a canister context, which
+/// makes any code that calls it untestable by `cargo test`. In `cfg(test)`
+/// we bypass it and return `false` — controller-specific behavior is
+/// exercised in integration tests that run inside a canister simulator.
+#[inline]
+fn caller_is_canister_controller(principal: &Principal) -> bool {
+    #[cfg(test)]
+    {
+        let _ = principal;
+        false
+    }
+    #[cfg(not(test))]
+    {
+        is_controller(principal)
+    }
+}
+
+/// Returns `true` if `principal` has **visibility** on `series`.
+///
+/// Visibility is strictly broader than trade authorization: it governs whether
+/// a series shows up in listings (e.g. `list_series`), not whether the caller
+/// can submit orders on it. Rules (logical OR):
+///
+/// 1. **Controllers** see every series.
+/// 2. The **series creator** always sees their own series, regardless of `trading_access`. This
+///    covers the case where a creator forked a market into a circle they are not themselves a
+///    member of.
+/// 3. Any [`TradingAccess::Open`] policy makes the series publicly visible.
+/// 4. Any [`TradingAccess::Restricted`] policy grants visibility if `principal` is a member of at
+///    least one of the listed groups.
+///
+/// If none of the above hold, the series is hidden from `principal`.
+///
+/// **Note:** this predicate is used only for listing/discovery. Trade
+/// authorization remains enforced by [`is_trading_authorized`] at order
+/// submission time in the clearing canister.
+#[must_use]
+pub fn can_principal_see_series(series: &Series, principal: &Principal) -> bool {
+    if caller_is_canister_controller(principal) {
+        return true;
+    }
+
+    if series.creator == *principal {
+        return true;
+    }
+
+    for policy in &series.trading_access {
+        match policy {
+            TradingAccess::Open => return true,
+            TradingAccess::Restricted { groups } => {
+                let visible = GROUPS_STORE.with(|store| {
+                    let store = store.borrow();
+                    groups.iter().any(|gid| {
+                        store
+                            .get(gid)
+                            .is_some_and(|g| g.members.contains(principal))
+                    })
+                });
+                if visible {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
 
 /// Determines whether a principal is authorized to trade on a given series.
 ///
