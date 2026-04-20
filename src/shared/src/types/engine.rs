@@ -61,7 +61,7 @@ pub enum EngineRole {
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct RoleGrant {
     /// The principal that received the role.
-    pub principal: Principal,
+    pub grantee: Principal,
     /// The granted role.
     pub role: EngineRole,
     /// The principal that performed the grant.
@@ -159,7 +159,7 @@ pub struct GrantEngineRoleParams {
     /// The Engine in which to grant the role.
     pub engine_id: EngineId,
     /// The principal receiving the role.
-    pub principal: Principal,
+    pub grantee: Principal,
     /// The role to grant.
     pub role: EngineRole,
 }
@@ -172,7 +172,7 @@ pub struct RevokeEngineRoleParams {
     /// The Engine in which to revoke the role.
     pub engine_id: EngineId,
     /// The principal losing the role.
-    pub principal: Principal,
+    pub grantee: Principal,
     /// The role to revoke.
     pub role: EngineRole,
 }

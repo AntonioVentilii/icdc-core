@@ -97,7 +97,7 @@ fn allowed_roles_scoping_rejects_wrong_role() {
             "grant_engine_role",
             (GrantEngineRoleParams {
                 engine_id,
-                principal: user,
+                grantee: user,
                 role: EngineRole::OracleAdmin,
             },),
         )
@@ -138,7 +138,7 @@ fn engine_admin_can_grant_roles() {
             "grant_engine_role",
             (GrantEngineRoleParams {
                 engine_id: engine_id.clone(),
-                principal: creator,
+                grantee: creator,
                 role: EngineRole::Creator,
             },),
         )
@@ -172,7 +172,7 @@ fn revoke_role_removes_access() {
             "revoke_engine_role",
             (RevokeEngineRoleParams {
                 engine_id: engine_id.clone(),
-                principal: creator,
+                grantee: creator,
                 role: EngineRole::Creator,
             },),
         )
@@ -223,7 +223,7 @@ fn double_grant_returns_role_already_granted() {
             "grant_engine_role",
             (GrantEngineRoleParams {
                 engine_id,
-                principal: user,
+                grantee: user,
                 role: EngineRole::Creator,
             },),
         )
@@ -249,7 +249,7 @@ fn revoke_without_grant_returns_role_not_granted() {
             "revoke_engine_role",
             (RevokeEngineRoleParams {
                 engine_id,
-                principal: user,
+                grantee: user,
                 role: EngineRole::Creator,
             },),
         )
@@ -385,7 +385,7 @@ fn non_admin_cannot_grant_role() {
             "grant_engine_role",
             (GrantEngineRoleParams {
                 engine_id,
-                principal: target,
+                grantee: target,
                 role: EngineRole::Creator,
             },),
         )

@@ -31,7 +31,7 @@ echo "Registered engine: $ENGINE_ID"
 echo "Granting Creator role..."
 dfx canister call registry grant_engine_role "(record {
     engine_id = \"$ENGINE_ID\";
-    principal = principal \"$PRINCIPAL\";
+    grantee = principal \"$PRINCIPAL\";
     role = variant { Creator }
 })" --network "$NETWORK" >/dev/null
 

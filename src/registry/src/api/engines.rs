@@ -175,13 +175,13 @@ pub fn grant_engine_role(params: GrantEngineRoleParams) -> EngineResult {
             let already_granted = engine
                 .role_grants
                 .iter()
-                .any(|g| g.principal == params.principal && g.role == params.role);
+                .any(|g| g.grantee == params.grantee && g.role == params.role);
             if already_granted {
                 return Err(EngineError::RoleAlreadyGranted);
             }
 
             engine.role_grants.push(RoleGrant {
-                principal: params.principal,
+                grantee: params.grantee,
                 role: params.role,
                 granted_by: caller,
                 granted_at_ns: now,
@@ -204,7 +204,7 @@ pub fn revoke_engine_role(params: RevokeEngineRoleParams) -> EngineResult {
     let now = time();
     let RevokeEngineRoleParams {
         engine_id,
-        principal,
+        grantee,
         role,
     } = params;
 
@@ -222,7 +222,7 @@ pub fn revoke_engine_role(params: RevokeEngineRoleParams) -> EngineResult {
             let before = engine.role_grants.len();
             engine
                 .role_grants
-                .retain(|g| !(g.principal == principal && g.role == role));
+                .retain(|g| !(g.grantee == grantee && g.role == role));
 
             if engine.role_grants.len() == before {
                 return Err(EngineError::RoleNotGranted);

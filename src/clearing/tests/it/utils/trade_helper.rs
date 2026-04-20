@@ -395,7 +395,7 @@ impl TradeHelperTrait for TestSetup {
         }
     }
 
-    fn grant_engine_role(&self, engine_id: &EngineId, principal: Principal, role: EngineRole) {
+    fn grant_engine_role(&self, engine_id: &EngineId, grantee: Principal, role: EngineRole) {
         let res: EngineResult = self
             .registry
             .update(
@@ -403,7 +403,7 @@ impl TradeHelperTrait for TestSetup {
                 "grant_engine_role",
                 (GrantEngineRoleParams {
                     engine_id: engine_id.clone(),
-                    principal,
+                    grantee,
                     role,
                 },),
             )

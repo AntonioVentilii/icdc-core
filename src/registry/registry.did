@@ -226,12 +226,12 @@ type ForkSeriesParams = record {
 //
 // Only Engine admins or canister controllers may grant roles.
 type GrantEngineRoleParams = record {
-	// The principal receiving the role.
-	"principal" : principal;
 	// The Engine in which to grant the role.
 	engine_id : text;
 	// The role to grant.
-	role : EngineRole
+	role : EngineRole;
+	// The principal receiving the role.
+	grantee : principal
 };
 // A trading group (closed circle).
 //
@@ -437,12 +437,12 @@ type RegisterEngineParams = record {
 type RegisterEngineResult = variant { Ok : text; Err : EngineError };
 // An audit record of a role grant within an Engine.
 type RoleGrant = record {
-	// The principal that received the role.
-	"principal" : principal;
 	// The granted role.
 	role : EngineRole;
 	// Timestamp of the grant in nanoseconds since UNIX epoch.
 	granted_at_ns : nat64;
+	// The principal that received the role.
+	grantee : principal;
 	// The principal that performed the grant.
 	granted_by : principal
 };

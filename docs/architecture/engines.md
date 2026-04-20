@@ -107,7 +107,7 @@ New roles can be added to this enum over time at the protocol level.
 
 ```rust
 struct RoleGrant {
-    principal: Principal,
+    grantee: Principal,
     role: EngineRole,
     granted_by: Principal,
     granted_at_ns: u64,

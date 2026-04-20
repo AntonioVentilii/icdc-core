@@ -34,7 +34,7 @@ pub fn has_engine_role(principal: &Principal, role: &EngineRole) -> bool {
                 && engine
                     .role_grants
                     .iter()
-                    .any(|grant| &grant.principal == principal && &grant.role == role)
+                    .any(|grant| &grant.grantee == principal && &grant.role == role)
         })
     })
 }
@@ -49,7 +49,7 @@ pub fn has_engine_role_on(principal: &Principal, role: &EngineRole, engine_id: &
                 && engine
                     .role_grants
                     .iter()
-                    .any(|grant| &grant.principal == principal && &grant.role == role)
+                    .any(|grant| &grant.grantee == principal && &grant.role == role)
         })
     })
 }

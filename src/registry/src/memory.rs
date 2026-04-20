@@ -78,7 +78,7 @@ fn migrate_v3_to_engines(
     let role_grants: Vec<RoleGrant> = all_principals
         .iter()
         .map(|p| RoleGrant {
-            principal: *p,
+            grantee: *p,
             role: EngineRole::Creator,
             granted_by: Principal::management_canister(),
             granted_at_ns: 0,

@@ -157,11 +157,13 @@ The `fork_series` endpoint provides on-chain traceability for forked series. Eac
 
 ## vici-app Roles
 
-| Role                   | Permissions                                                          |
-| ---------------------- | -------------------------------------------------------------------- |
-| `CONTROLLER` / `ADMIN` | All permissions including `CREATE_GROUP` and `MANAGE_TRADING_ACCESS` |
-| `GROUP_CREATOR`        | `CREATE_GROUP` — can create and manage groups                        |
-| `ENGINE_CREATOR`       | `CREATE_MARKET`, `FORK_MARKET` — via Engine role grants              |
+Group creation itself is open to every authenticated user (mirrors the canister guard on
+`create_group`); the app-layer roles below only gate administrative surfaces.
+
+| Role                   | Permissions                                             |
+| ---------------------- | ------------------------------------------------------- |
+| `CONTROLLER` / `ADMIN` | All permissions including `MANAGE_TRADING_ACCESS`       |
+| `ENGINE_CREATOR`       | `CREATE_MARKET`, `FORK_MARKET` — via Engine role grants |
 
 ## Future Extensions
 
