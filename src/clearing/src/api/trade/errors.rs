@@ -42,4 +42,12 @@ pub enum TradeError {
     /// The caller should check `is_trading_authorized` on the registry
     /// or contact the group creator to be added as a member.
     NotAuthorizedToTrade,
+    /// The series has an active or finalised settlement plan, so no new
+    /// trades, orders, or transfers can be initiated on it.
+    ///
+    /// Returned whenever a trade-initiating path sees an entry in
+    /// `SETTLEMENT_PLANS` for the series. Once a series is settled it is
+    /// economically closed: positions are gone, winners' cash is booked,
+    /// and opening a new position could only create unbacked exposure.
+    SeriesAlreadySettled(SeriesId),
 }

@@ -347,7 +347,14 @@ fn cancel_open_limit_orders(series_id: &SeriesId) {
         let matching: Vec<_> = orders
             .iter()
             .filter(|(_, o)| &o.series_id == series_id)
-            .map(|(id, o)| (id.clone(), o.creator, o.balance_domain, o.blocked_margin_usd))
+            .map(|(id, o)| {
+                (
+                    id.clone(),
+                    o.creator,
+                    o.balance_domain,
+                    o.blocked_margin_usd,
+                )
+            })
             .collect();
 
         for (id, _, _, _) in &matching {
