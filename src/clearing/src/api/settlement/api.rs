@@ -337,8 +337,10 @@ pub(crate) fn prepare_settlement_impl(
     }))
 }
 
-/// Removes every open limit order on `series_id` and refunds each order's
-/// `blocked_margin_usd` to the maker's reserved-margin balance.
+/// Removes every open limit order on `series_id` and releases each order's
+/// `blocked_margin_usd` from the maker's `reserved_margin_usd` (freeing that
+/// collateral for other trades or withdrawals), mirroring the bookkeeping
+/// done by [`cancel_limit_order`].
 ///
 /// Called synchronously from [`prepare_settlement_impl`] right after positions
 /// are removed so that the canister-level invariant "no open orders for a
@@ -1227,7 +1229,7 @@ mod tests {
                     .unwrap()
                     .get_reserved_margin_usd(BalanceDomain::Settlement),
                 0,
-                "maker's margin should be fully released after cancelation"
+                "maker's margin should be fully released after cancellation"
             );
             assert_eq!(
                 acc.get(&other_maker)
