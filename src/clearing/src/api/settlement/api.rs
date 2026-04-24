@@ -11,8 +11,8 @@ use super::{errors::SettlementError, params::SettleSeriesParams, results::Settle
 use crate::{
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
-        ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, CONFIG, INSURANCE_FUND, POSITIONS,
-        REGISTRY_CANISTER, SERIES, SETTLEMENT_PLANS, TREASURY,
+        ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, CONFIG, INSURANCE_FUND, LIMIT_ORDERS,
+        POSITIONS, REGISTRY_CANISTER, SERIES, SETTLEMENT_PLANS, TREASURY,
     },
     payoffs::{fees::calculate_settlement_fee, get_settlement_value},
     types::{
@@ -317,6 +317,12 @@ pub(crate) fn prepare_settlement_impl(
         }
     });
 
+    // Cancel every open LIMIT order on this series and release the maker's
+    // blocked margin back to their account. Leaving orders in the book after
+    // settlement would let takers match them against a series that no longer
+    // trades, and would leave collateral reserved forever.
+    cancel_open_limit_orders(series_id);
+
     Ok(SettlementPlan::get_or_create(SettlementPlanParams {
         series_id: series_id.clone(),
         settlement: settlement.clone(),
@@ -326,6 +332,47 @@ pub(crate) fn prepare_settlement_impl(
         positions: positions_to_settle,
         balance_domain: ser.balance_domain,
     }))
+}
+
+/// Removes every open limit order on `series_id` and refunds each order's
+/// `blocked_margin_usd` to the maker's reserved-margin balance.
+///
+/// Called synchronously from [`prepare_settlement_impl`] right after positions
+/// are removed so that the canister-level invariant "no open orders for a
+/// settled series" holds before the plan is persisted. Idempotent: safe to
+/// call on a series that has no open orders.
+fn cancel_open_limit_orders(series_id: &SeriesId) {
+    let cancelled: Vec<(User, BalanceDomain, u128)> = LIMIT_ORDERS.with(|orders| {
+        let mut orders = orders.borrow_mut();
+        let matching: Vec<_> = orders
+            .iter()
+            .filter(|(_, o)| &o.series_id == series_id)
+            .map(|(id, o)| (id.clone(), o.creator, o.balance_domain, o.blocked_margin_usd))
+            .collect();
+
+        for (id, _, _, _) in &matching {
+            orders.remove(id);
+        }
+
+        matching
+            .into_iter()
+            .map(|(_, creator, domain, margin)| (creator, domain, margin))
+            .collect()
+    });
+
+    if cancelled.is_empty() {
+        return;
+    }
+
+    ACCOUNT_STATES.with(|accounts| {
+        let mut accounts = accounts.borrow_mut();
+        for (user, domain, blocked_margin_usd) in cancelled {
+            if let Some(acc) = accounts.get_mut(&user) {
+                let current = acc.get_reserved_margin_usd(domain);
+                acc.set_reserved_margin_usd(domain, current.saturating_sub(blocked_margin_usd));
+            }
+        }
+    });
 }
 
 /// Validates aggregate solvency for a settlement batch.
@@ -1012,5 +1059,150 @@ mod tests {
 
         // Cleanup
         ACCOUNT_STATES.with(|acc| acc.borrow_mut().clear());
+    }
+
+    /// `prepare_settlement_impl` must cancel every open limit order on the
+    /// series being settled and refund the blocked margin to each maker, so
+    /// that a settled series leaves no live book and no stuck collateral.
+    #[test]
+    fn prepare_settlement_cancels_open_limit_orders_and_refunds_margin() {
+        use shared::types::OutcomeId;
+
+        use crate::{
+            memory::LIMIT_ORDERS,
+            types::trade::{LimitOrder, OrderId, Side},
+        };
+
+        let maker_p = Principal::from_slice(&[7]);
+        let maker = User(maker_p);
+        let other_maker_p = Principal::from_slice(&[8]);
+        let other_maker = User(other_maker_p);
+        let series_id = SeriesId::from("cleanup_test".to_owned());
+        let other_series_id = SeriesId::from("untouched_series".to_owned());
+
+        let series = Series {
+            series_id: series_id.clone(),
+            underlying: "BTC".to_owned(),
+            expiry_ns: 2_000_000_000,
+            payoff_type: PayoffType::Call,
+            strike: Some(Price::new(100, 0)),
+            price_precision: 0,
+            payout_unit: PayoutUnit::usd(),
+            outcomes: None,
+            balance_domain: BalanceDomain::Settlement,
+            oracle_source: "oracle".to_owned(),
+            creator: Principal::anonymous(),
+            created_at_ns: 1_000_000_000,
+            title: "Test".to_owned(),
+            description: Description::plain("Cleanup test"),
+            icon_url: None,
+            banner_url: None,
+            trading_access: vec![],
+            engine_id: None,
+            forked_from: None,
+        };
+
+        POSITIONS.with(|pos| pos.borrow_mut().clear());
+
+        // Seed two orders on the series under settlement and one order on an
+        // unrelated series that MUST be left alone.
+        let order_ids = [
+            (
+                OrderId::from("o1".to_owned()),
+                maker,
+                series_id.clone(),
+                40_000_u128,
+            ),
+            (
+                OrderId::from("o2".to_owned()),
+                maker,
+                series_id.clone(),
+                60_000_u128,
+            ),
+            (
+                OrderId::from("o3".to_owned()),
+                other_maker,
+                other_series_id.clone(),
+                25_000_u128,
+            ),
+        ];
+
+        LIMIT_ORDERS.with(|orders| {
+            let mut orders = orders.borrow_mut();
+            orders.clear();
+            for (id, creator, sid, blocked) in &order_ids {
+                orders.insert(
+                    id.clone(),
+                    LimitOrder {
+                        order_id: id.clone(),
+                        creator: *creator,
+                        series_id: sid.clone(),
+                        outcome_id: None::<OutcomeId>,
+                        side: Side::Buy,
+                        qty: 1,
+                        price: Price::new(50, 0),
+                        blocked_margin_usd: *blocked,
+                        balance_domain: BalanceDomain::Settlement,
+                    },
+                );
+            }
+        });
+
+        ACCOUNT_STATES.with(|acc| {
+            let mut acc = acc.borrow_mut();
+            acc.clear();
+            let mut a = AccountState::new(maker);
+            a.set_cash_balance_usd(BalanceDomain::Settlement, 10_000_000);
+            // Maker has 100_000 reserved for both orders (40_000 + 60_000).
+            a.set_reserved_margin_usd(BalanceDomain::Settlement, 100_000);
+            acc.insert(maker, a);
+
+            let mut b = AccountState::new(other_maker);
+            b.set_cash_balance_usd(BalanceDomain::Settlement, 10_000_000);
+            b.set_reserved_margin_usd(BalanceDomain::Settlement, 25_000);
+            acc.insert(other_maker, b);
+        });
+
+        let result = prepare_settlement_impl(
+            &series,
+            &series_id,
+            &SettlementInput::Price(Price::new(150, 0)),
+            0,
+            0,
+        );
+        assert!(result.is_ok(), "settlement prep failed: {result:?}");
+
+        // Both orders on the settled series are gone; the unrelated order stays.
+        LIMIT_ORDERS.with(|orders| {
+            let orders = orders.borrow();
+            assert!(orders.get(&OrderId::from("o1".to_owned())).is_none());
+            assert!(orders.get(&OrderId::from("o2".to_owned())).is_none());
+            assert!(orders.get(&OrderId::from("o3".to_owned())).is_some());
+        });
+
+        // Maker's reserved margin is refunded (100_000 → 0). The other maker
+        // on the untouched series keeps their reservation.
+        ACCOUNT_STATES.with(|acc| {
+            let acc = acc.borrow();
+            assert_eq!(
+                acc.get(&maker)
+                    .unwrap()
+                    .get_reserved_margin_usd(BalanceDomain::Settlement),
+                0,
+                "maker's margin should be fully released after cancelation"
+            );
+            assert_eq!(
+                acc.get(&other_maker)
+                    .unwrap()
+                    .get_reserved_margin_usd(BalanceDomain::Settlement),
+                25_000,
+                "unrelated series' maker should not be touched"
+            );
+        });
+
+        // Cleanup
+        LIMIT_ORDERS.with(|orders| orders.borrow_mut().clear());
+        ACCOUNT_STATES.with(|acc| acc.borrow_mut().clear());
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().remove(&series_id));
     }
 }
