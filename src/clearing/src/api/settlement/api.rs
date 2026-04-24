@@ -150,11 +150,14 @@ pub(crate) async fn settle_series_inner(params: SettleSeriesParams) -> SettleSer
             }
 
             if existing.settlement != settlement {
-                // For simplicity in the log check, we just return an error if mismatched.
-                // Comparing SettlementInput (enum) is fine.
-                return Err(SettlementError::Common(CommonError::InvalidInput(
-                    "Inconsistent settlement data".to_owned(),
-                )));
+                // A plan has already been locked on this series with a
+                // different settlement input. Rather than flattening this into
+                // `InvalidInput`, return the structured variant so the oracle
+                // tooling can diff the two.
+                return Err(SettlementError::InconsistentSettlement {
+                    existing: Box::new(existing.settlement.clone()),
+                    requested: Box::new(settlement),
+                });
             }
             existing
         } else {
@@ -1066,6 +1069,34 @@ mod tests {
 
         // Cleanup
         ACCOUNT_STATES.with(|acc| acc.borrow_mut().clear());
+    }
+
+    /// The structured `InconsistentSettlement` variant preserves both the
+    /// originally-locked settlement input and the conflicting attempt, so a
+    /// second `settle_series` call with a different price or outcome does not
+    /// lose information the way the previous generic `InvalidInput` did.
+    #[test]
+    fn inconsistent_settlement_variant_preserves_both_inputs() {
+        use crate::api::settlement::errors::SettlementError;
+
+        let original = SettlementInput::Price(Price::new(100, 0));
+        let requested = SettlementInput::Outcome("YES".to_owned().into());
+
+        let err = SettlementError::InconsistentSettlement {
+            existing: Box::new(original.clone()),
+            requested: Box::new(requested.clone()),
+        };
+
+        match err {
+            SettlementError::InconsistentSettlement {
+                existing,
+                requested: req,
+            } => {
+                assert_eq!(*existing, original);
+                assert_eq!(*req, requested);
+            }
+            other => panic!("expected InconsistentSettlement, got {other:?}"),
+        }
     }
 
     /// `prepare_settlement_impl` must cancel every open limit order on the

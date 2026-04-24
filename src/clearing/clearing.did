@@ -564,8 +564,17 @@ type SettleSeriesResult = variant {
 };
 // Errors occurring during derivative series settlement.
 type SettlementError = variant {
-	// Settlement price inconsistent with already executing plan.
-	InconsistentSettlementPrice : record { requested : Price; existing : Price };
+	// A second `settle_series` call arrived with a `SettlementInput` that does
+	// not match the one already locked in by the in-flight plan.
+	//
+	// Covers both `Price` and `Outcome` settlement types: the variant that's
+	// locked is stored in `existing`, and the one just attempted is in
+	// `requested`. Callers that need to surface a human-readable diff can
+	// pattern-match on both variants without losing information.
+	InconsistentSettlement : record {
+		requested : SettlementInput;
+		existing : SettlementInput
+	};
 	// Overflow during settlement calculation.
 	MathOverflow;
 	// Total net payoffs (post-fee) exceed global system equity (system insolvency).
