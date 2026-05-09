@@ -123,7 +123,7 @@ If a PR depends on another PR that has not landed yet:
   "Depends on #1234. Will mark ready once that lands.").
 - Once the prerequisite merges into `main`, pull `main` into the
   dependent branch (regular merge — no force-push, see
-  [§9](#9-updating-an-existing-pr)) and flip the PR to "ready for
+  [§8](#8-updating-an-existing-pr)) and flip the PR to "ready for
   review".
 
 Why this rule exists:
@@ -144,12 +144,12 @@ dependency, smoke-testing in CI. Mark it draft on creation and flip to
 One logical change per PR. If you catch yourself writing
 "and also" / "while I was there" / "I noticed that" in the body, split.
 
-| Anti-pattern                                         | Do this instead                                                        |
-| ---------------------------------------------------- | ---------------------------------------------------------------------- |
-| "Add feature X and rename old function"              | PR 1: `refactor: rename`. PR 2: `feat: X`.                             |
-| "Fix bug Y and update unrelated formatting"          | Two PRs.                                                               |
-| "Refactor 5 modules into shared `Foo`"               | PR 1: introduce `Foo` + migrate 1 caller. PR 2..N: migrate the others. |
-| "Speed up tests via CI cache + nextest + lazy WASMs" | Three small PRs (one CI change, one test infra change per PR).         |
+| Anti-pattern                                | Do this instead                                                        |
+| ------------------------------------------- | ---------------------------------------------------------------------- |
+| "Add feature X and rename old function"     | PR 1: `refactor: rename`. PR 2: `feat: X`.                             |
+| "Fix bug Y and update unrelated formatting" | Two PRs.                                                               |
+| "Refactor 5 modules into shared `Foo`"      | PR 1: introduce `Foo` + migrate 1 caller. PR 2..N: migrate the others. |
+| "Speed up tests via CI cache + lazy WASMs"  | One PR per layer (CI infra; in-process fixture cache).                 |
 
 This is also stated as commandment 2 in
 [`.agents/instructions.md`](../../.agents/instructions.md) and is
@@ -175,7 +175,6 @@ npm run test:unit
 # 3. Run integration tests (slower; spins up PocketIC)
 npm run test:integration
 # Or scoped: cargo test --test it -p clearing settlement
-#            cargo nextest run --test it -p clearing settlement
 
 # 4. Match CI's strict gates
 RUSTFLAGS="-D warnings" cargo test --lib --bins
@@ -185,42 +184,41 @@ RUSTFLAGS="-D warnings" cargo test --test it
 If you regenerated Candid:
 
 ```bash
-npm run did               # regenerates *.did files for every crate
+npm run did               # regenerates clearing.did, registry.did, minter.did
 ```
 
 If you've never run integration tests on this machine, install
-PocketIC and (recommended) `cargo-nextest` first:
+PocketIC first:
 
 ```bash
 scripts/pic-install
-scripts/setup cargo-nextest
 ```
 
 ## 6. CI jobs you must keep green
 
 Defined under [`.github/workflows/`](../../.github/workflows/):
 
-| Workflow      | Job(s)                      | What it runs                                                                |
-| ------------- | --------------------------- | --------------------------------------------------------------------------- |
-| `checks.yml`  | `format`                    | `npm run format` — fails if it produces a diff and no PAT is available.     |
-| `checks.yml`  | `lint`                      | `npm run lint` — `prettier --check` + `scripts/lint.sh` (rust, did, shell). |
-| `tests.yml`   | `unit`                      | `npm run test:unit` (`cargo test --lib --bins`).                            |
-| `tests.yml`   | `integration`               | `npm run build` then `npm run test:integration`.                            |
-| `tests.yml`   | `tests-pass`                | Aggregator gate via `.github/actions/needs_success`.                        |
-| `checks.yml`  | `checks-pass`               | Aggregator gate via `.github/actions/needs_success`.                        |
-| `release.yml` | `wasm`, `candid`, `release` | Tag-only — only runs on `push: tags: v*`.                                   |
+| Workflow      | Job(s)                      | What it runs                                                                                                                                                  |
+| ------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `checks.yml`  | `format`                    | `npm run format`. Fails the job whenever it produces a diff — run `npm run format` locally and push.                                                          |
+| `checks.yml`  | `lint`                      | `npm run lint` — `prettier --check` + `scripts/lint.sh` (rust, did, shell).                                                                                   |
+| `checks.yml`  | `checks-pass`               | Aggregator gate via `.github/actions/needs_success`.                                                                                                          |
+| `tests.yml`   | `unit`                      | `npm run build` then `npm run test:unit` (`cargo test --lib --bins`).                                                                                         |
+| `tests.yml`   | `integration`               | `npm run build` then `npm run test:integration`.                                                                                                              |
+| `tests.yml`   | `tests-pass`                | Aggregator gate via `.github/actions/needs_success`.                                                                                                          |
+| `release.yml` | `wasm`, `candid`, `release` | Triggered by `push: tags: v*`, GitHub `release` events, or `workflow_dispatch`. Builds + uploads WASM/`*.did` artifacts and (for tags) cuts a GitHub Release. |
 
 The `Prepare` composite action (`.github/actions/prepare`) installs
 the rust toolchain (`rust-toolchain.toml`), npm deps, `cargo-binstall`,
-`cargo-sort`, `cargo-nextest`, `shfmt`, `zizmor`, and `yq`. Touch
+`cargo-sort`, `shfmt`, `zizmor`, and `yq`. Touch
 [`dev-tools.json`](../../dev-tools.json) when you need to add or
 upgrade one of these.
 
 ## 7. After CI fails
 
-- **`format` failed and pushed a fixup commit** → pull, you're fine.
-- **`format` failed without a PAT** (forks) → run `npm run format`
-  locally and push.
+- **`format` failed** → the job runs `npm run format` and fails the
+  build whenever it produces a diff. Run `npm run format` locally and
+  push the result.
 - **`lint` failed** → run `npm run lint:rust` (auto-fixes clippy where
   possible). Never silence with `#[allow(clippy::…)]` unless you can
   justify it in code review. Pre-existing
@@ -230,8 +228,10 @@ upgrade one of these.
   RUSTFLAGS="-D warnings" cargo test --lib --bins
   RUSTFLAGS="-D warnings" cargo test --test it
   ```
-  Never commit `#[ignore]` to bypass — that violates
-  [`.policies/testing-policy.md`](../../.policies/testing-policy.md).
+  Don't commit `#[ignore]` to bypass — failing tests are a signal,
+  not a nuisance. See
+  [`.policies/testing-policy.md`](../../.policies/testing-policy.md)
+  for the broader testing rules.
 
 ## 8. Updating an existing PR
 
