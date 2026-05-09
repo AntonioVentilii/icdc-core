@@ -18,6 +18,9 @@ runs:
         # - any crate source changes,
         # - workspace manifests / lockfile / toolchain change,
         # - the build/test scripts or downloaded canister versions change,
+        # - the npm wrapper around the test commands changes (the
+        #   workflow runs `npm run test:*`, so node tooling changes can
+        #   break tests too),
         # - the workflow itself or its composite actions change.
         filters: |
           rust:
@@ -37,6 +40,9 @@ runs:
             - 'scripts/setup-*'
             - 'dfx.json'
             - 'canister_ids.json'
+            - '.node-version'
+            - 'package.json'
+            - 'package-lock.json'
             - '.github/workflows/tests.yml'
             - '.github/actions/prepare/**'
             - '.github/actions/check-rust-changes/**'
