@@ -1,15 +1,54 @@
 use core::str::from_utf8;
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     process::Command,
-    sync::Arc,
+    sync::{Arc, PoisonError, RwLock},
 };
 
 use candid::{
     decode_one, encode_args, encode_one, utils::ArgumentEncoder, CandidType, Deserialize, Principal,
 };
 use pocket_ic::PocketIc;
+
+/// Process-wide cache of WASM file contents, keyed by absolute path.
+///
+/// `cargo test` reuses a single test process for all tests in a binary,
+/// and `TestSetup::default()` is called by every integration test in
+/// `tests/it`. Reading the same 4 WASM files (`clearing`, `registry`,
+/// `minter`, and `target/ic/ledger.wasm` for three ledgers) from disk
+/// for ~90 tests adds up to non-trivial latency.
+///
+/// We cache the bytes behind an `Arc` so the original allocation lives
+/// only once; `pic.install_canister` still requires `Vec<u8>` so each
+/// caller does a single clone of the bytes, but the disk IO and the
+/// initial allocation are amortised across the whole test binary.
+///
+/// `RwLock` is preferred over `Mutex` because lookups vastly outnumber
+/// inserts. `PoisonError` is recovered with `into_inner()` so a single
+/// panicking test does not cascade into unrelated failures in other
+/// tests that share the same `cargo test` process.
+static WASM_CACHE: RwLock<Option<HashMap<String, Arc<Vec<u8>>>>> = RwLock::new(None);
+
+fn cached_wasm_bytes(path: &str) -> Arc<Vec<u8>> {
+    {
+        let read_guard = WASM_CACHE.read().unwrap_or_else(PoisonError::into_inner);
+        if let Some(bytes) = read_guard.as_ref().and_then(|map| map.get(path)) {
+            return bytes.clone();
+        }
+    }
+
+    let bytes = Arc::new(
+        fs::read(path).unwrap_or_else(|_| panic!("Could not find the backend wasm: {path}")),
+    );
+
+    let mut write_guard = WASM_CACHE.write().unwrap_or_else(PoisonError::into_inner);
+    let map = write_guard.get_or_insert_with(HashMap::new);
+    map.entry(path.to_owned())
+        .or_insert_with(|| bytes.clone())
+        .clone()
+}
 
 /// Common methods for interacting with a canister using `PocketIc`.
 pub trait PicCanisterTrait {
@@ -200,10 +239,12 @@ impl PicCanisterBuilder {
         self
     }
 
-    /// Reads the backend Wasm bytes from the configured path.
+    /// Reads the backend Wasm bytes, going through the process-wide
+    /// `WASM_CACHE` so each path is only read from disk once per
+    /// `cargo test` binary.
     fn wasm_bytes(&self) -> Vec<u8> {
-        fs::read(self.wasm_path.clone())
-            .unwrap_or_else(|_| panic!("Could not find the backend wasm: {}", self.wasm_path))
+        let bytes = cached_wasm_bytes(&self.wasm_path);
+        Vec::clone(&bytes)
     }
 
     /// Get or create canister.
