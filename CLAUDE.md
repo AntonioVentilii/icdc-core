@@ -14,6 +14,7 @@ This file contains instructions specifically optimized for the Claude model. Cla
 - **Follow Patterns**: Strictly adhere to the [Implementation Patterns](file:///Users/antonio.ventilii/projects/icdc-core/.agents/patterns.md).
 - **Quality First**: Never bypass `npm run quality` checks.
 - **Governance First**: Check [.policies/](file:///Users/antonio.ventilii/projects/icdc-core/.policies/) and [.boundaries/](file:///Users/antonio.ventilii/projects/icdc-core/.boundaries/) before making modifications.
+- **PR Conventions**: Follow [docs/ai/pr-and-ci.md](file:///Users/antonio.ventilii/projects/icdc-core/docs/ai/pr-and-ci.md) for every PR — title, template, atomicity, append-only history.
 
 ## Repository Conventions
 

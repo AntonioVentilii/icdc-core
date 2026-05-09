@@ -35,6 +35,7 @@ All changes must adhere to established testing and quality standards.
 
 - **Testing Standards**: [.workflows/testing-standards.md](file:///Users/antonio.ventilii/projects/icdc-core/.workflows/testing-standards.md)
 - **Testing Policy**: [.policies/testing-policy.md](file:///Users/antonio.ventilii/projects/icdc-core/.policies/testing-policy.md)
+- **PR & CI Conventions**: [docs/ai/pr-and-ci.md](file:///Users/antonio.ventilii/projects/icdc-core/docs/ai/pr-and-ci.md)
 
 ## Agent Coordination
 
