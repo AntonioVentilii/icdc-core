@@ -44,6 +44,7 @@ Ensures quality, verifies tests, and enforces atomicity and economic safety rule
 
 - [New API Endpoint Workflow](file:///Users/antonio.ventilii/projects/icdc-core/.workflows/new-api-endpoint.md)
 - [Testing Standards Workflow](file:///Users/antonio.ventilii/projects/icdc-core/.workflows/testing-standards.md)
+- [PR & CI Conventions](file:///Users/antonio.ventilii/projects/icdc-core/docs/ai/pr-and-ci.md)
 
 ## Coordination Rules
 
