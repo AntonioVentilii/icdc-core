@@ -4,7 +4,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
-    sync::{Arc, RwLock},
+    sync::{Arc, PoisonError, RwLock},
 };
 
 use candid::{
@@ -33,9 +33,7 @@ static WASM_CACHE: RwLock<Option<HashMap<String, Arc<Vec<u8>>>>> = RwLock::new(N
 
 fn cached_wasm_bytes(path: &str) -> Arc<Vec<u8>> {
     {
-        let read_guard = WASM_CACHE
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let read_guard = WASM_CACHE.read().unwrap_or_else(PoisonError::into_inner);
         if let Some(bytes) = read_guard.as_ref().and_then(|map| map.get(path)) {
             return bytes.clone();
         }
@@ -45,9 +43,7 @@ fn cached_wasm_bytes(path: &str) -> Arc<Vec<u8>> {
         fs::read(path).unwrap_or_else(|_| panic!("Could not find the backend wasm: {path}")),
     );
 
-    let mut write_guard = WASM_CACHE
-        .write()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut write_guard = WASM_CACHE.write().unwrap_or_else(PoisonError::into_inner);
     let map = write_guard.get_or_insert_with(HashMap::new);
     map.entry(path.to_owned())
         .or_insert_with(|| bytes.clone())
