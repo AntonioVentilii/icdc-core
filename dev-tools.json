@@ -59,5 +59,9 @@
 	"zizmor": {
 		"method": "cargo-binstall",
 		"version": "1.5.2"
+	},
+	"cargo-nextest": {
+		"method": "cargo-binstall",
+		"version": "0.9.133"
 	}
 }
