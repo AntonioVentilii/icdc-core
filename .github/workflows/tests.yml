@@ -22,13 +22,31 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check Rust changes
+        id: changes
+        uses: ./.github/actions/check-rust-changes
+
       - name: Prepare
+        if: steps.changes.outputs.rust == 'true'
         uses: ./.github/actions/prepare
 
-      - name: Build
-        run: npm run build
+      # Unit tests don't depend on built wasms or downloaded canister
+      # binaries, so the cache key only depends on Cargo.lock and the
+      # toolchain.
+      - name: Restore cargo cache
+        if: steps.changes.outputs.rust == 'true'
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-unit-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-unit-
 
       - name: Run tests
+        if: steps.changes.outputs.rust == 'true'
         run: npm run test:unit
 
   integration:
@@ -43,13 +61,37 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check Rust changes
+        id: changes
+        uses: ./.github/actions/check-rust-changes
+
       - name: Prepare
+        if: steps.changes.outputs.rust == 'true'
         uses: ./.github/actions/prepare
 
+      # Integration tests use both the workspace wasms (built into
+      # `target/wasm32-unknown-unknown/release/`) and the downloaded
+      # third-party canisters (extracted into `target/ic/`). Both live
+      # under `target/`, so caching it skips both rebuild and redownload
+      # whenever Cargo.lock and the download scripts are unchanged.
+      - name: Restore cargo cache
+        if: steps.changes.outputs.rust == 'true'
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-integration-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'scripts/download.ledger.sh', 'scripts/download.icp.sh', 'scripts/build.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-integration-
+
       - name: Build
+        if: steps.changes.outputs.rust == 'true'
         run: npm run build
 
       - name: Run tests
+        if: steps.changes.outputs.rust == 'true'
         run: npm run test:integration
 
   tests-pass:
