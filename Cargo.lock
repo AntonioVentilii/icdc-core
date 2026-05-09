@@ -755,9 +755,9 @@ dependencies = [
 
 [[package]]
 name = "ic-transport-types"
-version = "0.40.1"
+version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2e7706e55836e8104c98149ec0796d20d5213fef972ac01b544657d410f1883"
+checksum = "4a775244756a5d97ff19b08071a946a4b4896904e35deb036bf215e80f2e703d"
 dependencies = [
  "candid",
  "hex",
@@ -804,9 +804,9 @@ dependencies = [
 
 [[package]]
 name = "icrc-ledger-types"
-version = "0.1.12"
+version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aafb78e620b2cc2b000cd745c0504dfb23a828acc3dd6f1baef208cd6c471e32"
+checksum = "263acc94fa47008ad00f76b8d3694efe7f8361870c9ec92cddcc588b571518b7"
 dependencies = [
  "base32",
  "candid",
@@ -814,7 +814,6 @@ dependencies = [
  "hex",
  "ic-stable-structures",
  "icrc-cbor",
- "itertools",
  "minicbor",
  "num-bigint",
  "num-traits",
@@ -967,15 +966,6 @@ checksum = "c91338f0783edbd6195decb37bae672fd3b165faffb89bf7b9e6942f8b1a731a"
 dependencies = [
  "memchr",
  "serde",
-]
-
-[[package]]
-name = "itertools"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
-dependencies = [
- "either",
 ]
 
 [[package]]
@@ -1250,9 +1240,9 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
 name = "pocket-ic"
-version = "12.0.0"
+version = "13.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03c0fe19b920be1485cdd3d58a70abfa768c2608f8349864d950791fe1a5c193"
+checksum = "e30621a12b204880522340df8327930d1b7fdefd784c9fc6093b311440fa0506"
 dependencies = [
  "backoff",
  "base64 0.13.1",
@@ -1266,7 +1256,6 @@ dependencies = [
  "schemars",
  "semver",
  "serde",
- "serde_bytes",
  "serde_cbor",
  "serde_json",
  "sha2",
@@ -1388,7 +1377,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1920,6 +1909,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
+ "windows-sys 0.52.0",
  "windows-sys 0.59.0",
 ]
 
