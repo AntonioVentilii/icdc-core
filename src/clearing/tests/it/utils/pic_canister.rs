@@ -24,22 +24,31 @@ use pocket_ic::PocketIc;
 /// only once; `pic.install_canister` still requires `Vec<u8>` so each
 /// caller does a single clone of the bytes, but the disk IO and the
 /// initial allocation are amortised across the whole test binary.
+///
+/// `RwLock` is preferred over `Mutex` because lookups vastly outnumber
+/// inserts. `PoisonError` is recovered with `into_inner()` so a single
+/// panicking test does not cascade into unrelated failures in other
+/// tests that share the same `cargo test` process.
 static WASM_CACHE: RwLock<Option<HashMap<String, Arc<Vec<u8>>>>> = RwLock::new(None);
 
 fn cached_wasm_bytes(path: &str) -> Arc<Vec<u8>> {
-    if let Some(cache) = WASM_CACHE.read().unwrap().as_ref() {
-        if let Some(bytes) = cache.get(path) {
+    {
+        let read_guard = WASM_CACHE
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(bytes) = read_guard.as_ref().and_then(|map| map.get(path)) {
             return bytes.clone();
         }
     }
 
     let bytes = Arc::new(
-        fs::read(path)
-            .unwrap_or_else(|_| panic!("Could not find the backend wasm: {path}")),
+        fs::read(path).unwrap_or_else(|_| panic!("Could not find the backend wasm: {path}")),
     );
 
-    let mut guard = WASM_CACHE.write().unwrap();
-    let map = guard.get_or_insert_with(HashMap::new);
+    let mut write_guard = WASM_CACHE
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let map = write_guard.get_or_insert_with(HashMap::new);
     map.entry(path.to_owned())
         .or_insert_with(|| bytes.clone())
         .clone()
