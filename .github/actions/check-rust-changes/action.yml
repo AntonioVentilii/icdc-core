@@ -1,0 +1,48 @@
+name: Check Rust Changes
+
+description: Returns true when files affecting Rust builds or tests have changed.
+
+outputs:
+  rust:
+    description: 'True if any relevant Rust/CI file changed'
+    value: ${{ steps.changes.outputs.rust }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check for changes
+      uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+      id: changes
+      with:
+        # Trigger Rust workflows when:
+        # - any crate source changes,
+        # - workspace manifests / lockfile / toolchain change,
+        # - the build/test scripts or downloaded canister versions change,
+        # - the npm wrapper around the test commands changes (the
+        #   workflow runs `npm run test:*`, so node tooling changes can
+        #   break tests too),
+        # - the workflow itself or its composite actions change.
+        filters: |
+          rust:
+            - 'src/**'
+            - '**/Cargo.toml'
+            - 'Cargo.lock'
+            - 'rust-toolchain.toml'
+            - 'rustfmt.toml'
+            - 'clippy.toml'
+            - 'scripts/build.sh'
+            - 'scripts/build.*.sh'
+            - 'scripts/download.*.sh'
+            - 'scripts/download-immutable.sh'
+            - 'scripts/test.*.sh'
+            - 'scripts/pic-install'
+            - 'scripts/setup'
+            - 'scripts/setup-*'
+            - 'dfx.json'
+            - 'canister_ids.json'
+            - '.node-version'
+            - 'package.json'
+            - 'package-lock.json'
+            - '.github/workflows/tests.yml'
+            - '.github/actions/prepare/**'
+            - '.github/actions/check-rust-changes/**'

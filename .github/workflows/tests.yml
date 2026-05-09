@@ -22,14 +22,45 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check Rust changes
+        id: changes
+        uses: ./.github/actions/check-rust-changes
+
       - name: Prepare
+        if: steps.changes.outputs.rust == 'true'
         uses: ./.github/actions/prepare
 
-      - name: Build
-        run: npm run build
+      # Unit tests don't depend on built wasms or downloaded canister
+      # binaries. The primary key includes the commit SHA so a fresh
+      # cache is saved every run; `restore-keys` falls back to the most
+      # recent matching prefix for warm starts.
+      - name: Restore cargo cache
+        if: steps.changes.outputs.rust == 'true'
+        id: cache-unit
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-unit-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-unit-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
+            ${{ runner.os }}-cargo-test-unit-
 
       - name: Run tests
+        if: steps.changes.outputs.rust == 'true'
         run: npm run test:unit
+
+      - name: Save cargo cache
+        if: always() && steps.changes.outputs.rust == 'true' && steps.cache-unit.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.cache-unit.outputs.cache-primary-key }}
 
   integration:
     name: Integration Tests
@@ -43,14 +74,52 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check Rust changes
+        id: changes
+        uses: ./.github/actions/check-rust-changes
+
       - name: Prepare
+        if: steps.changes.outputs.rust == 'true'
         uses: ./.github/actions/prepare
 
+      # Integration tests use both the workspace wasms (built into
+      # `target/wasm32-unknown-unknown/release/`) and the downloaded
+      # third-party canisters (extracted into `target/ic/`). Both live
+      # under `target/`, so caching it skips both rebuild and redownload.
+      # The primary key includes the commit SHA so a fresh cache is
+      # saved every run; `restore-keys` falls back to the most recent
+      # matching prefix.
+      - name: Restore cargo cache
+        if: steps.changes.outputs.rust == 'true'
+        id: cache-integration
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-integration-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'scripts/build.sh', 'scripts/download.ledger.sh', 'scripts/download.icp.sh', 'scripts/download-immutable.sh') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-integration-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'scripts/build.sh', 'scripts/download.ledger.sh', 'scripts/download.icp.sh', 'scripts/download-immutable.sh') }}-
+            ${{ runner.os }}-cargo-test-integration-
+
       - name: Build
+        if: steps.changes.outputs.rust == 'true'
         run: npm run build
 
       - name: Run tests
+        if: steps.changes.outputs.rust == 'true'
         run: npm run test:integration
+
+      - name: Save cargo cache
+        if: always() && steps.changes.outputs.rust == 'true' && steps.cache-integration.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.cache-integration.outputs.cache-primary-key }}
 
   tests-pass:
     name: Tests Pass
