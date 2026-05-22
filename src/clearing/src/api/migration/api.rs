@@ -306,6 +306,7 @@ mod tests {
             trading_access: vec![],
             engine_id: None,
             forked_from: None,
+            locale: None,
         };
         SERIES.with(|s| s.borrow_mut().insert(series_id.clone(), series));
     }

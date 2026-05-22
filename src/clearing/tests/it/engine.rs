@@ -36,6 +36,7 @@ fn add_series_as(
         banner_url: None,
         trading_access: vec![],
         engine_id,
+        locale: None,
     };
 
     let res_bytes = setup

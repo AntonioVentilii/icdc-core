@@ -106,6 +106,7 @@ fn fork_must_be_restricted() {
         description: None,
         trading_access: vec![TradingAccess::Open],
         engine_id: None,
+        locale: None,
     };
 
     let res_bytes = setup
@@ -137,6 +138,7 @@ fn fork_nonexistent_source() {
             groups: vec![GroupId::from("grp_1".to_owned())],
         }],
         engine_id: None,
+        locale: None,
     };
 
     let res_bytes = setup
@@ -199,6 +201,7 @@ fn fork_empty_trading_access_rejected() {
         description: None,
         trading_access: vec![],
         engine_id: None,
+        locale: None,
     };
 
     let res_bytes = setup
@@ -236,6 +239,7 @@ fn fork_mixed_open_and_restricted_rejected() {
                 groups: vec![GroupId::from("grp_mixed".to_owned())],
             },
         ],
+        locale: None,
     };
 
     let res_bytes = setup
@@ -270,6 +274,7 @@ fn fork_title_too_long_rejected() {
             groups: vec![GroupId::from("grp_title".to_owned())],
         }],
         engine_id: None,
+        locale: None,
     };
 
     let res_bytes = setup
@@ -304,6 +309,7 @@ fn fork_description_too_long_rejected() {
             groups: vec![GroupId::from("grp_desc".to_owned())],
         }],
         engine_id: None,
+        locale: None,
     };
 
     let res_bytes = setup

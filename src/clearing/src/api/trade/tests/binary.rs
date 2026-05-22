@@ -31,6 +31,7 @@ fn binary_lifecycle_scenario() {
         trading_access: vec![],
         engine_id: None,
         forked_from: None,
+        locale: None,
     };
 
     setup_test_state(vec![
@@ -101,6 +102,7 @@ fn binary_settle_no() {
         trading_access: vec![],
         engine_id: None,
         forked_from: None,
+        locale: None,
     };
 
     setup_test_state(vec![(seller, 200_000), (buyer, 100_000)]);

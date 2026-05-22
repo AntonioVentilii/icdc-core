@@ -857,6 +857,7 @@ mod tests {
             trading_access: vec![],
             engine_id: None,
             forked_from: None,
+            locale: None,
         }
     }
 

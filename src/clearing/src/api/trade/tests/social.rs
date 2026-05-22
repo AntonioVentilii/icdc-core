@@ -42,6 +42,7 @@ fn social_trade_scenario() {
         trading_access: vec![],
         engine_id: None,
         forked_from: None,
+        locale: None,
     };
 
     // SETUP: Users have ZERO balance
