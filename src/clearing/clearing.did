@@ -524,17 +524,14 @@ type Series = record {
 	//
 	// Examples: `"en"`, `"en-US"`, `"es"`, `"zh-Hant-HK"`.
 	//
-	// # Semantics
+	// `locale` is metadata: it does NOT participate in `series_id` hashing,
+	// so the same economic contract written in different languages must
+	// collide on the same id (otherwise liquidity would fragment across
+	// localized clones of the same market).
 	//
-	// `locale` is metadata. It does **not** participate in [`SeriesId`]
-	// generation: the same economic contract written in different languages
-	// must collide on the same id, otherwise liquidity would fragment across
-	// localized clones of the same market.
-	//
-	// Consumers SHOULD treat `None` as
-	// [`DEFAULT_LOCALE`](crate::constants::DEFAULT_LOCALE) (i.e. `"en"`) and
-	// are responsible for translating into the user's preferred locale —
-	// the canister never stores translations on-chain.
+	// When `None`, consumers should assume the default locale `"en"` and are
+	// responsible for translating into the user's preferred locale — the
+	// canister never stores translations on-chain.
 	locale : opt text;
 	// A detailed description of the series.
 	description : Description;

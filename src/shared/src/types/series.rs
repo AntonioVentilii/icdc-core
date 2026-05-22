@@ -150,17 +150,14 @@ pub struct Series {
     ///
     /// Examples: `"en"`, `"en-US"`, `"es"`, `"zh-Hant-HK"`.
     ///
-    /// # Semantics
+    /// `locale` is metadata: it does NOT participate in `series_id` hashing,
+    /// so the same economic contract written in different languages must
+    /// collide on the same id (otherwise liquidity would fragment across
+    /// localized clones of the same market).
     ///
-    /// `locale` is metadata. It does **not** participate in [`SeriesId`]
-    /// generation: the same economic contract written in different languages
-    /// must collide on the same id, otherwise liquidity would fragment across
-    /// localized clones of the same market.
-    ///
-    /// Consumers SHOULD treat `None` as
-    /// [`DEFAULT_LOCALE`](crate::constants::DEFAULT_LOCALE) (i.e. `"en"`) and
-    /// are responsible for translating into the user's preferred locale —
-    /// the canister never stores translations on-chain.
+    /// When `None`, consumers should assume the default locale `"en"` and are
+    /// responsible for translating into the user's preferred locale — the
+    /// canister never stores translations on-chain.
     pub locale: Option<String>,
 }
 impl Series {
@@ -399,8 +396,7 @@ pub struct AddSeriesParams {
     /// Optional [BCP 47](https://www.rfc-editor.org/info/bcp47) locale tag for
     /// `title`, `description`, and any `outcomes[].title`/`description`.
     ///
-    /// When `None`, consumers should assume
-    /// [`DEFAULT_LOCALE`](crate::constants::DEFAULT_LOCALE) (`"en"`).
+    /// When `None`, consumers should assume the default locale `"en"`.
     /// Translations are never stored on-chain and are the responsibility of
     /// the consumer.
     pub locale: Option<String>,
@@ -425,8 +421,8 @@ pub struct ForkSeriesParams {
     /// Controllers may omit this (`None`). Non-controller callers must provide
     /// a valid `EngineId` on which they hold the `Creator` role.
     pub engine_id: Option<EngineId>,
-    /// Optional locale override. Falls back to the source series locale when `None`.
-    /// See [`Series::locale`] for semantics.
+    /// Optional locale override. Falls back to the source series locale when
+    /// `None`. See `Series.locale` for the full semantics.
     pub locale: Option<String>,
 }
 
@@ -963,47 +959,61 @@ mod tests {
 
     #[test]
     fn locale_does_not_affect_series_id() {
-        let underlying = "ICP";
-        let expiry = 1_735_689_600;
-        let payoff_type = PayoffType::Call;
-        let strike = Some(Price::new(100, 8));
-        let precision = 8;
-        let payout_unit = PayoutUnit::usd();
-        let oracle_source = "coingecko";
+        // Derives `SeriesIdParams` from a full `Series` value. The intent is
+        // to model the registry call site, which constructs hashing inputs
+        // from the user-supplied series fields. Because `SeriesIdParams` has
+        // no `locale` field, `Series.locale` is structurally excluded from
+        // hashing. If a future change adds locale to the hashing inputs, this
+        // helper will fail to compile (and the test below will catch the
+        // resulting id divergence in case the field is wired through).
+        fn id_from(series: &Series) -> SeriesId {
+            Series::generate_id(&SeriesIdParams {
+                underlying: &series.underlying,
+                expiry_ns: series.expiry_ns,
+                payoff_type: &series.payoff_type,
+                strike: series.strike.as_ref(),
+                price_precision: series.price_precision,
+                payout_unit: &series.payout_unit,
+                outcomes: series.outcomes.as_deref(),
+                oracle_source: &series.oracle_source,
+                balance_domain: series.balance_domain,
+                forked_from: series.forked_from.as_ref(),
+                fork_caller: None,
+                fork_index: None,
+            })
+        }
 
-        let id_no_locale = Series::generate_id(&SeriesIdParams {
-            underlying,
-            expiry_ns: expiry,
-            payoff_type: &payoff_type,
-            strike: strike.as_ref(),
-            price_precision: precision,
-            payout_unit: &payout_unit,
+        let base = Series {
+            series_id: SeriesId::from(String::new()),
+            underlying: "ICP".to_owned(),
+            expiry_ns: 1_735_689_600,
+            payoff_type: PayoffType::Call,
+            strike: Some(Price::new(100, 8)),
+            price_precision: 8,
+            payout_unit: PayoutUnit::usd(),
             outcomes: None,
-            oracle_source,
+            oracle_source: "coingecko".to_owned(),
+            creator: Principal::anonymous(),
+            created_at_ns: 0,
+            title: "Long ICP Call".to_owned(),
+            description: Description::plain("EN"),
+            icon_url: None,
+            banner_url: None,
             balance_domain: BalanceDomain::Settlement,
+            trading_access: vec![TradingAccess::Open],
+            engine_id: None,
             forked_from: None,
-            fork_caller: None,
-            fork_index: None,
-        });
+            locale: Some("en".to_owned()),
+        };
 
-        // Locale is metadata and intentionally absent from `SeriesIdParams`,
-        // so two `Series` differing only in `locale` must share the same id.
-        let id_again = Series::generate_id(&SeriesIdParams {
-            underlying,
-            expiry_ns: expiry,
-            payoff_type: &payoff_type,
-            strike: strike.as_ref(),
-            price_precision: precision,
-            payout_unit: &payout_unit,
-            outcomes: None,
-            oracle_source,
-            balance_domain: BalanceDomain::Settlement,
-            forked_from: None,
-            fork_caller: None,
-            fork_index: None,
-        });
+        let mut localized = base.clone();
+        localized.locale = Some("it-IT".to_owned());
+        // Title/description are part of `Series` (not hashed) but localizing
+        // them along with `locale` mirrors realistic usage.
+        localized.title = "Long ICP Call (IT)".to_owned();
+        localized.description = Description::plain("IT");
 
-        assert_eq!(id_no_locale, id_again);
+        assert_eq!(id_from(&base), id_from(&localized));
     }
 
     #[test]
