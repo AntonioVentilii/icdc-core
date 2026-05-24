@@ -203,7 +203,7 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "clearing"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "candid",
  "hex",
@@ -1157,7 +1157,7 @@ dependencies = [
 
 [[package]]
 name = "minter"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "candid",
  "ic-cdk",
@@ -1535,7 +1535,7 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
 name = "registry"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "candid",
  "ic-cdk",
@@ -1883,7 +1883,7 @@ dependencies = [
 
 [[package]]
 name = "shared"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "candid",
  "hex",
