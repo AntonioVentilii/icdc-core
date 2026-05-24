@@ -54,7 +54,7 @@ fn vusd_ledger_controllers() {
 
 #[test]
 fn complex_available_margin_check() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(54);
     let user_b = test_user(55);
 
