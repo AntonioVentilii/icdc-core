@@ -9,8 +9,8 @@ use shared::{
     },
     types::{
         series::{
-            AddSeriesParams, AddSeriesResult, ForkSeriesParams, ListSeriesParams, PaginationParams,
-            Series, SeriesError, SeriesPage,
+            is_valid_locale, AddSeriesParams, AddSeriesResult, ForkSeriesParams, ListSeriesParams,
+            PaginationParams, Series, SeriesError, SeriesPage,
         },
         BalanceDomain, EngineRole, NonMonetaryUnit, PayoutUnit, SeriesId, SeriesIdParams,
         TradingAccess,
@@ -99,6 +99,7 @@ fn add_series_impl(
         banner_url,
         trading_access,
         engine_id,
+        locale,
     } = params;
 
     // --- Social-domain invariants (apply regardless of tier) ---
@@ -146,6 +147,12 @@ fn add_series_impl(
         return Err(SeriesError::DescriptionTooLong).into();
     }
 
+    if let Some(ref tag) = locale {
+        if !is_valid_locale(tag) {
+            return Err(SeriesError::InvalidLocale).into();
+        }
+    }
+
     let trading_access = if trading_access.is_empty() {
         vec![TradingAccess::Open]
     } else {
@@ -190,6 +197,7 @@ fn add_series_impl(
         trading_access,
         engine_id,
         forked_from: None,
+        locale,
     };
 
     let res = SERIES_STORE.with(|store| {
@@ -291,12 +299,18 @@ fn fork_series_impl(
         let description = params
             .description
             .unwrap_or_else(|| source.description.clone());
+        let locale = params.locale.or_else(|| source.locale.clone());
 
         if title.chars().count() > MAX_SERIES_TITLE_LEN {
             return Err(SeriesError::TitleTooLong);
         }
         if description.plain.chars().count() > MAX_SERIES_DESCRIPTION_LEN {
             return Err(SeriesError::DescriptionTooLong);
+        }
+        if let Some(ref tag) = locale {
+            if !is_valid_locale(tag) {
+                return Err(SeriesError::InvalidLocale);
+            }
         }
 
         let fork_index = store
@@ -347,6 +361,7 @@ fn fork_series_impl(
             trading_access: params.trading_access,
             engine_id: params.engine_id,
             forked_from: Some(source.series_id),
+            locale,
         };
 
         store.insert(series_id.clone(), series);
@@ -504,6 +519,7 @@ mod tests {
             banner_url: None,
             trading_access: vec![],
             engine_id: None,
+            locale: None,
         }
     }
 
@@ -531,6 +547,7 @@ mod tests {
                 groups: vec![group],
             }],
             engine_id: None,
+            locale: None,
         }
     }
 
@@ -609,6 +626,108 @@ mod tests {
     }
 
     #[test]
+    fn creator_can_create_series_with_valid_locale() {
+        cleanup();
+        let caller = test_principal(1);
+
+        let mut params = base_params();
+        params.locale = Some("it-IT".to_owned());
+        let result = add_as_creator(params, caller, 1_000_000_000);
+        let AddSeriesResult::Ok(id) = result else {
+            panic!("expected Ok, got {result:?}");
+        };
+
+        let stored = SERIES_STORE.with(|s| s.borrow().get(&id).cloned()).unwrap();
+        assert_eq!(stored.locale.as_deref(), Some("it-IT"));
+    }
+
+    #[test]
+    fn creator_rejects_malformed_locale() {
+        cleanup();
+        let caller = test_principal(1);
+
+        let mut params = base_params();
+        params.locale = Some("english".to_owned());
+        let result = add_as_creator(params, caller, 1_000_000_000);
+        assert!(matches!(
+            result,
+            AddSeriesResult::Err(SeriesError::InvalidLocale)
+        ));
+    }
+
+    #[test]
+    fn fork_inherits_locale_from_source_when_unspecified() {
+        cleanup();
+        let caller = test_principal(1);
+        let group = GroupId::from("grp_locale_inherit".to_owned());
+
+        let mut params = base_params();
+        params.locale = Some("es".to_owned());
+        let AddSeriesResult::Ok(source_id) = add_as_creator(params, caller, 1_000_000_000) else {
+            panic!("source create failed");
+        };
+
+        let fork_res = fork_as_creator(
+            ForkSeriesParams {
+                source_series_id: source_id,
+                title: None,
+                description: None,
+                trading_access: vec![TradingAccess::Restricted {
+                    groups: vec![group],
+                }],
+                engine_id: None,
+                locale: None,
+            },
+            caller,
+            2_000_000_000,
+        );
+        let AddSeriesResult::Ok(fork_id) = fork_res else {
+            panic!("fork failed");
+        };
+
+        let forked = SERIES_STORE
+            .with(|s| s.borrow().get(&fork_id).cloned())
+            .unwrap();
+        assert_eq!(forked.locale.as_deref(), Some("es"));
+    }
+
+    #[test]
+    fn fork_can_override_locale() {
+        cleanup();
+        let caller = test_principal(1);
+        let group = GroupId::from("grp_locale_override".to_owned());
+
+        let mut params = base_params();
+        params.locale = Some("en".to_owned());
+        let AddSeriesResult::Ok(source_id) = add_as_creator(params, caller, 1_000_000_000) else {
+            panic!("source create failed");
+        };
+
+        let fork_res = fork_as_creator(
+            ForkSeriesParams {
+                source_series_id: source_id,
+                title: Some("Mercato in italiano".to_owned()),
+                description: None,
+                trading_access: vec![TradingAccess::Restricted {
+                    groups: vec![group],
+                }],
+                engine_id: None,
+                locale: Some("it".to_owned()),
+            },
+            caller,
+            2_000_000_000,
+        );
+        let AddSeriesResult::Ok(fork_id) = fork_res else {
+            panic!("fork failed");
+        };
+
+        let forked = SERIES_STORE
+            .with(|s| s.borrow().get(&fork_id).cloned())
+            .unwrap();
+        assert_eq!(forked.locale.as_deref(), Some("it"));
+    }
+
+    #[test]
     fn creator_can_create_social_series() {
         cleanup();
         let caller = test_principal(1);
@@ -638,6 +757,7 @@ mod tests {
                 groups: vec![group],
             }],
             engine_id: None,
+            locale: None,
         };
 
         let fork_res = fork_as_creator(fork_params, caller, 2_000_000_000);
@@ -668,6 +788,7 @@ mod tests {
                 groups: vec![GroupId::from("grp_1".to_owned())],
             }],
             engine_id: None,
+            locale: None,
         };
 
         let res = fork_as_creator(fork_params, caller, 1_000_000_000);
@@ -697,6 +818,7 @@ mod tests {
                     groups: vec![group.clone()],
                 }],
                 engine_id: None,
+                locale: None,
             },
             caller,
             2_000_000_000,
@@ -714,6 +836,7 @@ mod tests {
                     groups: vec![group],
                 }],
                 engine_id: None,
+                locale: None,
             },
             caller,
             3_000_000_000,
@@ -748,6 +871,7 @@ mod tests {
                         groups: vec![group.clone()],
                     }],
                     engine_id: None,
+                    locale: None,
                 },
                 caller,
                 2_000_000_000 + i,
@@ -767,6 +891,7 @@ mod tests {
                     groups: vec![group],
                 }],
                 engine_id: None,
+                locale: None,
             },
             caller,
             9_000_000_000,
@@ -928,6 +1053,7 @@ mod tests {
                     groups: vec![group],
                 }],
                 engine_id: None,
+                locale: None,
             },
             challenger,
             2_000_000_000,
@@ -971,6 +1097,7 @@ mod tests {
                     groups: vec![group.clone()],
                 }],
                 engine_id: None,
+                locale: None,
             },
             challenger,
             1_500_000_000,
@@ -986,6 +1113,7 @@ mod tests {
                     groups: vec![group],
                 }],
                 engine_id: None,
+                locale: None,
             },
             challenger,
             1_500_000_001,

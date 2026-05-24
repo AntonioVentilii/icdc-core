@@ -224,6 +224,7 @@ impl TradeHelperTrait for TestSetup {
             banner_url: None,
             trading_access: vec![],
             engine_id: None,
+            locale: None,
         };
 
         let res_bytes = self
@@ -430,6 +431,7 @@ impl TradeHelperTrait for TestSetup {
             description: None,
             trading_access,
             engine_id,
+            locale: None,
         };
 
         let res_bytes = self

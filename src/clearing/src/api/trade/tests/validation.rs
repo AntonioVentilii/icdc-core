@@ -51,6 +51,7 @@ fn categorical_arbitrage_validation() {
         trading_access: vec![],
         engine_id: None,
         forked_from: None,
+        locale: None,
     };
 
     LIMIT_ORDERS.with(|m| m.borrow_mut().clear());
@@ -138,6 +139,7 @@ fn binary_arbitrage_validation() {
         trading_access: vec![],
         engine_id: None,
         forked_from: None,
+        locale: None,
     };
 
     // Price $1.10 (Violation)

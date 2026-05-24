@@ -531,6 +531,7 @@ mod tests {
             trading_access: vec![],
             engine_id: None,
             forked_from: None,
+            locale: None,
         };
 
         // Settlement price 200 → Call payoff = 200 - 100 = 100 USD per unit.
@@ -619,6 +620,7 @@ mod tests {
             trading_access: vec![],
             engine_id: None,
             forked_from: None,
+            locale: None,
         };
 
         let settlement_price = Price::new(150, 0); // payoff 50 per unit
@@ -929,6 +931,7 @@ mod tests {
             trading_access: vec![],
             engine_id: None,
             forked_from: None,
+            locale: None,
         };
 
         // Settlement price 200 → gross payoff = 200 - 100 = 100 USD (4-decimal units)
@@ -1140,6 +1143,7 @@ mod tests {
             trading_access: vec![],
             engine_id: None,
             forked_from: None,
+            locale: None,
         };
 
         POSITIONS.with(|pos| pos.borrow_mut().clear());

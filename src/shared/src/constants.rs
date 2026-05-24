@@ -23,6 +23,17 @@ pub const USD_DECIMALS: u8 = 4;
 pub const MAX_SERIES_TITLE_LEN: usize = 128;
 /// Maximum length of a series description in characters.
 pub const MAX_SERIES_DESCRIPTION_LEN: usize = 1024;
+/// Maximum length of a series locale tag in characters.
+///
+/// Locales follow [BCP 47](https://www.rfc-editor.org/info/bcp47) (e.g. `"en"`,
+/// `"en-US"`, `"zh-Hant-HK"`). 16 chars comfortably fits language + script +
+/// region tags without enabling abuse vectors.
+pub const MAX_LOCALE_LEN: usize = 16;
+/// The default locale assumed for a series when none is provided.
+///
+/// Consumers SHOULD treat `Series::locale == None` as if it were
+/// [`DEFAULT_LOCALE`].
+pub const DEFAULT_LOCALE: &str = "en";
 
 /// Maximum length of a social reward title in characters.
 pub const MAX_REWARD_TITLE_LEN: usize = 64;

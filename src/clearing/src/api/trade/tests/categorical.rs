@@ -53,6 +53,7 @@ fn categorical_mint_redeem_complete_set() {
         trading_access: vec![],
         engine_id: None,
         forked_from: None,
+        locale: None,
     };
 
     setup_test_state(vec![(user, 100_000)]);
@@ -116,6 +117,7 @@ fn categorical_lifecycle_scenario() {
         trading_access: vec![],
         engine_id: None,
         forked_from: None,
+        locale: None,
     };
 
     setup_test_state(vec![(seller, 200_000), (buyer, 100_000)]);
@@ -197,6 +199,7 @@ fn categorical_short_settlement() {
         trading_access: vec![],
         engine_id: None,
         forked_from: None,
+        locale: None,
     };
 
     setup_test_state(vec![(seller, 100_000), (buyer, 100_000)]);
@@ -271,6 +274,7 @@ fn categorical_short_loss() {
         trading_access: vec![],
         engine_id: None,
         forked_from: None,
+        locale: None,
     };
 
     setup_test_state(vec![(seller, 100_000), (buyer, 100_000)]);

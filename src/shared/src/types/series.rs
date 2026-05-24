@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    constants::{DEFAULT_SOCIAL_MAX_PER_HOUR, DEFAULT_SOCIAL_MAX_PER_USER},
+    constants::{DEFAULT_SOCIAL_MAX_PER_HOUR, DEFAULT_SOCIAL_MAX_PER_USER, MAX_LOCALE_LEN},
     types::{
         description::Description, domain::BalanceDomain, engine::EngineId, groups::TradingAccess,
         payout::PayoutUnit, price::Price,
@@ -144,6 +144,21 @@ pub struct Series {
     pub engine_id: Option<EngineId>,
     /// If this series was forked from another, the source series ID.
     pub forked_from: Option<SeriesId>,
+    /// Optional [BCP 47](https://www.rfc-editor.org/info/bcp47) language tag
+    /// describing the language of `title`, `description`, and any
+    /// `outcomes[].title` / `outcomes[].description`.
+    ///
+    /// Examples: `"en"`, `"en-US"`, `"es"`, `"zh-Hant-HK"`.
+    ///
+    /// `locale` is metadata: it does NOT participate in `series_id` hashing,
+    /// so the same economic contract written in different languages must
+    /// collide on the same id (otherwise liquidity would fragment across
+    /// localized clones of the same market).
+    ///
+    /// When `None`, consumers should assume the default locale `"en"` and are
+    /// responsible for translating into the user's preferred locale — the
+    /// canister never stores translations on-chain.
+    pub locale: Option<String>,
 }
 impl Series {
     /// Generates a unique [`SeriesId`] based on the contract parameters.
@@ -232,6 +247,49 @@ impl Series {
     }
 }
 
+/// Validates a [BCP 47](https://www.rfc-editor.org/info/bcp47)-shaped locale tag.
+///
+/// This is intentionally a *shape* check, not a registry-backed lookup: the
+/// canister has no business validating against the IANA language subtag
+/// registry. The check ensures:
+///
+/// - non-empty, ASCII-only,
+/// - at most [`MAX_LOCALE_LEN`] characters,
+/// - matches the regex `^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$` (a primary language subtag of 2 or 3
+///   ASCII letters, optionally followed by `-`- separated alphanumeric subtags of 2 to 8
+///   characters).
+///
+/// Examples accepted: `"en"`, `"en-US"`, `"zh-Hant-HK"`, `"sr-Latn-RS"`.
+/// Examples rejected: `""`, `"e"`, `"en_US"`, `"english"`, `"en-"`.
+#[must_use]
+pub fn is_valid_locale(locale: &str) -> bool {
+    if locale.is_empty() || locale.chars().count() > MAX_LOCALE_LEN {
+        return false;
+    }
+    if !locale.is_ascii() {
+        return false;
+    }
+
+    let mut subtags = locale.split('-');
+
+    let Some(primary) = subtags.next() else {
+        return false;
+    };
+    let primary_len = primary.len();
+    if !(2..=3).contains(&primary_len) || !primary.bytes().all(|b| b.is_ascii_alphabetic()) {
+        return false;
+    }
+
+    for subtag in subtags {
+        let len = subtag.len();
+        if !(2..=8).contains(&len) || !subtag.bytes().all(|b| b.is_ascii_alphanumeric()) {
+            return false;
+        }
+    }
+
+    true
+}
+
 /// Parameters used to generate a unique [`SeriesId`].
 pub struct SeriesIdParams<'a> {
     pub underlying: &'a str,
@@ -288,6 +346,8 @@ pub enum SeriesError {
     EngineRoleNotHeld,
     /// Non-controller callers must specify an `engine_id` for non-social markets.
     EngineIdRequired,
+    /// The provided locale tag is not a valid BCP 47 shape or exceeds the length limit.
+    InvalidLocale,
 }
 
 /// Input parameters for registering a new derivative series.
@@ -333,6 +393,13 @@ pub struct AddSeriesParams {
     /// Controllers may omit this (`None`). Non-controller callers must provide
     /// a valid `EngineId` on which they hold the `Creator` role.
     pub engine_id: Option<EngineId>,
+    /// Optional [BCP 47](https://www.rfc-editor.org/info/bcp47) locale tag for
+    /// `title`, `description`, and any `outcomes[].title`/`description`.
+    ///
+    /// When `None`, consumers should assume the default locale `"en"`.
+    /// Translations are never stored on-chain and are the responsibility of
+    /// the consumer.
+    pub locale: Option<String>,
 }
 
 /// Input parameters for forking (cloning) an existing series into a restricted circle.
@@ -354,6 +421,9 @@ pub struct ForkSeriesParams {
     /// Controllers may omit this (`None`). Non-controller callers must provide
     /// a valid `EngineId` on which they hold the `Creator` role.
     pub engine_id: Option<EngineId>,
+    /// Optional locale override. Falls back to the source series locale when
+    /// `None`. See `Series.locale` for the full semantics.
+    pub locale: Option<String>,
 }
 
 /// Parameters for paginating results.
@@ -556,8 +626,8 @@ mod tests {
     use candid::Principal;
 
     use crate::types::{
-        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId,
-        SeriesIdParams, TradingAccess,
+        series::is_valid_locale, BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series,
+        SeriesId, SeriesIdParams, TradingAccess,
     };
 
     #[test]
@@ -878,11 +948,110 @@ mod tests {
             trading_access: vec![TradingAccess::Open],
             engine_id: None,
             forked_from: None,
+            locale: None,
         };
 
         assert_eq!(series.title, "Long ICP Call");
         assert_eq!(series.description.plain, "A vanilla call option on ICP");
         assert_eq!(series.creator, Principal::anonymous());
         assert_eq!(series.price_precision, 8);
+    }
+
+    #[test]
+    fn locale_does_not_affect_series_id() {
+        // Derives `SeriesIdParams` from a full `Series` value. The intent is
+        // to model the registry call site, which constructs hashing inputs
+        // from the user-supplied series fields. Because `SeriesIdParams` has
+        // no `locale` field, `Series.locale` is structurally excluded from
+        // hashing. If a future change adds locale to the hashing inputs, this
+        // helper will fail to compile (and the test below will catch the
+        // resulting id divergence in case the field is wired through).
+        fn id_from(series: &Series) -> SeriesId {
+            Series::generate_id(&SeriesIdParams {
+                underlying: &series.underlying,
+                expiry_ns: series.expiry_ns,
+                payoff_type: &series.payoff_type,
+                strike: series.strike.as_ref(),
+                price_precision: series.price_precision,
+                payout_unit: &series.payout_unit,
+                outcomes: series.outcomes.as_deref(),
+                oracle_source: &series.oracle_source,
+                balance_domain: series.balance_domain,
+                forked_from: series.forked_from.as_ref(),
+                fork_caller: None,
+                fork_index: None,
+            })
+        }
+
+        let base = Series {
+            series_id: SeriesId::from(String::new()),
+            underlying: "ICP".to_owned(),
+            expiry_ns: 1_735_689_600,
+            payoff_type: PayoffType::Call,
+            strike: Some(Price::new(100, 8)),
+            price_precision: 8,
+            payout_unit: PayoutUnit::usd(),
+            outcomes: None,
+            oracle_source: "coingecko".to_owned(),
+            creator: Principal::anonymous(),
+            created_at_ns: 0,
+            title: "Long ICP Call".to_owned(),
+            description: Description::plain("EN"),
+            icon_url: None,
+            banner_url: None,
+            balance_domain: BalanceDomain::Settlement,
+            trading_access: vec![TradingAccess::Open],
+            engine_id: None,
+            forked_from: None,
+            locale: Some("en".to_owned()),
+        };
+
+        let mut localized = base.clone();
+        localized.locale = Some("it-IT".to_owned());
+        // Title/description are part of `Series` (not hashed) but localizing
+        // them along with `locale` mirrors realistic usage.
+        localized.title = "Long ICP Call (IT)".to_owned();
+        localized.description = Description::plain("IT");
+
+        assert_eq!(id_from(&base), id_from(&localized));
+    }
+
+    #[test]
+    fn is_valid_locale_accepts_common_tags() {
+        for tag in [
+            "en",
+            "es",
+            "it",
+            "fr",
+            "de",
+            "en-US",
+            "en-GB",
+            "pt-BR",
+            "zh-Hant",
+            "zh-Hant-HK",
+            "sr-Latn-RS",
+        ] {
+            assert!(is_valid_locale(tag), "expected `{tag}` to be valid");
+        }
+    }
+
+    #[test]
+    fn is_valid_locale_rejects_malformed_tags() {
+        for tag in [
+            "",
+            "e",                  // primary too short
+            "english",            // primary too long (>3)
+            "en_US",              // wrong separator
+            "en-",                // trailing separator
+            "en--US",             // empty subtag
+            "en-U",               // subtag too short
+            "en-VERYLONGREGION",  // subtag too long (>8)
+            "en US",              // space disallowed
+            "en-US-",             // trailing separator
+            "12",                 // primary not letters
+            "abcdefghijklmnopqr", // exceeds MAX_LOCALE_LEN
+        ] {
+            assert!(!is_valid_locale(tag), "expected `{tag}` to be rejected");
+        }
     }
 }
