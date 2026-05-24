@@ -28,7 +28,7 @@ use crate::utils::{
 
 #[test]
 fn list_orders_empty() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
 
     let params = ListOrdersParams { series_id: None };
 
@@ -43,7 +43,7 @@ fn list_orders_empty() {
 
 #[test]
 fn status_by_series_empty() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
 
     let params = ListOrdersParams {
         series_id: Some("test_series".to_owned().into()),
@@ -60,7 +60,7 @@ fn status_by_series_empty() {
 
 #[test]
 fn get_orders_empty() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user = test_user(70);
 
     let orders: Vec<LimitOrder> = assert_ok_value(env.clearing.query::<Vec<LimitOrder>, _>(
@@ -74,7 +74,7 @@ fn get_orders_empty() {
 
 #[test]
 fn submit_market_order_nonexistent_order() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user = test_user(71);
 
     let params = SubmitMarketOrderParams {
@@ -97,7 +97,7 @@ fn submit_market_order_nonexistent_order() {
 
 #[test]
 fn cancel_limit_order_nonexistent() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user = test_user(72);
 
     let params = CancelLimitOrderParams {
@@ -119,7 +119,7 @@ fn cancel_limit_order_nonexistent() {
 
 #[test]
 fn submit_matched_trade_zero_qty_rejected() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let buyer = test_user(73);
     let seller = test_user(74);
 
@@ -154,7 +154,7 @@ fn submit_matched_trade_zero_qty_rejected() {
 
 #[test]
 fn submit_matched_trade_rejects_non_controller() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let random_user = test_user(75);
     let buyer = test_user(76);
     let seller = test_user(77);
@@ -181,7 +181,7 @@ fn submit_matched_trade_rejects_non_controller() {
 }
 #[test]
 fn basic_matched_trade() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(54);
     let user_b = test_user(55);
 
@@ -302,7 +302,7 @@ fn basic_matched_trade() {
 
 #[test]
 fn cross_limit_match() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(54);
     let user_b = test_user(55);
 
@@ -381,7 +381,7 @@ fn cross_limit_match() {
 
 #[test]
 fn insufficient_margin() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(54);
     let user_b = test_user(55);
 
@@ -482,7 +482,7 @@ fn insufficient_margin() {
 
 #[test]
 fn limit_buy_sell() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(54);
 
     // 1. Setup vUSD
@@ -523,7 +523,7 @@ fn limit_buy_sell() {
 
 #[test]
 fn limit_market_match() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(54);
     let user_b = test_user(55);
 
@@ -585,7 +585,7 @@ fn limit_market_match() {
 
 #[test]
 fn multi_user_journey() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(54);
     let user_b = test_user(55);
 

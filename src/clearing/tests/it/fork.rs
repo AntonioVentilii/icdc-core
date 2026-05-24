@@ -14,7 +14,7 @@ use crate::utils::{
 
 #[test]
 fn fork_series_creates_distinct_restricted_series() {
-    let setup = TestSetup::default();
+    let setup = TestSetup::with_icp();
 
     let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
     setup.pic.tick();
@@ -48,7 +48,7 @@ fn fork_series_creates_distinct_restricted_series() {
 
 #[test]
 fn engine_creator_can_fork() {
-    let setup = TestSetup::default();
+    let setup = TestSetup::with_icp();
     let creator = test_user(70);
 
     let engine_id = setup.register_engine("Fork Engine", vec![EngineRole::Creator]);
@@ -72,7 +72,7 @@ fn engine_creator_can_fork() {
 
 #[test]
 fn non_creator_cannot_fork() {
-    let setup = TestSetup::default();
+    let setup = TestSetup::with_icp();
     let random_user = test_user(71);
 
     let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
@@ -95,7 +95,7 @@ fn non_creator_cannot_fork() {
 
 #[test]
 fn fork_must_be_restricted() {
-    let setup = TestSetup::default();
+    let setup = TestSetup::with_icp();
 
     let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
     setup.pic.tick();
@@ -128,7 +128,7 @@ fn fork_must_be_restricted() {
 
 #[test]
 fn fork_nonexistent_source() {
-    let setup = TestSetup::default();
+    let setup = TestSetup::with_icp();
 
     let fork_params = ForkSeriesParams {
         source_series_id: SeriesId::from("nonexistent".to_owned()),
@@ -160,7 +160,7 @@ fn fork_nonexistent_source() {
 
 #[test]
 fn multiple_forks_from_same_source_produce_unique_ids() {
-    let setup = TestSetup::default();
+    let setup = TestSetup::with_icp();
 
     let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
     setup.pic.tick();
@@ -190,7 +190,7 @@ fn multiple_forks_from_same_source_produce_unique_ids() {
 
 #[test]
 fn fork_empty_trading_access_rejected() {
-    let setup = TestSetup::default();
+    let setup = TestSetup::with_icp();
 
     let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
     setup.pic.tick();
@@ -223,7 +223,7 @@ fn fork_empty_trading_access_rejected() {
 
 #[test]
 fn fork_mixed_open_and_restricted_rejected() {
-    let setup = TestSetup::default();
+    let setup = TestSetup::with_icp();
 
     let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
     setup.pic.tick();
@@ -261,7 +261,7 @@ fn fork_mixed_open_and_restricted_rejected() {
 
 #[test]
 fn fork_title_too_long_rejected() {
-    let setup = TestSetup::default();
+    let setup = TestSetup::with_icp();
 
     let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
     setup.pic.tick();
@@ -296,7 +296,7 @@ fn fork_title_too_long_rejected() {
 
 #[test]
 fn fork_description_too_long_rejected() {
-    let setup = TestSetup::default();
+    let setup = TestSetup::with_icp();
 
     let source_id = setup.add_binary_series("ICP", 50_000, BalanceDomain::Settlement);
     setup.pic.tick();
@@ -331,7 +331,7 @@ fn fork_description_too_long_rejected() {
 
 #[test]
 fn fork_with_engine_id_propagates_to_series() {
-    let setup = TestSetup::default();
+    let setup = TestSetup::with_icp();
     let creator = test_user(80);
 
     let engine_id = setup.register_engine("Fork EID Engine", vec![EngineRole::Creator]);
@@ -368,7 +368,7 @@ fn fork_with_engine_id_propagates_to_series() {
 
 #[test]
 fn fork_with_wrong_engine_id_rejected() {
-    let setup = TestSetup::default();
+    let setup = TestSetup::with_icp();
     let creator = test_user(81);
 
     let engine_a = setup.register_engine("Fork Eng A", vec![EngineRole::Creator]);
@@ -398,7 +398,7 @@ fn fork_with_wrong_engine_id_rejected() {
 
 #[test]
 fn fork_non_controller_without_engine_id_rejected() {
-    let setup = TestSetup::default();
+    let setup = TestSetup::with_icp();
     let creator = test_user(82);
 
     let engine_id = setup.register_engine("Fork No EID", vec![EngineRole::Creator]);

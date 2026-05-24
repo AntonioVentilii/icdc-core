@@ -19,7 +19,7 @@ use crate::utils::{
 /// proving risk parity with Settlement.
 #[test]
 fn playground_enforces_margin() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(56);
 
     let series_id = env.add_binary_series("RISK-PG", 1_000_000, BalanceDomain::Playground);
@@ -62,7 +62,7 @@ fn playground_enforces_margin() {
 /// the user can trade in Playground and cannot in Settlement.
 #[test]
 fn migrate_domain_balances() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(57);
 
     // Deposit into Settlement
@@ -187,7 +187,7 @@ fn migrate_domain_balances() {
 /// without doubling balances.
 #[test]
 fn migrate_domain_idempotent() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(58);
 
     let deposit_amount = Nat::from(10_000_000_000_u128);

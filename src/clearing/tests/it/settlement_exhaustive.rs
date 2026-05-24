@@ -17,7 +17,7 @@ use crate::utils::{
 
 #[test]
 fn exhaustive_settlement_journey() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(54);
     let user_b = test_user(55);
     let user_c = test_user(56);
