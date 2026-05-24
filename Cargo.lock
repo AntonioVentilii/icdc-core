@@ -798,15 +798,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ic-stable-structures"
-version = "0.6.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d30d4cf17aff1024e13133897048bcba580e063c9000571ab766ca37e2996f4"
-dependencies = [
- "ic_principal",
-]
-
-[[package]]
 name = "ic-transport-types"
 version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -857,15 +848,14 @@ dependencies = [
 
 [[package]]
 name = "icrc-ledger-types"
-version = "0.1.13"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "263acc94fa47008ad00f76b8d3694efe7f8361870c9ec92cddcc588b571518b7"
+checksum = "a11c866a01b93ef6bd0e3dc01374df41bc70a8b79027a2fd120543a094668978"
 dependencies = [
  "base32",
  "candid",
  "crc32fast",
  "hex",
- "ic-stable-structures",
  "icrc-cbor",
  "minicbor",
  "num-bigint",
