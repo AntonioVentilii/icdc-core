@@ -560,6 +560,28 @@ type Series = record {
 	// If this series was forked from another, the source series ID.
 	forked_from : opt text
 };
+// Input parameters for the one-shot settlement-event backfill.
+// Synthesizes `EventType::Settled` events for finalized plans that resolved
+// before the per-user event emission was added to settlement.
+type BackfillSettlementEventsParams = record {
+	// Resume after this series id (exclusive). `null` starts from the lowest
+	// series id. Callers re-invoke with the previous response's `next_cursor`
+	// until it comes back as `null`.
+	start_after : opt text
+};
+// Result of one chunk of the settlement-event backfill.
+type BackfillSettlementEventsResult = record {
+	// Number of finalized plans visited in this chunk.
+	plans_scanned : nat64;
+	// Number of `Settled` events newly written in this chunk.
+	events_emitted : nat64;
+	// Number of positions already covered by a pre-existing `Settled` event
+	// for the same series (idempotent skip).
+	events_skipped : nat64;
+	// When set, pass back as `start_after` to continue. `null` means the
+	// backfill is complete.
+	next_cursor : opt text
+};
 // Input parameters for initiating a series settlement.
 type SettleSeriesParams = record {
 	// The derivative series identifier.
@@ -897,6 +919,20 @@ service : (Config) -> {
 	// This method validates the series and increases the target user's position based on the provided
 	// proof. This method is gated to canister controllers.
 	accept_position_transfer : (PositionProof) -> (AcceptPositionTransferResult);
+	// One-shot, idempotent backfill of `Settled` events for plans finalized
+	// before per-user event emission was added to `apply_settlement_accounting_logic`.
+	//
+	// Iterates `SETTLEMENT_PLANS` in sorted order starting after `params.start_after`.
+	// For each `Finalised` plan it synthesizes one `Settled` event per
+	// `SettlementPosition` whose series has no pre-existing `Settled` event in `EVENTS`.
+	// The synthesized event's `timestamp` is the plan's original `idempotency_ns`.
+	//
+	// Yields cooperatively when the instruction counter is high so a single call
+	// cannot exhaust the update budget. Callers loop until the response returns
+	// `next_cursor : null`. This method is gated to canister controllers.
+	backfill_settlement_events : (BackfillSettlementEventsParams) -> (
+		BackfillSettlementEventsResult
+	);
 	// Cancels a stuck fund withdrawal and refunds the internal ledger balance.
 	//
 	// This method is gated to canister controllers.
@@ -954,7 +990,10 @@ service : (Config) -> {
 	get_settlement_plan : (text) -> (opt SettlementPlan) query;
 	// Returns the public settlement progress for a derivative series without exposing user positions.
 	get_settlement_status : (text) -> (opt SettlementStatusView) query;
-	// Retrieves the trade history (executed trades) for the caller.
+	// Retrieves the trade history for the caller. Returns events that move
+	// the user's economic position — executed trades, settlements, and
+	// liquidations. Order-placement events are excluded so the response is
+	// bounded to events that materially settle cashflow.
 	get_trade_history : () -> (vec Event) query;
 	// Returns the official number of decimals for USD accounting.
 	get_usd_decimals : () -> (nat8) query;

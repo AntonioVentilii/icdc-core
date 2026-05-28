@@ -571,7 +571,10 @@ pub(crate) fn validate_no_arbitrage(
     Ok(())
 }
 
-/// Retrieves the trade history (executed trades) for the caller.
+/// Retrieves the trade history for the caller. Returns events that move the
+/// user's economic position — executed trades, settlements, and liquidations.
+/// Order-placement events are excluded so the response is bounded to events
+/// that materially settle cashflow.
 #[query(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn get_trade_history() -> Vec<Event> {
@@ -581,7 +584,13 @@ pub fn get_trade_history() -> Vec<Event> {
         events
             .borrow()
             .iter()
-            .filter(|e| e.user == caller && matches!(e.event_type, EventType::Executed))
+            .filter(|e| {
+                e.user == caller
+                    && matches!(
+                        e.event_type,
+                        EventType::Executed | EventType::Settled | EventType::Liquidated
+                    )
+            })
             .cloned()
             .collect()
     })
