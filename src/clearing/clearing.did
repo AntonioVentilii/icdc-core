@@ -102,6 +102,30 @@ type AssetWorth = record {
 	// The unique identifier of the asset.
 	asset_id : text
 };
+// Input parameters for the one-shot settlement-event backfill. Synthesizes
+// `EventType::Settled` events for finalized plans that resolved before the
+// per-user event emission was added to settlement.
+type BackfillSettlementEventsParams = record {
+	// Resume after this series id (exclusive). `None` starts from the lowest
+	// series id. Callers re-invoke with the previous response's `next_cursor`
+	// until it comes back as `None`.
+	start_after : opt text
+};
+// Outcome of one chunk of the settlement-event backfill.
+type BackfillSettlementEventsResult = record {
+	// Number of finalized plans visited in this chunk.
+	plans_scanned : nat64;
+	// Number of `Settled` events newly written in this chunk.
+	events_emitted : nat64;
+	// Number of `SettlementPosition`s skipped because their series already has
+	// at least one pre-existing `Settled` event (idempotent skip). Counted
+	// per-position to mirror the live emission contract, which writes one
+	// event per position.
+	events_skipped : nat64;
+	// When `Some`, pass back as `start_after` to continue. `None` means the
+	// backfill is complete.
+	next_cursor : opt text
+};
 // Represents a distinct domain for balances and trading logic.
 type BalanceDomain = variant {
 	// VICI XP (loyalty points) — segregated from Playground test assets.
@@ -897,6 +921,23 @@ service : (Config) -> {
 	// This method validates the series and increases the target user's position based on the provided
 	// proof. This method is gated to canister controllers.
 	accept_position_transfer : (PositionProof) -> (AcceptPositionTransferResult);
+	// One-shot, idempotent backfill of `Settled` events for plans finalized
+	// before per-user event emission was added to `apply_settlement_accounting_logic`.
+	//
+	// Iterates `SETTLEMENT_PLANS` in sorted order starting after
+	// `params.start_after`. For each `Finalised` plan it synthesizes one
+	// `EventType::Settled` event per `SettlementPosition` whose `(user,
+	// series_id)` pair has no pre-existing `Settled` event in `EVENTS`. The
+	// synthesized event's `timestamp` is the plan's original
+	// `idempotency_ns` so backfilled rows sort alongside the live events
+	// that would have been written at settlement time.
+	//
+	// Yields cooperatively when the instruction counter is high so a single
+	// call cannot exhaust the update budget. Callers loop until the response
+	// returns `next_cursor: None`.
+	backfill_settlement_events : (BackfillSettlementEventsParams) -> (
+		BackfillSettlementEventsResult
+	);
 	// Cancels a stuck fund withdrawal and refunds the internal ledger balance.
 	//
 	// This method is gated to canister controllers.
@@ -954,7 +995,14 @@ service : (Config) -> {
 	get_settlement_plan : (text) -> (opt SettlementPlan) query;
 	// Returns the public settlement progress for a derivative series without exposing user positions.
 	get_settlement_status : (text) -> (opt SettlementStatusView) query;
-	// Retrieves the trade history (executed trades) for the caller.
+	// Retrieves the trade history for the caller. Returns events that move the
+	// user's economic position — executed trades, settlements, and liquidations.
+	// Order-placement events are excluded so the response is bounded to events
+	// that materially settle cashflow.
+	//
+	// Results are sorted by `(timestamp, event_id)` so that backfilled rows whose
+	// timestamp reflects the original settlement time interleave chronologically
+	// with live events rather than appearing in storage-insertion order.
 	get_trade_history : () -> (vec Event) query;
 	// Returns the official number of decimals for USD accounting.
 	get_usd_decimals : () -> (nat8) query;

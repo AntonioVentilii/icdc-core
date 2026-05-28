@@ -1,5 +1,6 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
+use shared::types::SeriesId;
 
 use super::errors::SettlementError;
 
@@ -34,4 +35,21 @@ impl From<Result<(), SettlementError>> for SettleSeriesResult {
             Err(e) => SettleSeriesResult::Err(e),
         }
     }
+}
+
+/// Outcome of one chunk of the settlement-event backfill.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug, Default)]
+pub struct BackfillSettlementEventsResult {
+    /// Number of finalized plans visited in this chunk.
+    pub plans_scanned: u64,
+    /// Number of `Settled` events newly written in this chunk.
+    pub events_emitted: u64,
+    /// Number of `SettlementPosition`s skipped because their series already has
+    /// at least one pre-existing `Settled` event (idempotent skip). Counted
+    /// per-position to mirror the live emission contract, which writes one
+    /// event per position.
+    pub events_skipped: u64,
+    /// When `Some`, pass back as `start_after` to continue. `None` means the
+    /// backfill is complete.
+    pub next_cursor: Option<SeriesId>,
 }

@@ -32,7 +32,10 @@ use crate::{
             results::{DepositCollateralResult, WithdrawCollateralResult},
         },
         migration::{params::MigrateDomainParams, results::MigrateDomainResult},
-        settlement::{params::SettleSeriesParams, results::SettleSeriesResult},
+        settlement::{
+            params::{BackfillSettlementEventsParams, SettleSeriesParams},
+            results::{BackfillSettlementEventsResult, SettleSeriesResult},
+        },
         trade::{
             errors::TradeError,
             params::{
