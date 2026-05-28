@@ -575,13 +575,17 @@ pub(crate) fn validate_no_arbitrage(
 /// user's economic position — executed trades, settlements, and liquidations.
 /// Order-placement events are excluded so the response is bounded to events
 /// that materially settle cashflow.
+///
+/// Results are sorted by `(timestamp, event_id)` so that backfilled rows whose
+/// timestamp reflects the original settlement time interleave chronologically
+/// with live events rather than appearing in storage-insertion order.
 #[query(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn get_trade_history() -> Vec<Event> {
     let caller: User = msg_caller().into();
 
     EVENTS.with(|events: &RefCell<Vec<Event>>| {
-        events
+        let mut filtered: Vec<Event> = events
             .borrow()
             .iter()
             .filter(|e| {
@@ -592,7 +596,9 @@ pub fn get_trade_history() -> Vec<Event> {
                     )
             })
             .cloned()
-            .collect()
+            .collect();
+        filtered.sort_by(|a, b| a.timestamp.cmp(&b.timestamp).then(a.event_id.cmp(&b.event_id)));
+        filtered
     })
 }
 

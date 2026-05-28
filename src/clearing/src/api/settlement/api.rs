@@ -1,5 +1,5 @@
-use core::{cell::RefCell, time::Duration};
-use std::collections::{BTreeMap, HashMap};
+use core::{cell::RefCell, ops::Bound, time::Duration};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use candid::Principal;
 use ic_cdk::api::{instruction_counter, is_controller, msg_caller};
@@ -485,9 +485,9 @@ pub(crate) fn apply_settlement_accounting_logic(plan: &mut SettlementPlan) -> bo
                     current_reserved.saturating_sub(pos.reserved_margin_usd),
                 );
 
-                // 3. Record a per-user Settled event so the trade-history
-                //    query can surface the settlement. `qty` carries the
-                //    signed cashflow (positive = winner, negative = loser).
+                // 3. Record a per-user Settled event so the trade-history query can surface the
+                //    settlement. `qty` carries the signed cashflow (positive = winner, negative =
+                //    loser).
                 let event_id = NEXT_EVENT_ID.with(|id| {
                     let mut id = id.borrow_mut();
                     let current = *id;
@@ -556,6 +556,8 @@ pub fn backfill_settlement_events(
     #[cfg(not(test))]
     const INSTRUCTION_BUDGET: u64 = 1_000_000_000;
 
+    let BackfillSettlementEventsParams { start_after } = params;
+
     // Per-series dedup: any plan whose series already has at least one
     // Settled event in EVENTS is treated as already backfilled. A plan
     // is backfilled atomically (all positions or none), so this single
@@ -563,15 +565,14 @@ pub fn backfill_settlement_events(
     // which emits one event per `SettlementPosition` — including
     // multiple positions per user on the same series (e.g. hedged
     // YES + NO).
-    let mut series_already_backfilled: std::collections::HashSet<SeriesId> =
-        EVENTS.with(|events| {
-            events
-                .borrow()
-                .iter()
-                .filter(|e| matches!(e.event_type, EventType::Settled))
-                .map(|e| e.series_id.clone())
-                .collect()
-        });
+    let mut series_already_backfilled: HashSet<SeriesId> = EVENTS.with(|events| {
+        events
+            .borrow()
+            .iter()
+            .filter(|e| matches!(e.event_type, EventType::Settled))
+            .map(|e| e.series_id.clone())
+            .collect()
+    });
 
     let mut result = BackfillSettlementEventsResult::default();
     let mut emitted: Vec<Event> = Vec::new();
@@ -580,72 +581,67 @@ pub fn backfill_settlement_events(
         let plans = plans.borrow();
 
         // Lower bound on the iteration: exclude `start_after` itself.
-        let iter: Box<dyn Iterator<Item = (&SeriesId, &SettlementPlan)>> = match &params.start_after
-        {
+        let iter: Box<dyn Iterator<Item = (&SeriesId, &SettlementPlan)>> = match &start_after {
             None => Box::new(plans.iter()),
             Some(after) => Box::new(
-                plans
-                    .range::<SeriesId, _>((
-                        core::ops::Bound::Excluded(after),
-                        core::ops::Bound::Unbounded,
-                    ))
-                    .map(|(k, v)| (k, v)),
+                plans.range::<SeriesId, _>((Bound::Excluded(after), Bound::Unbounded)),
             ),
         };
 
         for (series_id, plan) in iter {
-            if plan.status != PlanStatus::Finalised {
-                continue;
+            if plan.status == PlanStatus::Finalised {
+                result.plans_scanned += 1;
+
+                if series_already_backfilled.contains(series_id) {
+                    // Skip the whole plan — at least one position has already
+                    // produced a Settled event for this series.
+                    result.events_skipped += plan.positions.len() as u64;
+                } else {
+                    // Use the original settlement-initiation timestamp so
+                    // backfilled rows have meaningful chronology rather than the
+                    // backfill execution time.
+                    let timestamp = plan
+                        .idempotency_ns
+                        .to_created_at_time_ns()
+                        .unwrap_or_else(now_ns);
+
+                    let price: Price = match &plan.settlement {
+                        SettlementInput::Price(p) => p.clone(),
+                        SettlementInput::Outcome(_) => Price::new(1, 0),
+                    };
+
+                    for pos in &plan.positions {
+                        let event_id = NEXT_EVENT_ID.with(|id| {
+                            let mut id = id.borrow_mut();
+                            let current = *id;
+                            *id += 1;
+                            current
+                        });
+                        emitted.push(Event {
+                            event_id,
+                            clearing_id: canister_id(),
+                            series_id: series_id.clone(),
+                            user: pos.user,
+                            qty: pos.cashflow_usd,
+                            price: price.clone(),
+                            event_type: EventType::Settled,
+                            timestamp,
+                        });
+                        result.events_emitted += 1;
+                    }
+
+                    series_already_backfilled.insert(series_id.clone());
+                }
             }
 
-            result.plans_scanned += 1;
-
-            if series_already_backfilled.contains(series_id) {
-                // Skip the whole plan — at least one position has already
-                // produced a Settled event for this series.
-                result.events_skipped += plan.positions.len() as u64;
-                continue;
-            }
-
-            // Use the original settlement-initiation timestamp so
-            // backfilled rows have meaningful chronology rather than the
-            // backfill execution time.
-            let timestamp = plan
-                .idempotency_ns
-                .to_created_at_time_ns()
-                .unwrap_or_else(now_ns);
-
-            let price: Price = match &plan.settlement {
-                SettlementInput::Price(p) => p.clone(),
-                SettlementInput::Outcome(_) => Price::new(1, 0),
-            };
-
-            for pos in &plan.positions {
-                let event_id = NEXT_EVENT_ID.with(|id| {
-                    let mut id = id.borrow_mut();
-                    let current = *id;
-                    *id += 1;
-                    current
-                });
-                emitted.push(Event {
-                    event_id,
-                    clearing_id: canister_id(),
-                    series_id: series_id.clone(),
-                    user: pos.user,
-                    qty: pos.cashflow_usd,
-                    price: price.clone(),
-                    event_type: EventType::Settled,
-                    timestamp,
-                });
-                result.events_emitted += 1;
-            }
-
-            series_already_backfilled.insert(series_id.clone());
-
-            // Cooperative yield: stop after the current plan once we've
-            // burned enough instructions. `instruction_counter()` panics
-            // when called outside a canister, so unit tests skip the check
-            // entirely and process every plan in one pass.
+            // Cooperative yield after every visited plan — including
+            // non-finalized and already-backfilled ones — so the per-call
+            // instruction budget remains bounded even when the cursor
+            // encounters long runs of plans that produce no events.
+            // `instruction_counter()` panics when called outside a canister,
+            // so unit tests skip the check entirely and process every plan in
+            // one pass. The cursor uses exclusive `start_after` semantics, so
+            // the next call resumes after `series_id`.
             #[cfg(not(test))]
             {
                 let used = instruction_counter();
@@ -1443,11 +1439,11 @@ mod tests {
     /// timestamps reflect the plan's original `idempotency_ns`.
     #[test]
     fn backfill_settlement_events_emits_and_is_idempotent() {
-        use crate::api::settlement::{
-            backfill_settlement_events, params::BackfillSettlementEventsParams,
+        use crate::{
+            api::settlement::{backfill_settlement_events, params::BackfillSettlementEventsParams},
+            memory::EVENTS,
+            types::event::EventType,
         };
-        use crate::memory::EVENTS;
-        use crate::types::event::EventType;
 
         // Reset shared state to a known baseline so the test is hermetic.
         EVENTS.with(|e| e.borrow_mut().clear());
@@ -1525,14 +1521,15 @@ mod tests {
             e.borrow()
                 .iter()
                 .filter(|ev| {
-                    matches!(ev.event_type, EventType::Settled)
-                        && ev.series_id == series_finalised
+                    matches!(ev.event_type, EventType::Settled) && ev.series_id == series_finalised
                 })
                 .cloned()
                 .collect()
         });
         assert_eq!(emitted.len(), 3);
-        assert!(emitted.iter().all(|e| e.timestamp == 1_700_000_000_000_000_000));
+        assert!(emitted
+            .iter()
+            .all(|e| e.timestamp == 1_700_000_000_000_000_000));
         // Two winners, one loser — qty carries signed cashflow.
         let winners = emitted.iter().filter(|e| e.qty > 0).count();
         let losers = emitted.iter().filter(|e| e.qty < 0).count();
