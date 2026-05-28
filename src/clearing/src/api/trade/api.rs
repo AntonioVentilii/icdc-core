@@ -597,7 +597,11 @@ pub fn get_trade_history() -> Vec<Event> {
             })
             .cloned()
             .collect();
-        filtered.sort_by(|a, b| a.timestamp.cmp(&b.timestamp).then(a.event_id.cmp(&b.event_id)));
+        filtered.sort_by(|a, b| {
+            a.timestamp
+                .cmp(&b.timestamp)
+                .then(a.event_id.cmp(&b.event_id))
+        });
         filtered
     })
 }

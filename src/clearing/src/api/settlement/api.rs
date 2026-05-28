@@ -583,9 +583,9 @@ pub fn backfill_settlement_events(
         // Lower bound on the iteration: exclude `start_after` itself.
         let iter: Box<dyn Iterator<Item = (&SeriesId, &SettlementPlan)>> = match &start_after {
             None => Box::new(plans.iter()),
-            Some(after) => Box::new(
-                plans.range::<SeriesId, _>((Bound::Excluded(after), Bound::Unbounded)),
-            ),
+            Some(after) => {
+                Box::new(plans.range::<SeriesId, _>((Bound::Excluded(after), Bound::Unbounded)))
+            }
         };
 
         for (series_id, plan) in iter {
