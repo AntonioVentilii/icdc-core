@@ -1,6 +1,6 @@
 {
 	"name": "icdc-core",
-	"version": "0.0.5",
+	"version": "0.0.9",
 	"scripts": {
 		"build": "./scripts/build.sh",
 		"test:unit": "scripts/test.unit.sh",
