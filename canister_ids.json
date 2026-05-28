@@ -1,17 +1,22 @@
 {
 	"clearing": {
-		"staging": "g2or7-caaaa-aaaaj-qqhoa-cai"
+		"ic": "g2or7-caaaa-aaaaj-qqhoa-cai",
+		"staging": "4lwgi-viaaa-aaaae-agulq-cai"
 	},
 	"index": {
-		"staging": "5ba7m-cqaaa-aaaaj-qqwvq-cai"
+		"ic": "5ba7m-cqaaa-aaaaj-qqwvq-cai",
+		"staging": "5gycg-2aaaa-aaaae-aguma-cai"
 	},
 	"ledger": {
-		"staging": "5uhob-dyaaa-aaaaj-qqwwa-cai"
+		"ic": "5uhob-dyaaa-aaaaj-qqwwa-cai",
+		"staging": "5bzes-xyaaa-aaaae-agumq-cai"
 	},
 	"minter": {
-		"staging": "5tgiv-oaaaa-aaaaj-qqwwq-cai"
+		"ic": "5tgiv-oaaaa-aaaaj-qqwwq-cai",
+		"staging": "5i2po-bqaaa-aaaae-aguna-cai"
 	},
 	"registry": {
-		"staging": "g5pxl-pyaaa-aaaaj-qqhoq-cai"
+		"ic": "g5pxl-pyaaa-aaaaj-qqhoq-cai",
+		"staging": "5p3j2-miaaa-aaaae-agunq-cai"
 	}
 }

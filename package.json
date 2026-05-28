@@ -15,15 +15,19 @@
 		"did": "./scripts/did.sh && npm run format && npm run lint",
 		"deploy": "dfx deploy --network local --upgrade-unchanged",
 		"deploy:staging": "dfx deploy --network staging --upgrade-unchanged",
-		"deploy:prod": "dfx deploy --ic --upgrade-unchanged",
+		"deploy:prod": "dfx deploy --network ic --upgrade-unchanged",
 		"reinstall": "./scripts/reinstall.sh",
 		"reinstall:staging": "./scripts/reinstall.sh --staging",
+		"reinstall:prod": "./scripts/reinstall.sh --ic",
 		"init:registry": "./scripts/init.registry.sh",
 		"init:registry:staging": "./scripts/init.registry.sh --staging",
+		"init:registry:prod": "./scripts/init.registry.sh --ic",
 		"init:clearing": "./scripts/init.clearing.sh",
 		"init:clearing:staging": "./scripts/init.clearing.sh --staging",
+		"init:clearing:prod": "./scripts/init.clearing.sh --ic",
 		"init": "npm run init:registry && npm run init:clearing",
-		"init:staging": "npm run init:registry:staging && npm run init:clearing:staging"
+		"init:staging": "npm run init:registry:staging && npm run init:clearing:staging",
+		"init:prod": "npm run init:registry:prod && npm run init:clearing:prod"
 	},
 	"devDependencies": {
 		"@icp-sdk/bindgen": "^0.3.0",

@@ -8,7 +8,7 @@ set -euo pipefail
 NETWORK="local"
 
 # Acceptable networks
-ACCEPTABLE_NETWORKS=("local" "staging")
+ACCEPTABLE_NETWORKS=("local" "staging" "ic")
 
 # Function to check if the network is acceptable
 check_network() {
@@ -35,7 +35,7 @@ check_network() {
 # Parse basic arguments to find network
 while [[ $# -gt 0 ]]; do
   case $1 in
-  local | staging)
+  local | staging | ic)
     NETWORK="$1"
     shift
     ;;
@@ -45,6 +45,10 @@ while [[ $# -gt 0 ]]; do
     ;;
   --staging)
     NETWORK="staging"
+    shift
+    ;;
+  --ic)
+    NETWORK="ic"
     shift
     ;;
   *)
