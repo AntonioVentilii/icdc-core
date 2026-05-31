@@ -59,10 +59,15 @@ place_outcome_orders() {
     local BID_VAL=$((MID_VAL - OFFSET))
     local ASK_VAL=$((MID_VAL + OFFSET))
 
-    # Keep within [0.01, 0.99] range (in USD_DECIMALS minor units)
+    # Clamp BOTH sides into the [0.01, 0.99] tick range (in USD_DECIMALS minor
+    # units). A consensus-derived mid near 0 or 1 can otherwise push a bid above
+    # MAX_TICK or an ask below MIN_TICK, which submit_limit_order rejects and
+    # (under set -e) would abort the run.
     local MIN_TICK=$((10 ** (USD_DECIMALS - 2)))
     local MAX_TICK=$((99 * (10 ** (USD_DECIMALS - 2))))
     [[ "$BID_VAL" -lt "$MIN_TICK" ]] && BID_VAL=$MIN_TICK
+    [[ "$BID_VAL" -gt "$MAX_TICK" ]] && BID_VAL=$MAX_TICK
+    [[ "$ASK_VAL" -lt "$MIN_TICK" ]] && ASK_VAL=$MIN_TICK
     [[ "$ASK_VAL" -gt "$MAX_TICK" ]] && ASK_VAL=$MAX_TICK
 
     local OBID
@@ -206,6 +211,7 @@ read_ledger_balance() {
   local principal=$2
   local res
   if ! res=$(dfx canister call "$ledger" icrc1_balance_of "(record { owner = principal \"$principal\" })" --network "$NETWORK" 2>/dev/null); then
+    echo "Warning: balance query failed for ledger $ledger; treating balance as 0." >&2
     echo 0
     return
   fi
