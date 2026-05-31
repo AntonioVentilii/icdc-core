@@ -196,12 +196,16 @@ cleanup_market_tmps() {
 
 # Echo the collateral required (in ledger base units) to back every ladder.
 # Usage: compute_required_base_units DECIMALS
+# Usage: compute_required_base_units DECIMALS [UNITS]
+#   UNITS defaults to TOTAL_UNITS (all active markets); pass a smaller count when
+#   only seeding a subset (e.g. deck-only) so the collateral isn't over-sized.
 compute_required_base_units() {
   local decimals=$1
+  local units=${2:-$TOTAL_UNITS}
   # For binary/categorical products total system margin per contract is ~1 USD,
   # so we scale by ORDER_QTY (contracts/units per order) across all ladders.
   local req_tokens
-  req_tokens=$(echo "$TOTAL_UNITS * $NUM_ORDERS_PER_SIDE * 2 * $ORDER_QTY * $ORDER_VALUE_USD * $WIGGLE_ROOM" | bc)
+  req_tokens=$(echo "$units * $NUM_ORDERS_PER_SIDE * 2 * $ORDER_QTY * $ORDER_VALUE_USD * $WIGGLE_ROOM" | bc)
   echo "scale=0; $req_tokens * (10^$decimals) / 1" | bc | cut -d'.' -f1
 }
 

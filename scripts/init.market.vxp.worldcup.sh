@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 
-# Seeds VXP (ViciXp domain) liquidity on active markets using a CURATED mid
-# taken from a market deck's `consensus` value, instead of the random mid used
-# by init.market.vxp.sh. Built for Vici's World Cup deck
-# (vici-app/scripts/data/markets.deck-2026.json), where every row carries a
-# 0-1 `consensus` probability.
+# Seeds VXP (ViciXp domain) liquidity on the markets in a curated deck, quoting
+# each around its `consensus` value (0-1) instead of the random mid used by
+# init.market.vxp.sh. Built for Vici's World Cup deck
+# (vici-app/scripts/data/markets.deck-2026.json).
+#
+# DECK-ONLY: only scalar markets whose title appears in the deck are seeded.
+# Every other registry market (and all categorical markets) is left untouched,
+# and the required collateral is sized to just the matched markets. Use
+# init.market.vxp.sh if you want to seed the whole registry with random mids.
 #
 # Usage:
 #   ./scripts/init.market.vxp.worldcup.sh <markets-deck-json> [--local|--staging|--ic]
 #   ./scripts/init.market.vxp.worldcup.sh ../vici-app/scripts/data/markets.deck-2026.json --local
 #
-# The deck is matched to on-chain series BY TITLE: a scalar market whose title
-# appears in the deck is quoted around its consensus; markets absent from the
-# deck (or categorical ones) fall back to the random ladder. Shared logic lives
-# in init.market.common.sh.
+# Shared logic lives in init.market.common.sh.
 
 # Capture the deck file (first positional) before utils.sh consumes "$@".
 DECK_FILE="${1:-}"
@@ -54,28 +55,6 @@ consensus_to_mid() {
   awk -v c="$1" -v d="$USD_DECIMALS" 'BEGIN { printf "%.0f", c * (10 ^ d) }'
 }
 
-# Seed scalar markets with a consensus-derived mid, falling back to random when
-# the market is not present in the deck.
-place_scalar_orders_consensus() {
-  local SID TITLE c MID_VAL SPREAD_VAL matched=0 missed=0
-  for SID in $SCALAR_MARKETS; do
-    TITLE=$(get_title "$SID")
-    c=${CONSENSUS_BY_TITLE["$TITLE"]:-}
-    if [[ -z "$c" ]]; then
-      MID_VAL=$(random_mid_val)
-      echo "Processing Scalar Market: $TITLE ($SID) — not in deck, random mid $MID_VAL"
-      missed=$((missed + 1))
-    else
-      MID_VAL=$(consensus_to_mid "$c")
-      echo "Processing Scalar Market: $TITLE ($SID) — consensus $c => mid $MID_VAL"
-      matched=$((matched + 1))
-    fi
-    SPREAD_VAL=$(random_spread_val)
-    place_outcome_orders "$SID" "null" "$MID_VAL" "$SPREAD_VAL"
-  done
-  echo "Consensus mids applied to $matched market(s); $missed fell back to random."
-}
-
 resolve_maker_identity
 
 load_consensus_map "$DECK_FILE"
@@ -84,11 +63,26 @@ echo "Loaded ${#CONSENSUS_BY_TITLE[@]} consensus entries from $DECK_FILE."
 # --- 1. FETCH + PARSE ACTIVE MARKETS ---
 fetch_and_parse_markets || exit 0
 
-# --- 2. REQUIRED COLLATERAL ---
-REQ_BASE_UNITS=$(compute_required_base_units "$VICI_XP_DECIMALS")
+# --- 2. SELECT DECK MARKETS (scalar, matched by title) ---
+MATCHED_SIDS=()
+for SID in $SCALAR_MARKETS; do
+  TITLE=$(get_title "$SID")
+  [[ -n "${CONSENSUS_BY_TITLE["$TITLE"]:-}" ]] && MATCHED_SIDS+=("$SID")
+done
+NUM_MATCHED=${#MATCHED_SIDS[@]}
+echo "Matched $NUM_MATCHED of $NUM_SCALAR scalar markets to the deck (deck-only; other markets left untouched)."
+
+if [[ "$NUM_MATCHED" -eq 0 ]]; then
+  echo "No deck markets present in the registry — nothing to seed. (Deploy the deck first.)"
+  cleanup_market_tmps
+  exit 0
+fi
+
+# --- 3. REQUIRED COLLATERAL (sized to the matched markets only) ---
+REQ_BASE_UNITS=$(compute_required_base_units "$VICI_XP_DECIMALS" "$NUM_MATCHED")
 echo "Required $VICI_XP_SYMBOL: $REQ_BASE_UNITS ledger base units"
 
-# --- 3. BALANCE CHECK (no faucet for VXP) ---
+# --- 4. BALANCE CHECK (no faucet for VXP) ---
 echo "Checking balance..."
 CUR_BAL_BASE=$(read_ledger_balance "$VICI_XP_LEDGER" "$MY_PRINCIPAL")
 echo "Current balance: $CUR_BAL_BASE base units"
@@ -100,12 +94,18 @@ if [[ "$CUR_BAL_BASE" -lt "$REQ_BASE_UNITS" ]]; then
 fi
 echo "Balance sufficient ($CUR_BAL_BASE base units)."
 
-# --- 4. DEPOSIT COLLATERAL ---
+# --- 5. DEPOSIT COLLATERAL ---
 deposit_all_collateral "$VICI_XP_SYMBOL" "$VICI_XP_LEDGER" "$VICI_XP_TRANSFER_FEE" "opt variant { ViciXp }" "$CUR_BAL_BASE"
 
-# --- 5. PLACE ORDERS (consensus mid for scalar; random for categorical) ---
-place_scalar_orders_consensus
-place_categorical_orders_random
+# --- 6. PLACE ORDERS (consensus mid, deck markets only) ---
+for SID in "${MATCHED_SIDS[@]}"; do
+  TITLE=$(get_title "$SID")
+  CONS=${CONSENSUS_BY_TITLE["$TITLE"]}
+  MID_VAL=$(consensus_to_mid "$CONS")
+  SPREAD_VAL=$(random_spread_val)
+  echo "Processing Scalar Market: $TITLE ($SID) — consensus $CONS => mid $MID_VAL"
+  place_outcome_orders "$SID" "null" "$MID_VAL" "$SPREAD_VAL"
+done
 
 cleanup_market_tmps
 echo "Finished."
