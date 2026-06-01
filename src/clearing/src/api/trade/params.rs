@@ -2,9 +2,12 @@ use candid::{CandidType, Deserialize, Nat};
 use serde::Serialize;
 use shared::types::{OutcomeId, Price, SeriesId};
 
-use crate::types::{
-    trade::{OrderId, Side, TradeId, TransferId},
-    user::User,
+use crate::{
+    api::trade::results::TradeHistoryCursor,
+    types::{
+        trade::{OrderId, Side, TradeId, TransferId},
+        user::User,
+    },
 };
 
 /// Input parameters for submitting a limit order.
@@ -83,4 +86,22 @@ pub struct CancelLimitOrderParams {
 pub struct ListOrdersParams {
     /// Optional series identifier to filter orders.
     pub series_id: Option<SeriesId>,
+}
+
+/// Input parameters for
+/// [`list_series_trade_history`](super::list_series_trade_history).
+///
+/// Returns the market-wide executed-trade history for a single series so a
+/// front end can derive a price-history series (e.g. a YES-probability
+/// sparkline) from the per-trade `price`/`timestamp`. Unlike `get_trade_history`
+/// the result is not caller-scoped.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct ListSeriesTradeHistoryParams {
+    /// The derivative series whose executed trades to return.
+    pub series_id: SeriesId,
+    /// Resume after this cursor (exclusive). `None` starts from the earliest
+    /// executed trade. Pass the previous response's `next_cursor` to continue.
+    pub start_after: Option<TradeHistoryCursor>,
+    /// Maximum number of events to return. `None` returns all remaining events.
+    pub limit: Option<u64>,
 }

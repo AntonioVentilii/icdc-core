@@ -13,9 +13,13 @@ use super::{
     errors::TradeError,
     params::{
         CancelLimitOrderParams, FreezePositionForTransferParams, ListOrdersParams,
-        SubmitLimitOrderParams, SubmitMarketOrderParams, SubmitMatchedTradeParams,
+        ListSeriesTradeHistoryParams, SubmitLimitOrderParams, SubmitMarketOrderParams,
+        SubmitMatchedTradeParams,
     },
-    results::{AcceptPositionTransferResult, SubmitMatchedTradeResult},
+    results::{
+        AcceptPositionTransferResult, SeriesTradeHistoryPage, SubmitMatchedTradeResult,
+        TradeHistoryCursor,
+    },
 };
 use crate::{
     guards::{caller_is_controller, caller_is_not_anonymous},
@@ -603,6 +607,82 @@ pub fn get_trade_history() -> Vec<Event> {
                 .then(a.event_id.cmp(&b.event_id))
         });
         filtered
+    })
+}
+
+/// Returns the executed-trade history for a single series, with stable cursor
+/// pagination.
+///
+/// Unlike [`get_trade_history`] — which is caller-scoped — this surfaces every
+/// participant's executed trades on `series_id`, so a front end can derive a
+/// market-wide price history (e.g. a YES-probability sparkline) from the
+/// per-trade `price`/`timestamp` rather than only the viewer's own fills.
+///
+/// Only [`EventType::Executed`] events are returned: those carry the matched
+/// trade price the sparkline plots. Settlement and liquidation events are
+/// excluded.
+///
+/// Events are ordered by `(timestamp, event_id)` so backfilled rows interleave
+/// chronologically rather than appearing in storage-insertion order. The cursor
+/// is exclusive and carries both fields because `event_id` alone is not
+/// monotonic in timestamp order. Paging is stable as long as the underlying
+/// event log is not mutated mid-traversal. Mirrors the pagination contract of
+/// `list_settled_series`.
+#[query(guard = "caller_is_not_anonymous")]
+#[must_use]
+pub fn list_series_trade_history(params: ListSeriesTradeHistoryParams) -> SeriesTradeHistoryPage {
+    let ListSeriesTradeHistoryParams {
+        series_id,
+        start_after,
+        limit,
+    } = params;
+
+    // Default to "all remaining" when no limit is supplied, and clamp to at
+    // least 1 so a limit of 0 still makes forward progress (returns one event +
+    // a cursor) instead of an empty page that strands a paging caller.
+    let limit = usize::try_from(limit.unwrap_or(u64::MAX))
+        .unwrap_or(usize::MAX)
+        .max(1);
+
+    EVENTS.with(|events: &RefCell<Vec<Event>>| {
+        let mut filtered: Vec<Event> = events
+            .borrow()
+            .iter()
+            .filter(|e| e.series_id == series_id && matches!(e.event_type, EventType::Executed))
+            .cloned()
+            .collect();
+        filtered.sort_by(|a, b| {
+            a.timestamp
+                .cmp(&b.timestamp)
+                .then(a.event_id.cmp(&b.event_id))
+        });
+
+        // Exclusive cursor: skip the sorted prefix up to and including the
+        // (timestamp, event_id) the caller last saw. `partition_point` relies on
+        // `filtered` being sorted by that same key.
+        let start = match &start_after {
+            Some(cursor) => filtered.partition_point(|e| {
+                (e.timestamp, e.event_id) <= (cursor.timestamp, cursor.event_id)
+            }),
+            None => 0,
+        };
+
+        let remaining = &filtered[start..];
+        let page_len = remaining.len().min(limit);
+        let items = remaining[..page_len].to_vec();
+
+        // Emit a cursor only if at least one more event exists beyond this page.
+        // `start_after` is exclusive, so the cursor is the last event returned;
+        // resuming with it yields the next event without dropping or repeating.
+        let next_cursor = (remaining.len() > page_len)
+            .then(|| items.last())
+            .flatten()
+            .map(|e| TradeHistoryCursor {
+                timestamp: e.timestamp,
+                event_id: e.event_id,
+            });
+
+        SeriesTradeHistoryPage { items, next_cursor }
     })
 }
 

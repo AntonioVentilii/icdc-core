@@ -387,6 +387,22 @@ type ListOrdersParams = record {
 	// Optional series identifier to filter orders.
 	series_id : opt text
 };
+// Input parameters for
+// [`list_series_trade_history`](super::list_series_trade_history).
+//
+// Returns the market-wide executed-trade history for a single series so a
+// front end can derive a price-history series (e.g. a YES-probability
+// sparkline) from the per-trade `price`/`timestamp`. Unlike `get_trade_history`
+// the result is not caller-scoped.
+type ListSeriesTradeHistoryParams = record {
+	// The derivative series whose executed trades to return.
+	series_id : text;
+	// Resume after this cursor (exclusive). `None` starts from the earliest
+	// executed trade. Pass the previous response's `next_cursor` to continue.
+	start_after : opt TradeHistoryCursor;
+	// Maximum number of events to return. `None` returns all remaining events.
+	limit : opt nat64
+};
 // Input parameters for [`list_settled_series`](super::list_settled_series).
 //
 // A series is considered settled the moment a settlement plan is opened for it
@@ -601,6 +617,15 @@ type Series = record {
 	oracle_source : text;
 	// If this series was forked from another, the source series ID.
 	forked_from : opt text
+};
+// A page of executed-trade events scoped to a single series.
+type SeriesTradeHistoryPage = record {
+	// When `Some`, pass back as `start_after` to fetch the next page. `None`
+	// means the last page has been returned.
+	next_cursor : opt TradeHistoryCursor;
+	// Executed events for the series in this page, ordered by
+	// `(timestamp, event_id)` ascending.
+	items : vec Event
 };
 // Input parameters for initiating a series settlement.
 type SettleSeriesParams = record {
@@ -828,6 +853,17 @@ type TradeError = variant {
 	// A common error occurred.
 	Common : CommonError
 };
+// Stable, exclusive cursor for paging a series' executed-trade history.
+//
+// Events are ordered by `(timestamp, event_id)`, so the cursor carries both:
+// `event_id` alone is not monotonic in timestamp order because backfilled rows
+// can have a newer id but an older timestamp.
+type TradeHistoryCursor = record {
+	// Timestamp (ns) of the last event returned in the previous page.
+	timestamp : nat64;
+	// Event id of the last event returned in the previous page.
+	event_id : nat64
+};
 // A single trading access policy attached to a derivative series.
 //
 // A [`Series`](super::series::Series) holds a `Vec<TradingAccess>`.
@@ -1042,6 +1078,27 @@ service : (Config) -> {
 	list_orders : (ListOrdersParams) -> (vec LimitOrder) query;
 	// Returns a list of all derivative series currently cached in the clearing canister.
 	list_series : () -> (vec Series) query;
+	// Returns the executed-trade history for a single series, with stable cursor
+	// pagination.
+	//
+	// Unlike [`get_trade_history`] — which is caller-scoped — this surfaces every
+	// participant's executed trades on `series_id`, so a front end can derive a
+	// market-wide price history (e.g. a YES-probability sparkline) from the
+	// per-trade `price`/`timestamp` rather than only the viewer's own fills.
+	//
+	// Only [`EventType::Executed`] events are returned: those carry the matched
+	// trade price the sparkline plots. Settlement and liquidation events are
+	// excluded.
+	//
+	// Events are ordered by `(timestamp, event_id)` so backfilled rows interleave
+	// chronologically rather than appearing in storage-insertion order. The cursor
+	// is exclusive and carries both fields because `event_id` alone is not
+	// monotonic in timestamp order. Paging is stable as long as the underlying
+	// event log is not mutated mid-traversal. Mirrors the pagination contract of
+	// `list_settled_series`.
+	list_series_trade_history : (ListSeriesTradeHistoryParams) -> (
+		SeriesTradeHistoryPage
+	) query;
 	// Lists the ids of series that have been settled (resolved), with stable
 	// cursor pagination.
 	//

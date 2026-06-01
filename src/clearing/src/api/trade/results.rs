@@ -1,7 +1,7 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
 
-use crate::api::trade::errors::TradeError;
+use crate::{api::trade::errors::TradeError, types::event::Event};
 
 /// Outcome of a matched trade submission.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -35,4 +35,28 @@ impl From<Result<bool, TradeError>> for AcceptPositionTransferResult {
             Err(e) => AcceptPositionTransferResult::Err(e),
         }
     }
+}
+
+/// Stable, exclusive cursor for paging a series' executed-trade history.
+///
+/// Events are ordered by `(timestamp, event_id)`, so the cursor carries both:
+/// `event_id` alone is not monotonic in timestamp order because backfilled rows
+/// can have a newer id but an older timestamp.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct TradeHistoryCursor {
+    /// Timestamp (ns) of the last event returned in the previous page.
+    pub timestamp: u64,
+    /// Event id of the last event returned in the previous page.
+    pub event_id: u64,
+}
+
+/// A page of executed-trade events scoped to a single series.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug, Default)]
+pub struct SeriesTradeHistoryPage {
+    /// Executed events for the series in this page, ordered by
+    /// `(timestamp, event_id)` ascending.
+    pub items: Vec<Event>,
+    /// When `Some`, pass back as `start_after` to fetch the next page. `None`
+    /// means the last page has been returned.
+    pub next_cursor: Option<TradeHistoryCursor>,
 }
