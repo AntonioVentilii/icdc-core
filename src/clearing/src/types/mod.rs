@@ -6,6 +6,7 @@ pub mod leaderboard;
 pub mod margin;
 pub(crate) mod payment;
 pub mod plans;
+pub mod price_history;
 pub mod state;
 pub(crate) mod stats;
 pub mod trade;

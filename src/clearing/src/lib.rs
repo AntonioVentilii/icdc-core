@@ -40,12 +40,13 @@ use crate::{
         trade::{
             errors::TradeError,
             params::{
-                CancelLimitOrderParams, FreezePositionForTransferParams, ListOrdersParams,
-                ListSeriesTradeHistoryParams, SubmitLimitOrderParams, SubmitMarketOrderParams,
-                SubmitMatchedTradeParams,
+                CancelLimitOrderParams, FreezePositionForTransferParams,
+                GetSeriesPriceHistoryParams, ListOrdersParams, ListSeriesTradeHistoryParams,
+                SubmitLimitOrderParams, SubmitMarketOrderParams, SubmitMatchedTradeParams,
             },
             results::{
-                AcceptPositionTransferResult, SeriesTradeHistoryPage, SubmitMatchedTradeResult,
+                AcceptPositionTransferResult, SeriesPriceHistory, SeriesTradeHistoryPage,
+                SubmitMatchedTradeResult,
             },
         },
     },

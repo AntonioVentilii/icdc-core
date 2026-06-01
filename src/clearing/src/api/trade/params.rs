@@ -3,6 +3,7 @@ use serde::Serialize;
 use shared::types::{OutcomeId, Price, SeriesId};
 
 use crate::types::{
+    price_history::PriceHistoryInterval,
     trade::{OrderId, Side, TradeId, TransferId},
     user::User,
 };
@@ -103,4 +104,27 @@ pub struct ListSeriesTradeHistoryParams {
     pub start_after: Option<u64>,
     /// Maximum number of trades to return. `None` returns all remaining trades.
     pub limit: Option<u64>,
+}
+
+/// Input parameters for
+/// [`get_series_price_history`](super::get_series_price_history).
+///
+/// Returns a series' executed trades aggregated into fixed-width
+/// [`PriceHistoryInterval`] time buckets (OHLC + volume + trade count), so a
+/// front end can render a time-scoped consensus/price chart directly instead of
+/// fetching and re-bucketing the raw per-trade tape. The optional time bounds
+/// let the caller request just the window it draws (e.g. the last day) and the
+/// `interval` picks the resolution (hourly for short windows, daily for long).
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct GetSeriesPriceHistoryParams {
+    /// The derivative series whose executed trades to aggregate.
+    pub series_id: SeriesId,
+    /// Bucket width: one candle per hour or per day.
+    pub interval: PriceHistoryInterval,
+    /// Inclusive lower bound on a trade's timestamp (ns). `None` starts from the
+    /// series' earliest trade.
+    pub start_time: Option<u64>,
+    /// Exclusive upper bound on a trade's timestamp (ns). `None` runs through
+    /// the series' latest trade.
+    pub end_time: Option<u64>,
 }
