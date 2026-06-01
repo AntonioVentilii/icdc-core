@@ -36,6 +36,32 @@ type AccountStateResponse = record {
 	// Available equity in USD (total equity - reserved margin).
 	available_margin_usd : int
 };
+// Aggregate long/short lean of a supplied set of principals on a series,
+// broken down per outcome.
+//
+// Privacy-safe by construction: it exposes only aggregate counts over the
+// supplied set, never individual identities, sides, amounts, or P&L.
+type AggregateLean = record {
+	// Number of distinct supplied principals holding a non-flat position
+	// anywhere on the series (a principal long on two outcomes counts once).
+	total : nat64;
+	// The series this lean was computed for.
+	series_id : text;
+	// Per-outcome aggregate lean, one entry per outcome on which at least one
+	// supplied principal holds a non-flat position, ordered by outcome.
+	outcomes : vec OutcomeLean
+};
+// Input parameters for the `aggregate_lean` query.
+type AggregateLeanParams = record {
+	// The derivative series to aggregate the lean over.
+	series_id : text;
+	// The set of principals to aggregate over. The set is caller-supplied and
+	// scanned in full, so it is capped — any list longer than the cap is
+	// truncated. Duplicate principals are de-duplicated and never affect the
+	// counts. The clearing layer ascribes no meaning to the set; how it is
+	// chosen is entirely a consumer concern.
+	principals : vec principal
+};
 // Represents a supported asset in the ICDC ecosystem.
 type Asset = variant {
 	// An ERC-20 token on an EVM-compatible chain.
@@ -545,6 +571,24 @@ type Outcome = record {
 	description : opt Description;
 	// An optional icon URL for the outcome.
 	icon_url : opt text
+};
+// Aggregate lean of the supplied principal set on a single outcome of a
+// series.
+//
+// Carries **counts only** — no principal identities, sides, quantities, or
+// P&L. Long is the number of net-long holders, short the number of net-short
+// holders; flat (zero net) positions are excluded from both.
+type OutcomeLean = record {
+	// `long + short`, the number of supplied principals with a non-flat
+	// position on this outcome.
+	total : nat64;
+	// The outcome this lean is for. `None` is the series' binary payoff (long
+	// vs short); `Some` identifies a categorical outcome.
+	outcome_id : opt text;
+	// Number of supplied principals net long on this outcome.
+	long : nat64;
+	// Number of supplied principals net short on this outcome.
+	short : nat64
 };
 // Mechanism for ensuring idempotency in ledger payments.
 type PaymentIdempotency = variant {
@@ -1086,6 +1130,22 @@ service : (Config) -> {
 	// This method validates the series and increases the target user's position based on the provided
 	// proof. This method is gated to canister controllers.
 	accept_position_transfer : (PositionProof) -> (AcceptPositionTransferResult);
+	// Aggregates, for a series, the long/short lean of a supplied set of
+	// principals, broken down per outcome.
+	//
+	// The clearing layer ascribes no meaning to the set — it is just a list of
+	// principals the caller passes in; how it is assembled is a concern of the
+	// consuming layer-2 / application, not of clearing.
+	//
+	// Returns **counts only**: per outcome, how many of the supplied principals
+	// are net long vs net short, plus the number of distinct principals with any
+	// non-flat position on the series. It never exposes individual identities,
+	// sides, quantities, or P&L, so no single principal's own side is ever singled
+	// out.
+	//
+	// The supplied set is de-duplicated and capped at `MAX_AGGREGATE_PRINCIPALS`.
+	// Guarded by `caller_is_not_anonymous`, matching the other position reads.
+	aggregate_lean : (AggregateLeanParams) -> (AggregateLean) query;
 	// One-shot, idempotent backfill of `Settled` events for plans finalized
 	// before per-user event emission was added to `apply_settlement_accounting_logic`.
 	//
