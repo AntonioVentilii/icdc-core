@@ -109,11 +109,11 @@ call.
 Chosen design: a **per-`(window, period)` aggregate index**, mirroring the
 `SERIES_TRADE_HISTORY` precedent.
 
-- `SETTLEMENT_LEADERBOARD: BTreeMap<(LeaderboardWindow, u64), BTreeMap<User,
-  PnlAggregate>>`. Each settled position folds its signed `cashflow_usd` into
-  its current week, month, and all-time buckets. A query then ranks only the two
-  relevant buckets (current + prior period) — `O(bucket)` instead of
-  `O(total events)`.
+- `SETTLEMENT_LEADERBOARD`, keyed by `(window, period)` and holding a
+  per-`User` `PnlAggregate`. Each settled position folds its signed
+  `cashflow_usd` into its current week, month, and all-time buckets. A query
+  then ranks only the two relevant buckets (current + prior period) —
+  `O(bucket)` instead of `O(total events)`.
 - **Heap-only, rebuilt on upgrade.** The index is a pure projection of the
   `Settled` rows in `EVENTS`, so it is **not** added to the persisted
   `StableState` — `post_upgrade` reconstructs it via `rebuild_leaderboard` after
