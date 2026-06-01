@@ -2,12 +2,9 @@ use candid::{CandidType, Deserialize, Nat};
 use serde::Serialize;
 use shared::types::{OutcomeId, Price, SeriesId};
 
-use crate::{
-    api::trade::results::TradeHistoryCursor,
-    types::{
-        trade::{OrderId, Side, TradeId, TransferId},
-        user::User,
-    },
+use crate::types::{
+    trade::{OrderId, Side, TradeId, TransferId},
+    user::User,
 };
 
 /// Input parameters for submitting a limit order.
@@ -99,9 +96,11 @@ pub struct ListOrdersParams {
 pub struct ListSeriesTradeHistoryParams {
     /// The derivative series whose executed trades to return.
     pub series_id: SeriesId,
-    /// Resume after this cursor (exclusive). `None` starts from the earliest
-    /// executed trade. Pass the previous response's `next_cursor` to continue.
-    pub start_after: Option<TradeHistoryCursor>,
-    /// Maximum number of events to return. `None` returns all remaining events.
+    /// Resume after this trade's `event_id` (exclusive). `None` starts from the
+    /// earliest executed trade. Pass the previous response's `next_cursor` to
+    /// continue. Executed-trade `event_id`s are strictly increasing in
+    /// execution order, so the bare id is a stable cursor.
+    pub start_after: Option<u64>,
+    /// Maximum number of trades to return. `None` returns all remaining trades.
     pub limit: Option<u64>,
 }

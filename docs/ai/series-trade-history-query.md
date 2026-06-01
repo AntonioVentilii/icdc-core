@@ -28,20 +28,22 @@ settlement or correctness implications.
 ### Clearing — series trade history (new query)
 
 ```candid
-type TradeHistoryCursor = record {
-  timestamp : nat64;  // ns of the last event in the previous page
-  event_id  : nat64;  // id of the last event in the previous page
+type SeriesTradePoint = record {
+  event_id  : nat64;   // strictly increasing in execution order; doubles as cursor
+  price     : Price;   // execution price
+  qty       : int;     // traded quantity (positive)
+  timestamp : nat64;   // execution time (ns)
 };
 
 type ListSeriesTradeHistoryParams = record {
-  series_id   : text;                     // series whose trades to return
-  start_after : opt TradeHistoryCursor;   // exclusive cursor
-  limit       : opt nat64;                // None = all remaining
+  series_id   : text;        // series whose trades to return
+  start_after : opt nat64;   // exclusive cursor = last returned event_id
+  limit       : opt nat64;   // None = all remaining
 };
 
 type SeriesTradeHistoryPage = record {
-  items       : vec Event;                // executed events, (timestamp, event_id) ascending
-  next_cursor : opt TradeHistoryCursor;   // pass back as start_after to continue
+  items       : vec SeriesTradePoint;   // one point per trade, event_id ascending
+  next_cursor : opt nat64;              // last event_id; pass as start_after to continue
 };
 
 service : {
@@ -50,43 +52,53 @@ service : {
 };
 ```
 
-- Returns only `EventType::Executed` events for `series_id`. Those carry the
-  matched trade `price` the sparkline plots; settlement and liquidation events
-  are excluded (they don't represent a market clearing price).
+- Returns one `SeriesTradePoint` **per executed trade** on `series_id`, ordered
+  by `event_id` (execution order). Each trade carries the matched `price` the
+  sparkline plots plus `qty` (volume); settlement and liquidation events are
+  excluded (they don't represent a market clearing price).
 - Guarded by `caller_is_not_anonymous`, matching `get_trade_history` and
   `list_settled_series`.
-- Events are ordered by `(timestamp, event_id)` so backfilled rows (whose
-  timestamp reflects the original settlement/trade time) interleave
-  chronologically rather than appearing in storage-insertion order — identical
-  to `get_trade_history`'s ordering.
-- Cursor convention mirrors `list_settled_series` / `backfill_settlement_events`:
-  `start_after` is **exclusive**, `next_cursor` is the **last event returned**
-  (so resuming neither drops nor repeats an event), and a `limit` of 0 is clamped
-  to 1 so a paging caller always makes forward progress.
+- Cursor convention mirrors `list_settled_series`: `start_after` is
+  **exclusive**, `next_cursor` is the **last `event_id` returned** (so resuming
+  neither drops nor repeats a trade), and a `limit` of 0 is clamped to 1 so a
+  paging caller always makes forward progress.
 
-## Cursor design decision
+## Performance / cycles design decision
 
-`EVENTS` is a flat `Vec<Event>` keyed implicitly by insertion, with a separate
-monotonically-increasing `event_id`. The query sorts by `(timestamp, event_id)`,
-so the resume cursor must carry **both** fields, not just `event_id`:
-`backfill_settlement_events` synthesizes events with old timestamps but new ids,
-so `event_id` is not monotonic in timestamp order. A bare `event_id` cursor would
-either skip or repeat backfilled rows. `TradeHistoryCursor` therefore records
-`(timestamp, event_id)` and the page is resumed with a `partition_point` over the
-sorted slice.
+An executed trade emits **two** `Event` rows (buyer + seller) that share one
+`event_id`, `price`, and `timestamp`. The naive query — filter the flat
+`EVENTS: Vec<Event>` by `series_id`, clone all matches, sort, paginate — is
+`O(total events)` in compute **and** clones every match before discarding all
+but one page, on a read that fires on essentially every market view. It also
+returns both counterparty rows (duplicate price points) and the duplicate
+`(timestamp, event_id)` key breaks an exclusive cursor that lands between a
+trade's two rows.
 
-Two options were considered for storage:
+Chosen design: a **per-series price-history index** maintained on write.
 
-- **(a) Filter + sort the existing `Vec<Event>` per query.** ✅ chosen.
-- **(b) Add a per-series secondary index (`BTreeMap<SeriesId, …>`) to make the
-  read O(page) instead of O(events).**
+- `SERIES_TRADE_HISTORY: BTreeMap<SeriesId, Vec<SeriesTradePoint>>`, one point
+  per trade, appended in execution order so each vector is already sorted by
+  `event_id`. The query is then `O(log series + page)`: map lookup +
+  `partition_point` for the cursor + clone of just the page.
+- **Heap-only, rebuilt on upgrade.** The index is a pure projection of `EVENTS`,
+  so it is **not** added to the persisted `StableState` — `post_upgrade`
+  reconstructs it via `rebuild_series_trade_history` after `EVENTS` is restored.
+  This avoids a stable-layout migration and keeps the persisted state minimal;
+  the cost is one extra `O(N)` pass per upgrade, which is negligible (upgrades
+  are rare and `post_upgrade` is already `O(N)`).
+- **Dedup + bare cursor.** Collapsing the buyer/seller pair to one point per
+  trade is what a sparkline wants, halves the payload, and makes `event_id` a
+  unique, strictly-increasing key — so the cursor is a bare `nat64` instead of a
+  `(timestamp, event_id)` tuple, and the duplicate-key edge case disappears.
+- **Privacy.** `SeriesTradePoint` omits the per-trade buyer/seller principal, so
+  this market-wide read exposes only the public trade tape (price, qty, time),
+  not who traded.
 
-**Chosen (a)** because it adds no new persisted state, no migration, and no
-second structure to keep consistent on every trade/settlement/backfill write. The
-clearing event log is bounded by realistic trade volume per canister and the
-query is a non-replicated `query`; if log size ever makes the per-query scan a
-problem, (b) is a self-contained follow-up that doesn't change this endpoint's
-candid shape.
+Write cost is one `Vec::push` per trade at the single execution site
+(`trade::service::internal_execute_trade`); trades are far rarer than sparkline
+reads, so moving work to the write path is the right trade. If per-series heap
+ever matters, the index could store `EVENTS` offsets instead of cloned points —
+a self-contained follow-up that doesn't change this endpoint's candid shape.
 
 ## Front-end wiring (separate vici-app PR)
 
@@ -94,7 +106,7 @@ candid shape.
    regenerates its own).
 2. Rewire `MarketDetailChartCard` / `FlowCardSparkline` (via
    `market-price-history.utils`) to page `clearing.list_series_trade_history({
-series_id, start_after, limit })` and derive the YES-% series from each event's
+series_id, start_after, limit })` and derive the YES-% series from each point's
    `price`/`timestamp`.
 3. Drop the caller-scoped derivation that plotted only the viewer's own trades.
 
@@ -102,11 +114,13 @@ Cross-ref: vici-app sparkline interim in PR #385.
 
 ## Tests
 
-- `clearing`: series + executed-only filtering, `(timestamp, event_id)`
-  ordering (including a backfilled-style row whose id disagrees with timestamp
-  order), stable exclusive-cursor pagination across pages, the exact-boundary
-  no-cursor case, `limit = 0` forward progress, and the unknown-series empty
-  case (`src/clearing/src/api/trade/tests/series_history.rs`).
+- `clearing` (`src/clearing/src/api/trade/tests/series_history.rs`): series +
+  executed-only filtering, buyer/seller rows collapsing to one point per trade,
+  `event_id` ordering (jumbled seed sorted on rebuild), stable exclusive-cursor
+  pagination across pages, the exact-boundary no-cursor case, `limit = 0`
+  forward progress, the unknown-series empty case, and a live-execution test
+  asserting the write path (`internal_execute_trade`) populates the index — not
+  just the `post_upgrade` rebuild.
 
 Integration (pocket-ic) tests require the downloaded `ledger`/`index` wasm
 fixtures (`target/ic/…`); they are unaffected by this change.

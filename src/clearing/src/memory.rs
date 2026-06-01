@@ -10,7 +10,7 @@ use shared::types::{
 
 use crate::{
     types::{
-        event::Event,
+        event::{Event, EventType, SeriesTradePoint},
         margin::{AccountState, Position, PositionsMap},
         plans::{
             DepositPlan, FundWithdrawalPlan, MigrationKey, MigrationPlan, SettlementPlan,
@@ -49,6 +49,14 @@ thread_local! {
     pub static SERIES: RefCell<BTreeMap<SeriesId, Series>> = const { RefCell::new(BTreeMap::new()) };
     pub static EVENTS: RefCell<Vec<Event>> = const { RefCell::new(Vec::new()) };
     pub static NEXT_EVENT_ID: RefCell<u64> = const { RefCell::new(0) };
+    /// Per-series price-history index: one [`SeriesTradePoint`] per executed
+    /// trade, in execution order (ascending `event_id`). Derived entirely from
+    /// the executed rows in `EVENTS`, so it is **not** persisted — it is rebuilt
+    /// from `EVENTS` in `post_upgrade` via [`rebuild_series_trade_history`] and
+    /// maintained incrementally on each trade. Lets `list_series_trade_history`
+    /// serve a market's price history in O(log series + page) instead of
+    /// scanning the whole event log per call.
+    pub static SERIES_TRADE_HISTORY: RefCell<BTreeMap<SeriesId, Vec<SeriesTradePoint>>> = const { RefCell::new(BTreeMap::new()) };
     pub static REGISTRY_CANISTER: RefCell<Principal> = const { RefCell::new(Principal::anonymous()) };
     pub static DEPOSIT_PLANS: RefCell<BTreeMap<DepositKey, DepositPlan>> = const { RefCell::new(BTreeMap::new()) };
     pub static WITHDRAWAL_PLANS: RefCell<BTreeMap<WithdrawalKey, WithdrawalPlan>> = const { RefCell::new(BTreeMap::new()) };
@@ -177,6 +185,7 @@ pub fn restore_state() {
     SERIES.with(|s| *s.borrow_mut() = series);
     EVENTS.with(|e| *e.borrow_mut() = events);
     NEXT_EVENT_ID.with(|id| *id.borrow_mut() = next_id);
+    rebuild_series_trade_history();
     REGISTRY_CANISTER.with(|r| *r.borrow_mut() = registry);
     DEPOSIT_PLANS.with(|d| *d.borrow_mut() = deposit_plans);
     WITHDRAWAL_PLANS.with(|w| *w.borrow_mut() = withdrawal_plans);
@@ -193,4 +202,52 @@ pub fn restore_state() {
     ASSET_METRICS.with(|f| *f.borrow_mut() = asset_metrics);
     DOMAIN_POLICIES.with(|f| *f.borrow_mut() = domain_policies);
     MIGRATION_PLANS.with(|f| *f.borrow_mut() = migration_plans);
+}
+
+/// Records an executed trade in the per-series price-history index
+/// ([`SERIES_TRADE_HISTORY`]). Called once per trade from the execution path.
+///
+/// Trades execute in monotonically increasing `event_id` order, so appending
+/// keeps each series' vector sorted without a re-sort.
+pub(crate) fn index_executed_trade(series_id: &SeriesId, point: SeriesTradePoint) {
+    SERIES_TRADE_HISTORY.with(|idx| {
+        idx.borrow_mut()
+            .entry(series_id.clone())
+            .or_default()
+            .push(point);
+    });
+}
+
+/// Rebuilds [`SERIES_TRADE_HISTORY`] from the executed rows in `EVENTS`.
+///
+/// The index is a pure projection of `EVENTS`, so it is not part of the
+/// persisted [`StableState`]; `restore_state` reconstructs it after `EVENTS` is
+/// loaded. Each executed trade has two rows sharing one `event_id` (buyer with
+/// `qty > 0`, seller with `qty < 0`); selecting the `qty > 0` row collapses the
+/// pair to a single point per trade. Vectors are sorted by `event_id` to stay
+/// robust to any future change in `EVENTS` ordering.
+pub(crate) fn rebuild_series_trade_history() {
+    SERIES_TRADE_HISTORY.with(|idx| {
+        let mut idx = idx.borrow_mut();
+        idx.clear();
+
+        EVENTS.with(|events| {
+            for e in events.borrow().iter() {
+                if matches!(e.event_type, EventType::Executed) && e.qty > 0 {
+                    idx.entry(e.series_id.clone())
+                        .or_default()
+                        .push(SeriesTradePoint {
+                            event_id: e.event_id,
+                            price: e.price.clone(),
+                            qty: e.qty,
+                            timestamp: e.timestamp,
+                        });
+                }
+            }
+        });
+
+        for points in idx.values_mut() {
+            points.sort_by_key(|p| p.event_id);
+        }
+    });
 }

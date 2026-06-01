@@ -397,10 +397,12 @@ type ListOrdersParams = record {
 type ListSeriesTradeHistoryParams = record {
 	// The derivative series whose executed trades to return.
 	series_id : text;
-	// Resume after this cursor (exclusive). `None` starts from the earliest
-	// executed trade. Pass the previous response's `next_cursor` to continue.
-	start_after : opt TradeHistoryCursor;
-	// Maximum number of events to return. `None` returns all remaining events.
+	// Resume after this trade's `event_id` (exclusive). `None` starts from the
+	// earliest executed trade. Pass the previous response's `next_cursor` to
+	// continue. Executed-trade `event_id`s are strictly increasing in
+	// execution order, so the bare id is a stable cursor.
+	start_after : opt nat64;
+	// Maximum number of trades to return. `None` returns all remaining trades.
 	limit : opt nat64
 };
 // Input parameters for [`list_settled_series`](super::list_settled_series).
@@ -618,14 +620,35 @@ type Series = record {
 	// If this series was forked from another, the source series ID.
 	forked_from : opt text
 };
-// A page of executed-trade events scoped to a single series.
+// A page of executed trades scoped to a single series.
 type SeriesTradeHistoryPage = record {
-	// When `Some`, pass back as `start_after` to fetch the next page. `None`
-	// means the last page has been returned.
-	next_cursor : opt TradeHistoryCursor;
-	// Executed events for the series in this page, ordered by
-	// `(timestamp, event_id)` ascending.
-	items : vec Event
+	// When `Some`, pass back as `start_after` to fetch the next page (it is the
+	// `event_id` of the last trade returned). `None` means the last page has
+	// been returned.
+	next_cursor : opt nat64;
+	// Executed trades for the series in this page, one point per trade, ordered
+	// by `event_id` ascending (i.e. execution order).
+	items : vec SeriesTradePoint
+};
+// A single executed trade on a series, as surfaced by the market-wide
+// price-history query.
+//
+// Each executed trade emits two [`Event`] rows (one per counterparty) that
+// share the same `event_id`, `price`, and `timestamp`. A price history needs
+// only one point per trade, so this collapses the pair to the trade-level
+// facts a front end plots — `price`/`timestamp` for the sparkline, `qty` for
+// optional volume — without exposing either counterparty's principal in a
+// market-wide read.
+type SeriesTradePoint = record {
+	// Traded quantity (positive).
+	qty : int;
+	// Execution timestamp in nanoseconds since UNIX epoch.
+	timestamp : nat64;
+	// Id of the trade's [`Event`] rows. Strictly increasing in execution
+	// order, so it doubles as the pagination cursor.
+	event_id : nat64;
+	// Execution price of the trade.
+	price : Price
 };
 // Input parameters for initiating a series settlement.
 type SettleSeriesParams = record {
@@ -853,17 +876,6 @@ type TradeError = variant {
 	// A common error occurred.
 	Common : CommonError
 };
-// Stable, exclusive cursor for paging a series' executed-trade history.
-//
-// Events are ordered by `(timestamp, event_id)`, so the cursor carries both:
-// `event_id` alone is not monotonic in timestamp order because backfilled rows
-// can have a newer id but an older timestamp.
-type TradeHistoryCursor = record {
-	// Timestamp (ns) of the last event returned in the previous page.
-	timestamp : nat64;
-	// Event id of the last event returned in the previous page.
-	event_id : nat64
-};
 // A single trading access policy attached to a derivative series.
 //
 // A [`Series`](super::series::Series) holds a `Vec<TradingAccess>`.
@@ -1086,16 +1098,13 @@ service : (Config) -> {
 	// market-wide price history (e.g. a YES-probability sparkline) from the
 	// per-trade `price`/`timestamp` rather than only the viewer's own fills.
 	//
-	// Only [`EventType::Executed`] events are returned: those carry the matched
-	// trade price the sparkline plots. Settlement and liquidation events are
-	// excluded.
-	//
-	// Events are ordered by `(timestamp, event_id)` so backfilled rows interleave
-	// chronologically rather than appearing in storage-insertion order. The cursor
-	// is exclusive and carries both fields because `event_id` alone is not
-	// monotonic in timestamp order. Paging is stable as long as the underlying
-	// event log is not mutated mid-traversal. Mirrors the pagination contract of
-	// `list_settled_series`.
+	// Each trade is returned as a single [`SeriesTradePoint`] (the two
+	// counterparty rows are collapsed), ordered by `event_id` ascending — i.e.
+	// execution order. Served from the `SERIES_TRADE_HISTORY` index, so the read
+	// is `O(log series + page)` rather than a scan of the whole event log. The
+	// cursor is the last trade's `event_id` and is exclusive; since executed-trade
+	// `event_id`s are strictly increasing, resuming neither drops nor repeats a
+	// trade. Mirrors the pagination contract of `list_settled_series`.
 	list_series_trade_history : (ListSeriesTradeHistoryParams) -> (
 		SeriesTradeHistoryPage
 	) query;

@@ -5,14 +5,14 @@ use shared::types::{BalanceDomain, Series};
 use crate::{
     api::trade::errors::TradeError,
     memory::{
-        ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, EVENTS, EXECUTED_TRADES, NEXT_EVENT_ID,
-        POSITIONS,
+        index_executed_trade, ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, EVENTS,
+        EXECUTED_TRADES, NEXT_EVENT_ID, POSITIONS,
     },
     payoffs::get_required_margin,
     trade::types::ExecuteTradeParams,
     types::{
         errors::CommonError,
-        event::{Event, EventType},
+        event::{Event, EventType, SeriesTradePoint},
         margin::{AccountState, Position, PositionsMap},
     },
     utils::{
@@ -295,6 +295,10 @@ pub(crate) fn execute_trade_impl(
         current
     });
 
+    // Single timestamp for the trade so both counterparty rows — and the
+    // price-history point derived from them — agree.
+    let timestamp = now_ns();
+
     EVENTS.with(|events| {
         let mut events = events.borrow_mut();
 
@@ -307,7 +311,7 @@ pub(crate) fn execute_trade_impl(
             qty,
             price: price.clone(),
             event_type: EventType::Executed,
-            timestamp: now_ns(),
+            timestamp,
         });
 
         // Seller Event (using same event_id or should it be different? Usually history shows the
@@ -319,11 +323,23 @@ pub(crate) fn execute_trade_impl(
             series_id: series_id.clone(),
             user: seller,
             qty: -qty,
-            price,
+            price: price.clone(),
             event_type: EventType::Executed,
-            timestamp: now_ns(),
+            timestamp,
         });
     });
+
+    // Maintain the per-series price-history index incrementally (one point per
+    // trade), keeping `list_series_trade_history` reads off the full event log.
+    index_executed_trade(
+        &series_id,
+        SeriesTradePoint {
+            event_id,
+            price,
+            qty,
+            timestamp,
+        },
+    );
 
     EXECUTED_TRADES.with(|m| {
         m.borrow_mut().insert(trade_id, event_id);
