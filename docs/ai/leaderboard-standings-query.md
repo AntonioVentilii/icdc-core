@@ -79,10 +79,15 @@ service : {
   principals who settled at least one position in the window.
 - Guarded by `caller_is_not_anonymous`, matching `get_trade_history`,
   `list_settled_series`, and `list_series_trade_history`.
-- Cursor convention mirrors the other list queries: `start_after` is the number
-  of entries already consumed (exclusive), `next_cursor` is the new running
-  count, and a `limit` of 0 is clamped to 1 so a paging caller always makes
-  forward progress.
+- Pagination is **offset-based**: `start_after` is the number of entries already
+  consumed and `next_cursor` is the new running count. This differs from the
+  id/key cursors of `list_settled_series` (`SeriesId`) and
+  `list_series_trade_history` (`event_id`), whose rows carry a stable key to
+  resume from; a ranking has no such per-entry key, so it pages by position over
+  the window's deterministic order. As in those queries, a `limit` of 0 is
+  clamped to 1 so a paging caller always makes forward progress.
+- The caller-supplied `members` set is capped at 10,000 principals (it is
+  ranked in full); a longer list is truncated.
 
 ### Window semantics — calendar, not rolling
 

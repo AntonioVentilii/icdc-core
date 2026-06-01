@@ -22,6 +22,13 @@ use crate::{
 /// within each `(window, period)` bucket.
 type LeaderboardIndex = BTreeMap<(LeaderboardWindow, u64), BTreeMap<User, PnlAggregate>>;
 
+/// Upper bound on a caller-supplied `members` (league) filter. The set is
+/// caller-controlled and must be materialized and ranked in full, so it is
+/// capped to keep a single query within the replica's instruction budget and
+/// argument-size limit. A league of any realistic size is far below this;
+/// anything longer is truncated to the first `MAX_LEADERBOARD_MEMBERS`.
+const MAX_LEADERBOARD_MEMBERS: usize = 10_000;
+
 /// Returns ranked standings for a calendar window (this week / this month / all
 /// time), derived from settled-position `PnL`, with each entry's prior-window
 /// rank for ↑/↓ deltas and stable cursor pagination.
@@ -53,10 +60,15 @@ fn list_leaderboard_impl(
 ) -> LeaderboardPage {
     let ListLeaderboardParams {
         window,
-        members,
+        mut members,
         start_after,
         limit,
     } = params;
+    // Bound the caller-supplied league filter before it drives any allocation
+    // or sort (see `MAX_LEADERBOARD_MEMBERS`).
+    if let Some(m) = members.as_mut() {
+        m.truncate(MAX_LEADERBOARD_MEMBERS);
+    }
     let members = members.as_deref();
 
     let mut current = collect_population(idx, window, window.period_id(now_ns), members);
@@ -566,6 +578,21 @@ mod tests {
             .unwrap();
         assert_eq!(p1_all.realized_pnl, 140);
         assert_eq!(p1_all.settled_count, 3);
+    }
+
+    #[test]
+    fn members_filter_is_capped() {
+        set_index(vec![]);
+        // A members list longer than the cap is truncated before it drives any
+        // ranking work, so the result covers at most `MAX_LEADERBOARD_MEMBERS`.
+        let oversized = u32::try_from(MAX_LEADERBOARD_MEMBERS).unwrap() + 5;
+        let members: Vec<Principal> = (0..oversized)
+            .map(|i| Principal::from_slice(&i.to_be_bytes()))
+            .collect();
+        let mut p = params(LeaderboardWindow::AllTime);
+        p.members = Some(members);
+        let page = query(p, DAY_NS * 100);
+        assert_eq!(page.total, MAX_LEADERBOARD_MEMBERS as u64);
     }
 
     /// Reference implementation: rank the whole population (and the whole prior

@@ -67,8 +67,10 @@ impl LeaderboardWindow {
     }
 
     /// The id of the period immediately preceding the one containing `ts_ns`,
-    /// or `None` when there is no prior window ([`AllTime`], or a period at the
-    /// very start of the epoch).
+    /// or `None` when there is no prior window: [`AllTime`] (one unbounded
+    /// period), or any window whose `period_id` is already `0`. In practice
+    /// only `Week` reaches `0` (the epoch's first week); `Month` ids are large
+    /// positive values, so a prior month always exists.
     ///
     /// [`AllTime`]: LeaderboardWindow::AllTime
     #[must_use]
@@ -128,7 +130,10 @@ fn civil_from_days(days: u64) -> (u64, u32) {
     let month = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
                                                        // March–December belong to `year`; January/February roll into the next.
     let year = if month <= 2 { year + 1 } else { year };
-    (year, u32::try_from(month).unwrap_or(1))
+    (
+        year,
+        u32::try_from(month).expect("civil_from_days yields month in 1..=12"),
+    )
 }
 
 #[cfg(test)]
