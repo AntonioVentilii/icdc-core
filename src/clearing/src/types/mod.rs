@@ -2,6 +2,7 @@ pub(crate) mod account;
 pub mod errors;
 pub mod event;
 pub(crate) mod http;
+pub mod leaderboard;
 pub mod margin;
 pub(crate) mod payment;
 pub mod plans;

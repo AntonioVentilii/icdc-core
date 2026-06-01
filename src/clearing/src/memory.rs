@@ -11,6 +11,7 @@ use shared::types::{
 use crate::{
     types::{
         event::{Event, EventType, SeriesTradePoint},
+        leaderboard::{LeaderboardWindow, PnlAggregate},
         margin::{AccountState, Position, PositionsMap},
         plans::{
             DepositPlan, FundWithdrawalPlan, MigrationKey, MigrationPlan, SettlementPlan,
@@ -57,6 +58,16 @@ thread_local! {
     /// serve a market's price history in O(log series + page) instead of
     /// scanning the whole event log per call.
     pub static SERIES_TRADE_HISTORY: RefCell<BTreeMap<SeriesId, Vec<SeriesTradePoint>>> = const { RefCell::new(BTreeMap::new()) };
+    /// Per-window leaderboard index: realized settlement `PnL` aggregated per
+    /// principal, keyed by `(window, period_id)` (see [`LeaderboardWindow`]).
+    /// Each settled position folds its signed `cashflow_usd` into the current
+    /// week, month, and all-time buckets. Like [`SERIES_TRADE_HISTORY`] this is
+    /// a pure projection of the `Settled` rows in `EVENTS`, so it is **not**
+    /// persisted — it is rebuilt from `EVENTS` in `post_upgrade` via
+    /// [`rebuild_leaderboard`] and maintained incrementally as settlements emit
+    /// events. Lets `list_leaderboard` rank a window without scanning the whole
+    /// event log per call.
+    pub static SETTLEMENT_LEADERBOARD: RefCell<BTreeMap<(LeaderboardWindow, u64), BTreeMap<User, PnlAggregate>>> = const { RefCell::new(BTreeMap::new()) };
     pub static REGISTRY_CANISTER: RefCell<Principal> = const { RefCell::new(Principal::anonymous()) };
     pub static DEPOSIT_PLANS: RefCell<BTreeMap<DepositKey, DepositPlan>> = const { RefCell::new(BTreeMap::new()) };
     pub static WITHDRAWAL_PLANS: RefCell<BTreeMap<WithdrawalKey, WithdrawalPlan>> = const { RefCell::new(BTreeMap::new()) };
@@ -186,6 +197,7 @@ pub fn restore_state() {
     EVENTS.with(|e| *e.borrow_mut() = events);
     NEXT_EVENT_ID.with(|id| *id.borrow_mut() = next_id);
     rebuild_series_trade_history();
+    rebuild_leaderboard();
     REGISTRY_CANISTER.with(|r| *r.borrow_mut() = registry);
     DEPOSIT_PLANS.with(|d| *d.borrow_mut() = deposit_plans);
     WITHDRAWAL_PLANS.with(|w| *w.borrow_mut() = withdrawal_plans);
@@ -249,5 +261,64 @@ pub(crate) fn rebuild_series_trade_history() {
         for points in idx.values_mut() {
             points.sort_by_key(|p| p.event_id);
         }
+    });
+}
+
+/// Folds a single settled position into the leaderboard index, adding its
+/// signed `cashflow_usd` to the user's current week, month, and all-time
+/// aggregates. The period is derived from `timestamp`, so the buckets a
+/// settlement lands in are fixed at settlement time and independent of when the
+/// leaderboard is later queried.
+fn record_settled_pnl(
+    idx: &mut BTreeMap<(LeaderboardWindow, u64), BTreeMap<User, PnlAggregate>>,
+    user: User,
+    cashflow_usd: i128,
+    timestamp: u64,
+) {
+    for window in LeaderboardWindow::ALL {
+        let period = window.period_id(timestamp);
+        idx.entry((window, period))
+            .or_default()
+            .entry(user)
+            .or_default()
+            .record(cashflow_usd);
+    }
+}
+
+/// Indexes the `Settled` rows in a freshly emitted batch of events into
+/// [`SETTLEMENT_LEADERBOARD`]. Called at each site that appends settlement
+/// events to `EVENTS` (live settlement and the one-shot backfill), so the
+/// leaderboard stays current between upgrades. Non-`Settled` events are
+/// ignored. A `Settled` event's `qty` is the position's signed `cashflow_usd`.
+pub(crate) fn index_settled_events(events: &[Event]) {
+    SETTLEMENT_LEADERBOARD.with(|idx| {
+        let mut idx = idx.borrow_mut();
+        for e in events {
+            if matches!(e.event_type, EventType::Settled) {
+                record_settled_pnl(&mut idx, e.user, e.qty, e.timestamp);
+            }
+        }
+    });
+}
+
+/// Rebuilds [`SETTLEMENT_LEADERBOARD`] from the `Settled` rows in `EVENTS`.
+///
+/// The index is a pure projection of `EVENTS`, so it is not part of the
+/// persisted [`StableState`]; `restore_state` reconstructs it after `EVENTS` is
+/// loaded. Period bucketing is a deterministic function of each event's
+/// `timestamp`, so the rebuild reproduces exactly the buckets the incremental
+/// maintenance produced.
+pub(crate) fn rebuild_leaderboard() {
+    SETTLEMENT_LEADERBOARD.with(|idx| {
+        let mut idx = idx.borrow_mut();
+        idx.clear();
+
+        EVENTS.with(|events| {
+            for e in events.borrow().iter() {
+                if matches!(e.event_type, EventType::Settled) {
+                    record_settled_pnl(&mut idx, e.user, e.qty, e.timestamp);
+                }
+            }
+        });
     });
 }

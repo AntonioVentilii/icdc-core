@@ -15,9 +15,9 @@ use super::{
 use crate::{
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
-        ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, CONFIG, EVENTS, INSURANCE_FUND,
-        LIMIT_ORDERS, NEXT_EVENT_ID, POSITIONS, REGISTRY_CANISTER, SERIES, SETTLEMENT_PLANS,
-        TREASURY,
+        index_settled_events, ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, CONFIG, EVENTS,
+        INSURANCE_FUND, LIMIT_ORDERS, NEXT_EVENT_ID, POSITIONS, REGISTRY_CANISTER, SERIES,
+        SETTLEMENT_PLANS, TREASURY,
     },
     payoffs::{fees::calculate_settlement_fee, get_settlement_value},
     types::{
@@ -586,6 +586,7 @@ pub(crate) fn apply_settlement_accounting_logic(plan: &mut SettlementPlan) -> bo
     });
 
     if !emitted.is_empty() {
+        index_settled_events(&emitted);
         EVENTS.with(|events| {
             events.borrow_mut().extend(emitted);
         });
@@ -724,6 +725,7 @@ pub fn backfill_settlement_events(
     });
 
     if !emitted.is_empty() {
+        index_settled_events(&emitted);
         EVENTS.with(|events| {
             events.borrow_mut().extend(emitted);
         });
