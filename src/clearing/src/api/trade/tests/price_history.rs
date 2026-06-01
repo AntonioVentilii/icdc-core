@@ -243,3 +243,39 @@ fn caps_to_the_most_recent_points() {
     assert_eq!(candles.first().unwrap().bucket_start_ns, DAY);
     assert_eq!(candles.last().unwrap().bucket_start_ns, 1_000 * DAY);
 }
+
+#[test]
+fn oldest_kept_bucket_at_the_cap_is_fully_aggregated() {
+    let series = SeriesId::from("series".to_owned());
+
+    // Day 0 (overflow → dropped) and day 1 (the oldest kept bucket) each carry
+    // several trades. The newest-first scan must fold every trade of the oldest
+    // kept bucket before the next, strictly-older bucket ends the scan — not cut
+    // it off mid-bucket once the cap is reached.
+    let mut events = vec![
+        trade(0, &series, 99, 1, 0),         // day 0 — dropped
+        trade(1, &series, 98, 1, 1),         // day 0 — dropped
+        trade(2, &series, 10, 1, DAY),       // day 1 — earliest → open
+        trade(3, &series, 20, 1, DAY + 1),   // day 1
+        trade(4, &series, 30, 1, DAY + 2),   // day 1 — latest → close
+    ];
+    // Fill days 2..=1000 with one trade each, so day 1 is exactly the 1000th
+    // (oldest) kept bucket and day 0 is the overflow that stops the scan. Five
+    // events precede these, so day `d`'s event_id continues from there.
+    for (offset, day) in (2..=1_000_u64).enumerate() {
+        let event_id = 5 + offset as u64;
+        events.push(trade(event_id, &series, u128::from(day), 1, day * DAY));
+    }
+    seed(events);
+
+    let candles = history(&series, PriceHistoryInterval::Day, None, None);
+
+    assert_eq!(candles.len(), 1_000);
+    let day1 = candles.first().unwrap();
+    assert_eq!(day1.bucket_start_ns, DAY, "day 0 dropped, day 1 is oldest kept");
+    assert_eq!(day1.trade_count, 3, "all of the oldest kept bucket's trades");
+    assert_eq!(day1.open, price(10));
+    assert_eq!(day1.close, price(30));
+    assert_eq!(day1.high, price(30));
+    assert_eq!(day1.low, price(10));
+}

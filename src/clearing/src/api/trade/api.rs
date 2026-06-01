@@ -674,7 +674,8 @@ pub fn list_series_trade_history(params: ListSeriesTradeHistoryParams) -> Series
 /// open-ended range at a fine interval (e.g. hourly over years) could still grow
 /// unboundedly; capping keeps the read within the replica's instruction and
 /// response-size budget. When the range yields more buckets than this, the most
-/// recent ones are kept (a chart reads the latest window).
+/// recent ones are kept (a chart reads the latest window). The cap bounds the
+/// *work* too, not just the payload — see [`aggregate_price_history`].
 const MAX_PRICE_HISTORY_POINTS: usize = 1_000;
 
 /// Returns a single series' executed trades aggregated into fixed-width
@@ -692,8 +693,11 @@ const MAX_PRICE_HISTORY_POINTS: usize = 1_000;
 ///
 /// Served from the same `SERIES_TRADE_HISTORY` index as
 /// [`list_series_trade_history`], so it adds no write-path cost and no persisted
-/// state; aggregation is `O(trades in range)`. Guarded by
-/// `caller_is_not_anonymous`, matching the other series-scoped reads.
+/// state. Aggregation scans newest-first and stops once it has filled
+/// [`MAX_PRICE_HISTORY_POINTS`] buckets, so both the work and the payload are
+/// bounded even when `start_time`/`end_time` are open-ended (see
+/// [`aggregate_price_history`]). Guarded by `caller_is_not_anonymous`, matching
+/// the other series-scoped reads.
 #[query(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn get_series_price_history(params: GetSeriesPriceHistoryParams) -> SeriesPriceHistory {
@@ -713,18 +717,19 @@ pub fn get_series_price_history(params: GetSeriesPriceHistoryParams) -> SeriesPr
     })
 }
 
-/// Folds one trade into its bucket's candle. `points` is iterated in execution
-/// (ascending `event_id`) order, which is chronological — trades execute
-/// sequentially, so a higher `event_id` never carries an earlier timestamp — so
-/// the last point folded into a bucket is its `close`.
-fn fold_into_candle(candle: &mut SeriesPriceCandle, point: &SeriesTradePoint) {
+/// Folds a trade *older* than the candle's current `open` into it. The scan in
+/// [`aggregate_price_history`] runs newest→oldest, so a bucket's first-seen
+/// point is its `close` (set on insert) and each subsequent point is older and
+/// becomes the new `open`; `high`/`low`/`volume`/`trade_count` accumulate
+/// regardless of direction.
+fn fold_older_point(candle: &mut SeriesPriceCandle, point: &SeriesTradePoint) {
     if point.price.value() > candle.high.value() {
         candle.high = point.price.clone();
     }
     if point.price.value() < candle.low.value() {
         candle.low = point.price.clone();
     }
-    candle.close = point.price.clone();
+    candle.open = point.price.clone();
     candle.volume += point.qty;
     candle.trade_count += 1;
 }
@@ -733,6 +738,17 @@ fn fold_into_candle(candle: &mut SeriesPriceCandle, point: &SeriesTradePoint) {
 /// [`PriceHistoryInterval`] candles within `[start_time, end_time)`. Factored
 /// out of [`get_series_price_history`] so it can be unit-tested without the
 /// thread-local index.
+///
+/// Scans **newest→oldest** and stops as soon as it would open a
+/// (`MAX_PRICE_HISTORY_POINTS` + 1)-th bucket, so the work is bounded by the
+/// most recent capped window rather than the whole series — an open-ended
+/// (`None`/`None`) request on a long-lived market processes only the points in
+/// its newest `MAX_PRICE_HISTORY_POINTS` buckets, not every trade ever. `points`
+/// is ascending `event_id`, i.e. chronological (trades execute sequentially, so
+/// a higher `event_id` never carries an earlier timestamp), so reversing it
+/// visits buckets in strictly non-increasing `bucket_start_ns`: once the cap is
+/// full, the next not-yet-seen bucket is strictly older than every kept one and
+/// terminates the scan.
 fn aggregate_price_history(
     points: &[SeriesTradePoint],
     interval: PriceHistoryInterval,
@@ -743,37 +759,42 @@ fn aggregate_price_history(
     // separate sort.
     let mut buckets: BTreeMap<u64, SeriesPriceCandle> = BTreeMap::new();
 
-    for point in points {
-        if start_time.is_some_and(|from| point.timestamp < from)
-            || end_time.is_some_and(|to| point.timestamp >= to)
-        {
+    for point in points.iter().rev() {
+        if end_time.is_some_and(|to| point.timestamp >= to) {
+            // Above the window; older points may still qualify.
             continue;
+        }
+        if start_time.is_some_and(|from| point.timestamp < from) {
+            // Below the window; every remaining (older) point is too.
+            break;
         }
 
         let bucket_start_ns = interval.bucket_start(point.timestamp);
-        buckets
-            .entry(bucket_start_ns)
-            .and_modify(|candle| fold_into_candle(candle, point))
-            .or_insert_with(|| SeriesPriceCandle {
+        if let Some(candle) = buckets.get_mut(&bucket_start_ns) {
+            fold_older_point(candle, point);
+        } else {
+            // A new, strictly-older bucket once the cap is full ends the scan.
+            if buckets.len() == MAX_PRICE_HISTORY_POINTS {
+                break;
+            }
+            buckets.insert(
                 bucket_start_ns,
-                open: point.price.clone(),
-                high: point.price.clone(),
-                low: point.price.clone(),
-                close: point.price.clone(),
-                volume: point.qty,
-                trade_count: 1,
-            });
+                SeriesPriceCandle {
+                    bucket_start_ns,
+                    open: point.price.clone(),
+                    high: point.price.clone(),
+                    low: point.price.clone(),
+                    close: point.price.clone(),
+                    volume: point.qty,
+                    trade_count: 1,
+                },
+            );
+        }
     }
 
-    let mut candles: Vec<SeriesPriceCandle> = buckets.into_values().collect();
-    // Keep the most recent buckets if the range/interval yields more than the
-    // cap; candles are already ascending, so drop from the front.
-    if candles.len() > MAX_PRICE_HISTORY_POINTS {
-        let overflow = candles.len() - MAX_PRICE_HISTORY_POINTS;
-        candles.drain(..overflow);
+    SeriesPriceHistory {
+        candles: buckets.into_values().collect(),
     }
-
-    SeriesPriceHistory { candles }
 }
 
 /// Returns a list of all active limit orders, potentially filtered by series.
