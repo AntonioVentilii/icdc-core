@@ -37,3 +37,25 @@ pub struct Event {
     /// Timestamp in nanoseconds since UNIX epoch.
     pub timestamp: u64,
 }
+
+/// A single executed trade on a series, as surfaced by the market-wide
+/// price-history query.
+///
+/// Each executed trade emits two [`Event`] rows (one per counterparty) that
+/// share the same `event_id`, `price`, and `timestamp`. A price history needs
+/// only one point per trade, so this collapses the pair to the trade-level
+/// facts a front end plots — `price`/`timestamp` for the sparkline, `qty` for
+/// optional volume — without exposing either counterparty's principal in a
+/// market-wide read.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct SeriesTradePoint {
+    /// Id of the trade's [`Event`] rows. Strictly increasing in execution
+    /// order, so it doubles as the pagination cursor.
+    pub event_id: u64,
+    /// Execution price of the trade.
+    pub price: Price,
+    /// Traded quantity (positive).
+    pub qty: i128,
+    /// Execution timestamp in nanoseconds since UNIX epoch.
+    pub timestamp: u64,
+}

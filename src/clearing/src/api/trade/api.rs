@@ -13,15 +13,16 @@ use super::{
     errors::TradeError,
     params::{
         CancelLimitOrderParams, FreezePositionForTransferParams, ListOrdersParams,
-        SubmitLimitOrderParams, SubmitMarketOrderParams, SubmitMatchedTradeParams,
+        ListSeriesTradeHistoryParams, SubmitLimitOrderParams, SubmitMarketOrderParams,
+        SubmitMatchedTradeParams,
     },
-    results::{AcceptPositionTransferResult, SubmitMatchedTradeResult},
+    results::{AcceptPositionTransferResult, SeriesTradeHistoryPage, SubmitMatchedTradeResult},
 };
 use crate::{
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
         ACCEPTED_TRANSFERS, ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, EVENTS,
-        FROZEN_TRANSFERS, LIMIT_ORDERS, POSITIONS, REGISTRY_CANISTER,
+        FROZEN_TRANSFERS, LIMIT_ORDERS, POSITIONS, REGISTRY_CANISTER, SERIES_TRADE_HISTORY,
     },
     payoffs::{get_required_margin, scale_price, RoundingMode},
     trade::{
@@ -603,6 +604,64 @@ pub fn get_trade_history() -> Vec<Event> {
                 .then(a.event_id.cmp(&b.event_id))
         });
         filtered
+    })
+}
+
+/// Returns the executed-trade history for a single series, with stable cursor
+/// pagination.
+///
+/// Unlike [`get_trade_history`] — which is caller-scoped — this surfaces every
+/// participant's executed trades on `series_id`, so a front end can derive a
+/// market-wide price history (e.g. a YES-probability sparkline) from the
+/// per-trade `price`/`timestamp` rather than only the viewer's own fills.
+///
+/// Each trade is returned as a single [`SeriesTradePoint`] (the two
+/// counterparty rows are collapsed), ordered by `event_id` ascending — i.e.
+/// execution order. Served from the `SERIES_TRADE_HISTORY` index, so the read
+/// is `O(log series + page)` rather than a scan of the whole event log. The
+/// cursor is the last trade's `event_id` and is exclusive; since executed-trade
+/// `event_id`s are strictly increasing, resuming neither drops nor repeats a
+/// trade. Mirrors the pagination contract of `list_settled_series`.
+#[query(guard = "caller_is_not_anonymous")]
+#[must_use]
+pub fn list_series_trade_history(params: ListSeriesTradeHistoryParams) -> SeriesTradeHistoryPage {
+    let ListSeriesTradeHistoryParams {
+        series_id,
+        start_after,
+        limit,
+    } = params;
+
+    // Default to "all remaining" when no limit is supplied, and clamp to at
+    // least 1 so a limit of 0 still makes forward progress (returns one trade +
+    // a cursor) instead of an empty page that strands a paging caller.
+    let limit = usize::try_from(limit.unwrap_or(u64::MAX))
+        .unwrap_or(usize::MAX)
+        .max(1);
+
+    SERIES_TRADE_HISTORY.with(|idx| {
+        let idx = idx.borrow();
+        let Some(points) = idx.get(&series_id) else {
+            return SeriesTradeHistoryPage::default();
+        };
+
+        // Exclusive cursor: skip the prefix up to and including the `event_id`
+        // the caller last saw. `points` is sorted ascending by `event_id`, so
+        // `partition_point` finds the resume offset in O(log n).
+        let start = match start_after {
+            Some(cursor) => points.partition_point(|p| p.event_id <= cursor),
+            None => 0,
+        };
+
+        let remaining = &points[start..];
+        let page_len = remaining.len().min(limit);
+        let items = remaining[..page_len].to_vec();
+
+        // Emit a cursor only if at least one more trade exists beyond this page.
+        let next_cursor = (remaining.len() > page_len)
+            .then(|| items.last().map(|p| p.event_id))
+            .flatten();
+
+        SeriesTradeHistoryPage { items, next_cursor }
     })
 }
 

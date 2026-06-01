@@ -84,3 +84,23 @@ pub struct ListOrdersParams {
     /// Optional series identifier to filter orders.
     pub series_id: Option<SeriesId>,
 }
+
+/// Input parameters for
+/// [`list_series_trade_history`](super::list_series_trade_history).
+///
+/// Returns the market-wide executed-trade history for a single series so a
+/// front end can derive a price-history series (e.g. a YES-probability
+/// sparkline) from the per-trade `price`/`timestamp`. Unlike `get_trade_history`
+/// the result is not caller-scoped.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct ListSeriesTradeHistoryParams {
+    /// The derivative series whose executed trades to return.
+    pub series_id: SeriesId,
+    /// Resume after this trade's `event_id` (exclusive). `None` starts from the
+    /// earliest executed trade. Pass the previous response's `next_cursor` to
+    /// continue. Executed-trade `event_id`s are strictly increasing in
+    /// execution order, so the bare id is a stable cursor.
+    pub start_after: Option<u64>,
+    /// Maximum number of trades to return. `None` returns all remaining trades.
+    pub limit: Option<u64>,
+}
