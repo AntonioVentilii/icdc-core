@@ -140,9 +140,13 @@ pub fn list_settled_series(params: ListSettledSeriesParams) -> SettledSeriesPage
         limit,
     } = params;
 
-    // Default to "all remaining" when no limit is supplied, mirroring the
-    // registry's pagination contract.
-    let limit = usize::try_from(limit.unwrap_or(u64::MAX)).unwrap_or(usize::MAX);
+    // Default to "all remaining" when no limit is supplied, and clamp to at
+    // least 1 so a limit of 0 still makes forward progress (returns one id +
+    // a cursor) instead of an empty page that strands a paging caller.
+    // Mirrors the registry's pagination contract.
+    let limit = usize::try_from(limit.unwrap_or(u64::MAX))
+        .unwrap_or(usize::MAX)
+        .max(1);
 
     SETTLEMENT_PLANS.with(|plans| {
         let plans = plans.borrow();
@@ -1719,5 +1723,24 @@ mod tests {
         let page = list_settled_series(ListSettledSeriesParams::default());
         assert!(page.items.is_empty());
         assert!(page.next_cursor.is_none());
+    }
+
+    #[test]
+    fn list_settled_series_clamps_zero_limit_to_make_progress() {
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+        for id in ["s1", "s2", "s3"] {
+            seed_settled(id, BalanceDomain::Settlement);
+        }
+
+        // limit = 0 is clamped to 1: returns a single id plus a cursor rather
+        // than an empty page that would strand the caller.
+        let page = list_settled_series(ListSettledSeriesParams {
+            limit: Some(0),
+            ..Default::default()
+        });
+        assert_eq!(page.items, vec![SeriesId::from("s1".to_owned())]);
+        assert_eq!(page.next_cursor, Some(SeriesId::from("s1".to_owned())));
+
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
     }
 }

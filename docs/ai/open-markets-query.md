@@ -113,7 +113,7 @@ is strictly better than the previous "fetch everything + scan the log" path.
    regenerates its own).
 2. Flow lite-fetch:
    - `registry.list_series_with({ balance_domain, payoff_type = Binary,
-     only_unexpired = opt true, pagination })`
+only_unexpired = opt true, pagination })`
    - `clearing.list_settled_series({ balance_domain, ... })` → build a `Set`
    - candidate set = open/unexpired page minus settled ids.
 3. Drop the activity-log-derived resolution map entirely.
