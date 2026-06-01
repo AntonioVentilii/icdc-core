@@ -226,9 +226,12 @@ sequenceDiagram
     participant Clearing as ICDC Clearing
 
     Note over User, Clearing: 1. Discovery Phase
-    App->>Registry: list_series(Pagination)
-    Registry-->>App: Series[]
-    App->>User: Display available markets
+    App->>Registry: list_series_with({ balance_domain, payoff_type, only_unexpired = true, pagination })
+    Registry-->>App: SeriesPage (open + unexpired catalog)
+    App->>Clearing: list_settled_series({ balance_domain, ... })
+    Clearing-->>App: SettledSeriesPage (resolved ids)
+    Note right of App: tradeable = open/unexpired − settled ids
+    App->>User: Display currently-tradeable markets
 
     Note over User, Clearing: 2. User Onboarding
     User->>App: Connect Identity (II / Plug / etc)
