@@ -460,8 +460,13 @@ impl PaginationParams {
 
         let cursor = params.and_then(|p| p.cursor.as_ref());
         // Default to u64::MAX if no limit is provided ("give them all").
-        let limit =
-            usize::try_from(params.and_then(|p| p.limit).unwrap_or(u64::MAX)).unwrap_or(usize::MAX);
+        // Clamp to at least 1: `list_series` forwards user-supplied limits
+        // unvalidated, and a limit of 0 would otherwise return an empty page
+        // with no cursor, leaving a paging caller stuck with no forward
+        // progress. Treat 0 as "smallest meaningful page".
+        let limit = usize::try_from(params.and_then(|p| p.limit).unwrap_or(u64::MAX))
+            .unwrap_or(usize::MAX)
+            .max(1);
 
         // Pre-allocate the vector with a sensible cap (100) to prevent
         // massive allocations if the requested limit is extremely high.
@@ -638,8 +643,8 @@ mod tests {
 
     use crate::types::{
         series::{is_valid_locale, PaginationParams},
-        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId, SeriesIdParams,
-        TradingAccess,
+        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId,
+        SeriesIdParams, TradingAccess,
     };
 
     /// Builds a minimal [`Series`] carrying the given id. Only the id matters
@@ -777,7 +782,10 @@ mod tests {
             store.iter(),
         );
         assert_eq!(
-            page1.iter().map(|s| s.series_id.as_str()).collect::<Vec<_>>(),
+            page1
+                .iter()
+                .map(|s| s.series_id.as_str())
+                .collect::<Vec<_>>(),
             vec!["s0", "s1"]
         );
         assert_eq!(cur1.as_ref().map(SeriesId::as_str), Some("s1"));
@@ -791,10 +799,46 @@ mod tests {
             store.iter(),
         );
         assert_eq!(
-            page2.iter().map(|s| s.series_id.as_str()).collect::<Vec<_>>(),
+            page2
+                .iter()
+                .map(|s| s.series_id.as_str())
+                .collect::<Vec<_>>(),
             vec!["s2", "s3"]
         );
         assert!(cur2.is_none(), "exactly-filled final page must not page on");
+    }
+
+    /// A `limit` of 0 must still make forward progress (it is clamped to 1)
+    /// rather than returning an empty page with no cursor, which would strand
+    /// a paging caller. Walking with `limit = 0` therefore drains the whole
+    /// ordered set, one item per page.
+    #[test]
+    fn pagination_limit_zero_is_clamped_and_makes_progress() {
+        use std::collections::BTreeMap;
+
+        let mut store: BTreeMap<SeriesId, Series> = BTreeMap::new();
+        for id in ["s0", "s1", "s2"] {
+            store.insert(SeriesId::from(id.to_owned()), series_with_id(id));
+        }
+        let full: Vec<SeriesId> = store.keys().cloned().collect();
+
+        let mut collected: Vec<SeriesId> = Vec::new();
+        let mut cursor: Option<SeriesId> = None;
+        for _ in 0..(full.len() + 5) {
+            let params = PaginationParams {
+                limit: Some(0),
+                cursor: cursor.clone(),
+            };
+            let (items, next) = PaginationParams::apply(Some(&params), store.iter());
+            assert_eq!(items.len(), 1, "limit 0 is clamped to a single-item page");
+            collected.extend(items.into_iter().map(|s| s.series_id));
+            match next {
+                Some(c) => cursor = Some(c),
+                None => break,
+            }
+        }
+
+        assert_eq!(collected, full);
     }
 
     #[test]
