@@ -440,8 +440,18 @@ impl PaginationParams {
     ///
     /// The iterator MUST yield items in ascending order of their [`SeriesId`].
     /// This method skips all items up to and including the provided `cursor`,
-    /// then takes `limit` items. It returns those items (cloned) and the ID
-    /// of the *next* available item (if any) to be used as a cursor in subsequent requests.
+    /// then takes `limit` items. It returns those items (cloned) and the
+    /// **exclusive** cursor for the next page (if any).
+    ///
+    /// The returned cursor is the [`SeriesId`] of the **last item returned** in
+    /// this page, not the first un-returned one. Every resume path treats the
+    /// cursor as exclusive — the registry ranges with `Bound::Excluded(cursor)`
+    /// and the fallback below skips `id <= cursor` — so handing back the
+    /// last-returned id resumes exactly after it, dropping and repeating
+    /// nothing. (Returning the first un-returned id here would skip it on the
+    /// next call, losing one item per page boundary.) This matches the cursor
+    /// convention used by clearing's `backfill_settlement_events` and
+    /// `list_settled_series`.
     pub fn apply<'a, I>(params: Option<&Self>, iter: I) -> (Vec<Series>, Option<SeriesId>)
     where
         I: Iterator<Item = (&'a SeriesId, &'a Series)>,
@@ -456,25 +466,26 @@ impl PaginationParams {
         // Pre-allocate the vector with a sensible cap (100) to prevent
         // massive allocations if the requested limit is extremely high.
         let mut items = Vec::with_capacity(min(limit, 100));
-        let mut next_cursor = None;
+        // Id of the last item pushed this page — becomes the exclusive cursor.
+        let mut last_id: Option<&SeriesId> = None;
 
         // Fallback: Skip items up to the cursor if the caller didn't use a range optimization.
         let mut iter = iter.skip_while(move |(id, _)| cursor.is_some_and(|c| *id <= c));
 
         // Collect up to 'limit' items for the current page.
         for _ in 0..limit {
-            if let Some((_, s)) = iter.next() {
+            if let Some((id, s)) = iter.next() {
                 items.push(s.clone());
+                last_id = Some(id);
             } else {
-                // Iterator exhausted before reaching the limit.
+                // Iterator exhausted before reaching the limit: no further page.
                 return (items, None);
             }
         }
 
-        // Check if there's at least one more item to provide a 'next_cursor'.
-        if let Some((id, _)) = iter.next() {
-            next_cursor = Some(id.clone());
-        }
+        // Emit the last-returned id as the next cursor only if at least one more
+        // item remains; otherwise this was the final page.
+        let next_cursor = iter.next().is_some().then(|| last_id.cloned()).flatten();
 
         (items, next_cursor)
     }
@@ -626,9 +637,165 @@ mod tests {
     use candid::Principal;
 
     use crate::types::{
-        series::is_valid_locale, BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series,
-        SeriesId, SeriesIdParams, TradingAccess,
+        series::{is_valid_locale, PaginationParams},
+        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId, SeriesIdParams,
+        TradingAccess,
     };
+
+    /// Builds a minimal [`Series`] carrying the given id. Only the id matters
+    /// for pagination tests.
+    fn series_with_id(id: &str) -> Series {
+        Series {
+            series_id: SeriesId::from(id.to_owned()),
+            underlying: "ICP".to_owned(),
+            expiry_ns: 1_000,
+            payoff_type: PayoffType::Binary,
+            strike: None,
+            price_precision: 8,
+            payout_unit: PayoutUnit::usd(),
+            outcomes: None,
+            oracle_source: "oracle".to_owned(),
+            creator: Principal::anonymous(),
+            created_at_ns: 0,
+            title: "t".to_owned(),
+            description: Description::plain("d"),
+            icon_url: None,
+            banner_url: None,
+            balance_domain: BalanceDomain::Settlement,
+            trading_access: vec![TradingAccess::Open],
+            engine_id: None,
+            forked_from: None,
+            locale: None,
+        }
+    }
+
+    /// Walking every page with a fixed `limit` must reproduce the full ordered
+    /// set exactly — no item dropped at a page boundary, none repeated. This is
+    /// a regression test for an off-by-one where `next_cursor` pointed at the
+    /// first *un-returned* item while the resume path treats the cursor as
+    /// exclusive, silently skipping that item.
+    #[test]
+    fn pagination_covers_every_item_without_drops_or_dupes() {
+        use std::collections::BTreeMap;
+
+        let mut store: BTreeMap<SeriesId, Series> = BTreeMap::new();
+        for n in 0..10 {
+            // Zero-padded so lexical order matches numeric order.
+            let id = format!("s{n:02}");
+            store.insert(SeriesId::from(id.clone()), series_with_id(&id));
+        }
+        let full: Vec<SeriesId> = store.keys().cloned().collect();
+
+        // Try several page sizes, including ones that don't evenly divide the
+        // set and one larger than the set.
+        for limit in [1_u64, 2, 3, 4, 7, 10, 25] {
+            let mut collected: Vec<SeriesId> = Vec::new();
+            let mut cursor: Option<SeriesId> = None;
+
+            // Hard bound on iterations to fail fast rather than hang if the
+            // cursor ever fails to advance.
+            for _ in 0..(full.len() + 5) {
+                let params = PaginationParams {
+                    limit: Some(limit),
+                    cursor: cursor.clone(),
+                };
+                // No range pre-exclusion here, so this exercises `apply`'s own
+                // `skip_while` fallback against the cursor.
+                let (items, next) = PaginationParams::apply(Some(&params), store.iter());
+                collected.extend(items.into_iter().map(|s| s.series_id));
+                match next {
+                    Some(c) => cursor = Some(c),
+                    None => break,
+                }
+            }
+
+            assert_eq!(
+                collected, full,
+                "limit={limit}: paged traversal must equal the full ordered set"
+            );
+        }
+    }
+
+    /// Mirrors how the registry actually resumes: it pre-ranges the store with
+    /// `Bound::Excluded(cursor)` before handing the iterator to `apply`. The
+    /// returned cursor must be exclusive-resume-safe through that path too —
+    /// every item returned exactly once, in order.
+    #[test]
+    fn pagination_through_excluded_range_resume_has_no_drops() {
+        use core::ops::Bound;
+        use std::collections::BTreeMap;
+
+        let mut store: BTreeMap<SeriesId, Series> = BTreeMap::new();
+        for n in 0..6 {
+            let id = format!("s{n}");
+            store.insert(SeriesId::from(id.clone()), series_with_id(&id));
+        }
+        let full: Vec<SeriesId> = store.keys().cloned().collect();
+
+        let mut collected: Vec<SeriesId> = Vec::new();
+        let mut cursor: Option<SeriesId> = None;
+        for _ in 0..(full.len() + 5) {
+            let params = PaginationParams {
+                limit: Some(2),
+                cursor: cursor.clone(),
+            };
+            let (items, next) = match cursor.as_ref() {
+                Some(c) => PaginationParams::apply(
+                    Some(&params),
+                    store.range((Bound::Excluded(c.clone()), Bound::Unbounded)),
+                ),
+                None => PaginationParams::apply(Some(&params), store.range(..)),
+            };
+            collected.extend(items.into_iter().map(|s| s.series_id));
+            match next {
+                Some(c) => cursor = Some(c),
+                None => break,
+            }
+        }
+
+        assert_eq!(collected, full);
+    }
+
+    /// A final page exactly filled to `limit` must not advertise a further
+    /// cursor (otherwise the caller makes a spurious empty request, or worse,
+    /// a buggy resume repeats/loses items).
+    #[test]
+    fn pagination_full_final_page_has_no_next_cursor() {
+        use std::collections::BTreeMap;
+
+        let mut store: BTreeMap<SeriesId, Series> = BTreeMap::new();
+        for id in ["s0", "s1", "s2", "s3"] {
+            store.insert(SeriesId::from(id.to_owned()), series_with_id(id));
+        }
+
+        // First page of 2 → cursor at the last returned id (s1), more remain.
+        let (page1, cur1) = PaginationParams::apply(
+            Some(&PaginationParams {
+                limit: Some(2),
+                cursor: None,
+            }),
+            store.iter(),
+        );
+        assert_eq!(
+            page1.iter().map(|s| s.series_id.as_str()).collect::<Vec<_>>(),
+            vec!["s0", "s1"]
+        );
+        assert_eq!(cur1.as_ref().map(SeriesId::as_str), Some("s1"));
+
+        // Second page of 2 exactly empties the set → no further cursor.
+        let (page2, cur2) = PaginationParams::apply(
+            Some(&PaginationParams {
+                limit: Some(2),
+                cursor: cur1,
+            }),
+            store.iter(),
+        );
+        assert_eq!(
+            page2.iter().map(|s| s.series_id.as_str()).collect::<Vec<_>>(),
+            vec!["s2", "s3"]
+        );
+        assert!(cur2.is_none(), "exactly-filled final page must not page on");
+    }
 
     #[test]
     fn generate_series_id_consistency() {
