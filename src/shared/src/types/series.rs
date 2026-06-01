@@ -515,6 +515,17 @@ pub struct ListSeriesParams {
     pub creator: Option<Principal>,
     /// Filter by a search term in the title or description (case-insensitive, partial match).
     pub search_term: Option<String>,
+    /// When `Some(true)`, exclude series whose `expiry_ns` is at or before the
+    /// registry's current time — i.e. return only series that are still open
+    /// for trading. `Some(false)` and `None` are equivalent and apply no expiry
+    /// filtering (the historical behavior).
+    ///
+    /// The cutoff is the canister's own `time()` evaluated server-side, so the
+    /// caller cannot widen the window with a stale or forged clock. This is the
+    /// expiry half of the "currently-tradeable" predicate; resolution/settlement
+    /// state is owned by the clearing canister and is filtered separately by the
+    /// caller (see `clearing.list_settled_series`).
+    pub only_unexpired: Option<bool>,
     /// Optional pagination parameters.
     pub pagination: Option<PaginationParams>,
 }
@@ -589,6 +600,25 @@ impl ListSeriesParams {
         }
 
         true
+    }
+
+    /// Returns true if `series` satisfies the `only_unexpired` filter relative to
+    /// `now` (nanoseconds since the UNIX epoch).
+    ///
+    /// Kept separate from [`Self::matches`] — which is a pure function of the
+    /// filter and the series — because the expiry cutoff depends on the caller's
+    /// notion of "now". The registry passes its own `time()` so the cutoff is
+    /// server-authoritative.
+    ///
+    /// A series is unexpired when its `expiry_ns` is strictly in the future.
+    /// When the filter is unset or `Some(false)`, every series passes.
+    #[must_use]
+    pub fn matches_expiry(&self, series: &Series, now: u64) -> bool {
+        if self.only_unexpired == Some(true) {
+            series.expiry_ns > now
+        } else {
+            true
+        }
     }
 }
 

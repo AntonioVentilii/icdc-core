@@ -33,8 +33,8 @@ use crate::{
         },
         migration::{params::MigrateDomainParams, results::MigrateDomainResult},
         settlement::{
-            params::{BackfillSettlementEventsParams, SettleSeriesParams},
-            results::{BackfillSettlementEventsResult, SettleSeriesResult},
+            params::{BackfillSettlementEventsParams, ListSettledSeriesParams, SettleSeriesParams},
+            results::{BackfillSettlementEventsResult, SettleSeriesResult, SettledSeriesPage},
         },
         trade::{
             errors::TradeError,

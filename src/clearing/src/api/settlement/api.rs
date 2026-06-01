@@ -9,8 +9,8 @@ use shared::types::{BalanceDomain, Price, Series, SeriesId, SettlementInput};
 
 use super::{
     errors::SettlementError,
-    params::{BackfillSettlementEventsParams, SettleSeriesParams},
-    results::{BackfillSettlementEventsResult, SettleSeriesResult},
+    params::{BackfillSettlementEventsParams, ListSettledSeriesParams, SettleSeriesParams},
+    results::{BackfillSettlementEventsResult, SettleSeriesResult, SettledSeriesPage},
 };
 use crate::{
     guards::{caller_is_controller, caller_is_not_anonymous},
@@ -115,6 +115,74 @@ pub fn get_settlement_plan(series_id: SeriesId) -> Option<SettlementPlan> {
 #[must_use]
 pub fn get_settlement_status(series_id: SeriesId) -> Option<SettlementStatusView> {
     SETTLEMENT_PLANS.with(move |m| m.borrow().get(&series_id).map(SettlementStatusView::from))
+}
+
+/// Lists the ids of series that have been settled (resolved), with stable
+/// cursor pagination.
+///
+/// A series appears here as soon as a [`SettlementPlan`] is opened for it — in
+/// any [`PlanStatus`] — which is precisely when it stops being tradeable. This
+/// is the authoritative resolution set: the clearing canister owns settlement
+/// state, the registry does not. Front ends that build a "currently-tradeable"
+/// candidate set call the registry's `list_series_with` with `only_unexpired`
+/// for the open/unexpired catalog and subtract the ids returned here to drop the
+/// resolved markets, instead of reconstructing resolution from the activity log.
+///
+/// Ids are returned in ascending order from `SETTLEMENT_PLANS` (a `BTreeMap`
+/// keyed by `SeriesId`), so paging with the previous response's `next_cursor`
+/// is stable as long as the underlying set is not mutated mid-traversal.
+#[query(guard = "caller_is_not_anonymous")]
+#[must_use]
+pub fn list_settled_series(params: ListSettledSeriesParams) -> SettledSeriesPage {
+    let ListSettledSeriesParams {
+        balance_domain,
+        start_after,
+        limit,
+    } = params;
+
+    // Default to "all remaining" when no limit is supplied, and clamp to at
+    // least 1 so a limit of 0 still makes forward progress (returns one id +
+    // a cursor) instead of an empty page that strands a paging caller.
+    // Mirrors the registry's pagination contract.
+    let limit = usize::try_from(limit.unwrap_or(u64::MAX))
+        .unwrap_or(usize::MAX)
+        .max(1);
+
+    SETTLEMENT_PLANS.with(|plans| {
+        let plans = plans.borrow();
+
+        let mut iter = match &start_after {
+            Some(after) => plans.range((Bound::Excluded(after), Bound::Unbounded)),
+            None => plans.range(..),
+        }
+        .filter(|(_, plan)| balance_domain.is_none_or(|d| plan.balance_domain == d))
+        .map(|(series_id, _)| series_id);
+
+        let mut items = Vec::new();
+        for _ in 0..limit {
+            match iter.next() {
+                Some(id) => items.push(id.clone()),
+                None => {
+                    // Fewer than `limit` ids remain: this is the last page.
+                    return SettledSeriesPage {
+                        items,
+                        next_cursor: None,
+                    };
+                }
+            }
+        }
+
+        // A full page was produced. Emit a cursor only if at least one more id
+        // exists. `start_after` is exclusive, so the cursor is the last id
+        // returned (mirroring `backfill_settlement_events`); resuming with it
+        // yields the next id without dropping or repeating any.
+        let next_cursor = iter
+            .next()
+            .is_some()
+            .then(|| items.last().cloned())
+            .flatten();
+        SettledSeriesPage { items, next_cursor }
+    })
 }
 
 /// Admin function to manually resume a stuck settlement plan, e.g., if the timer was dropped during
@@ -678,7 +746,7 @@ mod tests {
     use crate::{
         api::settlement::{
             api::check_settlement_solvency, errors::SettlementError, get_settlement_plan,
-            prepare_settlement_impl,
+            list_settled_series, params::ListSettledSeriesParams, prepare_settlement_impl,
         },
         memory::{ACCOUNT_STATES, COLLATERAL_ASSETS, POSITIONS, SETTLEMENT_PLANS},
         types::{
@@ -1544,6 +1612,135 @@ mod tests {
 
         // Cleanup
         EVENTS.with(|e| e.borrow_mut().clear());
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+    }
+
+    /// Seeds an empty-positions settlement plan for `series_id` in `domain`, so
+    /// the series is registered as settled/resolved.
+    fn seed_settled(series_id: &str, domain: BalanceDomain) {
+        let _ = SettlementPlan::get_or_create(SettlementPlanParams {
+            series_id: SeriesId::from(series_id.to_owned()),
+            settlement: SettlementInput::Price(Price::new(1, 0)),
+            oracle_source: "oracle".to_owned(),
+            fee: 0,
+            insurance_fee: 0,
+            positions: vec![],
+            balance_domain: domain,
+        });
+    }
+
+    #[test]
+    fn list_settled_series_returns_ids_ascending_and_filters_by_domain() {
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+
+        // Insert out of order to prove the BTreeMap yields ascending ids.
+        seed_settled("s_c", BalanceDomain::Settlement);
+        seed_settled("s_a", BalanceDomain::ViciXp);
+        seed_settled("s_b", BalanceDomain::Settlement);
+
+        // No filter → every settled id, ascending.
+        let all = list_settled_series(ListSettledSeriesParams::default());
+        assert_eq!(
+            all.items,
+            vec![
+                SeriesId::from("s_a".to_owned()),
+                SeriesId::from("s_b".to_owned()),
+                SeriesId::from("s_c".to_owned()),
+            ]
+        );
+        assert!(all.next_cursor.is_none());
+
+        // Domain filter → only matching plans.
+        let settlement_only = list_settled_series(ListSettledSeriesParams {
+            balance_domain: Some(BalanceDomain::Settlement),
+            ..Default::default()
+        });
+        assert_eq!(
+            settlement_only.items,
+            vec![
+                SeriesId::from("s_b".to_owned()),
+                SeriesId::from("s_c".to_owned()),
+            ]
+        );
+
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+    }
+
+    #[test]
+    fn list_settled_series_paginates_stably() {
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+
+        for id in ["s1", "s2", "s3", "s4", "s5"] {
+            seed_settled(id, BalanceDomain::Settlement);
+        }
+
+        // First page of 2. `next_cursor` is the last id returned (exclusive
+        // resume point), set because more ids remain.
+        let page1 = list_settled_series(ListSettledSeriesParams {
+            limit: Some(2),
+            ..Default::default()
+        });
+        assert_eq!(
+            page1.items,
+            vec![
+                SeriesId::from("s1".to_owned()),
+                SeriesId::from("s2".to_owned()),
+            ]
+        );
+        assert_eq!(page1.next_cursor, Some(SeriesId::from("s2".to_owned())));
+
+        // Resume after the cursor → next page, with no id dropped or repeated.
+        let page2 = list_settled_series(ListSettledSeriesParams {
+            start_after: page1.next_cursor,
+            limit: Some(2),
+            ..Default::default()
+        });
+        assert_eq!(
+            page2.items,
+            vec![
+                SeriesId::from("s3".to_owned()),
+                SeriesId::from("s4".to_owned()),
+            ]
+        );
+        assert_eq!(page2.next_cursor, Some(SeriesId::from("s4".to_owned())));
+
+        // Final page → last id, no further cursor.
+        let page3 = list_settled_series(ListSettledSeriesParams {
+            start_after: page2.next_cursor,
+            limit: Some(2),
+            ..Default::default()
+        });
+        assert_eq!(page3.items, vec![SeriesId::from("s5".to_owned())]);
+        assert!(page3.next_cursor.is_none());
+
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+    }
+
+    #[test]
+    fn list_settled_series_empty_when_nothing_settled() {
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+
+        let page = list_settled_series(ListSettledSeriesParams::default());
+        assert!(page.items.is_empty());
+        assert!(page.next_cursor.is_none());
+    }
+
+    #[test]
+    fn list_settled_series_clamps_zero_limit_to_make_progress() {
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+        for id in ["s1", "s2", "s3"] {
+            seed_settled(id, BalanceDomain::Settlement);
+        }
+
+        // limit = 0 is clamped to 1: returns a single id plus a cursor rather
+        // than an empty page that would strand the caller.
+        let page = list_settled_series(ListSettledSeriesParams {
+            limit: Some(0),
+            ..Default::default()
+        });
+        assert_eq!(page.items, vec![SeriesId::from("s1".to_owned())]);
+        assert_eq!(page.next_cursor, Some(SeriesId::from("s1".to_owned())));
+
         SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
     }
 }

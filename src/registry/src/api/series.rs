@@ -424,7 +424,7 @@ pub fn get_series(series_id: SeriesId) -> Option<Series> {
 #[query]
 #[must_use]
 pub fn list_series_with(params: ListSeriesParams) -> SeriesPage {
-    list_series_with_impl(params, msg_caller())
+    list_series_with_impl(params, msg_caller(), time())
 }
 
 /// Returns a paginated page of all registered derivative series visible to the caller.
@@ -436,12 +436,17 @@ pub fn list_series(pagination: PaginationParams) -> SeriesPage {
         ..Default::default()
     };
 
-    list_series_with_impl(params, msg_caller())
+    list_series_with_impl(params, msg_caller(), time())
 }
 
-/// Implementation of `list_series_with` with an injectable caller for unit tests.
+/// Implementation of `list_series_with` with an injectable caller and clock for
+/// unit tests.
+///
+/// `now` is the cutoff used by the `only_unexpired` filter (see
+/// [`ListSeriesParams::matches_expiry`]). The public query passes the canister's
+/// `time()`; tests pass an explicit value.
 #[must_use]
-fn list_series_with_impl(params: ListSeriesParams, caller: Principal) -> SeriesPage {
+fn list_series_with_impl(params: ListSeriesParams, caller: Principal, now: u64) -> SeriesPage {
     SERIES_STORE.with(move |store| {
         let store = store.borrow();
 
@@ -454,6 +459,7 @@ fn list_series_with_impl(params: ListSeriesParams, caller: Principal) -> SeriesP
 
         let iter = range
             .filter(|(_, s)| params.matches(s))
+            .filter(|(_, s)| params.matches_expiry(s, now))
             .filter(|(_, s)| can_principal_see_series(s, &caller));
 
         let (items, next_cursor) = PaginationParams::apply(params.pagination.as_ref(), iter);
@@ -593,6 +599,9 @@ mod tests {
                 ..Default::default()
             },
             caller,
+            // `now = 0` with the default (unset) `only_unexpired` filter leaves
+            // every series visible regardless of expiry.
+            0,
         )
         .items
         .into_iter()
@@ -1186,5 +1195,98 @@ mod tests {
 
         let stranger_visible = list_all_visible_to(test_principal(99));
         assert!(!stranger_visible.contains(&id));
+    }
+
+    // --- only_unexpired filter ---
+
+    /// Lists series for `caller` with `only_unexpired = Some(true)` evaluated at
+    /// `now`, returning the matching ids.
+    fn list_unexpired_at(caller: Principal, now: u64) -> Vec<SeriesId> {
+        list_series_with_impl(
+            ListSeriesParams {
+                only_unexpired: Some(true),
+                pagination: Some(PaginationParams {
+                    limit: None,
+                    cursor: None,
+                }),
+                ..Default::default()
+            },
+            caller,
+            now,
+        )
+        .items
+        .into_iter()
+        .map(|s| s.series_id)
+        .collect()
+    }
+
+    #[test]
+    fn only_unexpired_excludes_expired_series() {
+        cleanup();
+        let caller = test_principal(1);
+
+        // Two open series with distinct expiries (base_params uses expiry 1000;
+        // bump one so they get distinct ids).
+        let mut early = base_params();
+        early.expiry_ns = 1_000;
+        let AddSeriesResult::Ok(early_id) = add_as_creator(early, caller, 0) else {
+            panic!("early create failed");
+        };
+
+        let mut late = base_params();
+        late.expiry_ns = 5_000;
+        let AddSeriesResult::Ok(late_id) = add_as_creator(late, caller, 0) else {
+            panic!("late create failed");
+        };
+
+        // now = 2000: early (1000) has expired, late (5000) is still open.
+        let visible = list_unexpired_at(caller, 2_000);
+        assert!(
+            !visible.contains(&early_id),
+            "series whose expiry is at/before now must be excluded"
+        );
+        assert!(
+            visible.contains(&late_id),
+            "series whose expiry is strictly after now must be included"
+        );
+    }
+
+    #[test]
+    fn only_unexpired_uses_strict_inequality_at_boundary() {
+        cleanup();
+        let caller = test_principal(1);
+
+        let mut params = base_params();
+        params.expiry_ns = 1_000;
+        let AddSeriesResult::Ok(id) = add_as_creator(params, caller, 0) else {
+            panic!("create failed");
+        };
+
+        // now exactly equal to expiry → expired (a series expires at expiry_ns).
+        assert!(!list_unexpired_at(caller, 1_000).contains(&id));
+        // now one nanosecond earlier → still open.
+        assert!(list_unexpired_at(caller, 999).contains(&id));
+    }
+
+    #[test]
+    fn unset_only_unexpired_preserves_legacy_behavior() {
+        cleanup();
+        let caller = test_principal(1);
+
+        let mut params = base_params();
+        params.expiry_ns = 1_000;
+        let AddSeriesResult::Ok(id) = add_as_creator(params, caller, 0) else {
+            panic!("create failed");
+        };
+
+        // Default params (only_unexpired = None) return the series even when
+        // `now` is far past its expiry — the historical contract.
+        let visible: Vec<SeriesId> =
+            list_series_with_impl(ListSeriesParams::default(), caller, 1_000_000_000)
+                .items
+                .into_iter()
+                .map(|s| s.series_id)
+                .collect();
+        assert!(visible.contains(&id));
     }
 }

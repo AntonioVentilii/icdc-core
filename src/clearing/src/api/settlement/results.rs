@@ -53,3 +53,13 @@ pub struct BackfillSettlementEventsResult {
     /// backfill is complete.
     pub next_cursor: Option<SeriesId>,
 }
+
+/// A page of settled (resolved) series ids.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug, Default)]
+pub struct SettledSeriesPage {
+    /// Settled series ids in this page, ascending.
+    pub items: Vec<SeriesId>,
+    /// When `Some`, pass back as `start_after` to fetch the next page. `None`
+    /// means the last page has been returned.
+    pub next_cursor: Option<SeriesId>,
+}
