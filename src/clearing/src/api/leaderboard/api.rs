@@ -1,3 +1,4 @@
+use core::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use candid::Principal;
@@ -58,22 +59,7 @@ fn list_leaderboard_impl(
     } = params;
     let members = members.as_deref();
 
-    // Current period: collect, order deterministically, and rank.
-    let current = ranked_period(idx, window, window.period_id(now_ns), members);
-    let current_ranks = competition_ranks(&current);
-
-    // Prior period (if any): rank it too, but keyed by principal for lookup,
-    // since the displayed page is the current period's order.
-    let prior_ranks: Option<HashMap<Principal, u64>> = window.prior_period_id(now_ns).map(|p| {
-        let prior = ranked_period(idx, window, p, members);
-        let ranks = competition_ranks(&prior);
-        prior
-            .iter()
-            .map(|(principal, _)| *principal)
-            .zip(ranks)
-            .collect()
-    });
-
+    let mut current = collect_population(idx, window, window.period_id(now_ns), members);
     let total = current.len();
 
     // Pagination: `start_after` is the number of entries already consumed.
@@ -85,12 +71,32 @@ fn list_leaderboard_impl(
         .max(1);
     let end = start.saturating_add(limit).min(total);
 
-    let items = current[start..end]
+    // Only the top `end` entries have to be ordered to serve the page and its
+    // ranks: an entry's competition rank counts the strictly-higher `PnL`s, which
+    // are themselves all within the top `end`. So partition the top `end` out
+    // in O(total) and sort just that prefix — instead of sorting the whole
+    // population on every call. `by_rank` is a strict total order (principals
+    // are unique), so the top `end` is well-defined even across `PnL` ties.
+    if end < total {
+        current.select_nth_unstable_by(end, by_rank);
+    }
+    current[..end].sort_unstable_by(by_rank);
+    let ranked = &current[..end];
+    let ranks = competition_ranks(ranked);
+    let page = &ranked[start..];
+
+    // Prior period (if any): the page needs each shown principal's prior rank
+    // for the ↑/↓ delta — not the whole prior ranking — so compute only those.
+    let prior_ranks = window
+        .prior_period_id(now_ns)
+        .map(|period| prior_ranks_for(idx, window, period, members, page));
+
+    let items = page
         .iter()
         .enumerate()
         .map(|(offset, (principal, agg))| LeaderboardEntry {
             principal: *principal,
-            rank: current_ranks[start + offset],
+            rank: ranks[start + offset],
             prior_rank: prior_ranks.as_ref().and_then(|m| m.get(principal).copied()),
             realized_pnl: agg.realized_pnl,
             settled_count: agg.settled_count,
@@ -107,9 +113,18 @@ fn list_leaderboard_impl(
     }
 }
 
-/// Collects the `(principal, aggregate)` pairs for one `(window, period)` bucket
-/// in display order: realized `PnL` descending, ties broken by principal ascending
-/// for a stable, deterministic ordering.
+/// Total order used to rank standings: realized `PnL` descending, ties broken by
+/// principal ascending. Strict (principals are unique), so the top-`k` of a
+/// population is uniquely defined — which is what lets a paged read select a
+/// page without sorting the whole population.
+fn by_rank(a: &(Principal, PnlAggregate), b: &(Principal, PnlAggregate)) -> Ordering {
+    b.1.realized_pnl
+        .cmp(&a.1.realized_pnl)
+        .then_with(|| a.0.cmp(&b.0))
+}
+
+/// Collects the `(principal, aggregate)` pairs for one `(window, period)` bucket,
+/// **unsorted**.
 ///
 /// With `members = Some`, the bucket is restricted to that set and **every**
 /// listed member is included — those absent from the bucket get a zeroed
@@ -117,7 +132,7 @@ fn list_leaderboard_impl(
 /// members are de-duplicated. With `members = None`, only principals present in
 /// the bucket (i.e. who settled at least one position in the period) are
 /// returned.
-fn ranked_period(
+fn collect_population(
     idx: &LeaderboardIndex,
     window: LeaderboardWindow,
     period: u64,
@@ -125,7 +140,7 @@ fn ranked_period(
 ) -> Vec<(Principal, PnlAggregate)> {
     let bucket = idx.get(&(window, period));
 
-    let mut entries: Vec<(Principal, PnlAggregate)> = match members {
+    match members {
         Some(members) => {
             let mut seen = BTreeSet::new();
             members
@@ -143,20 +158,13 @@ fn ranked_period(
         None => bucket
             .map(|b| b.iter().map(|(u, a)| (u.principal(), *a)).collect())
             .unwrap_or_default(),
-    };
-
-    entries.sort_by(|a, b| {
-        b.1.realized_pnl
-            .cmp(&a.1.realized_pnl)
-            .then_with(|| a.0.cmp(&b.0))
-    });
-    entries
+    }
 }
 
-/// Assigns 1-based competition ranks to an already-sorted (`PnL` descending)
-/// slice: equal-`PnL` runs share the rank of their first element, and the next
-/// distinct `PnL` takes the ordinal position (e.g. `PnL`s `100, 50, 50, 10` →
-/// ranks `1, 2, 2, 4`). Returns one rank per input entry, in input order.
+/// Assigns 1-based competition ranks to a [`by_rank`]-sorted slice: equal-`PnL`
+/// runs share the rank of their first element, and the next distinct `PnL`
+/// takes the ordinal position (e.g. `PnL`s `100, 50, 50, 10` → ranks
+/// `1, 2, 2, 4`). Returns one rank per input entry, in input order.
 fn competition_ranks(sorted: &[(Principal, PnlAggregate)]) -> Vec<u64> {
     let mut ranks = Vec::with_capacity(sorted.len());
     let mut last_pnl: Option<i128> = None;
@@ -172,6 +180,96 @@ fn competition_ranks(sorted: &[(Principal, PnlAggregate)]) -> Vec<u64> {
         last_rank = rank;
     }
     ranks
+}
+
+/// Prior-period rank for each principal on `page`, keyed by principal. A
+/// principal absent from the prior period is omitted (→ `None` prior rank).
+///
+/// For a league query (`members = Some`) the population is bounded by the
+/// member set, so it is simply ranked in full. For a global query the prior
+/// bucket can be large, so rather than rank the whole thing we compute the rank
+/// of just the shown principals: a competition rank is `1 + count(strictly
+/// higher PnL)`, which one linear pass over the bucket tallies for all of them
+/// at once (see [`global_prior_ranks`]).
+fn prior_ranks_for(
+    idx: &LeaderboardIndex,
+    window: LeaderboardWindow,
+    period: u64,
+    members: Option<&[Principal]>,
+    page: &[(Principal, PnlAggregate)],
+) -> HashMap<Principal, u64> {
+    match members {
+        Some(members) => {
+            let mut prior = collect_population(idx, window, period, Some(members));
+            prior.sort_unstable_by(by_rank);
+            let ranks = competition_ranks(&prior);
+            prior
+                .into_iter()
+                .map(|(principal, _)| principal)
+                .zip(ranks)
+                .collect()
+        }
+        None => global_prior_ranks(idx.get(&(window, period)), page),
+    }
+}
+
+/// Computes the prior competition rank of each principal on `page` against the
+/// full (global) prior `bucket`, without sorting the bucket.
+///
+/// A competition rank is `1 + count(entries with strictly higher PnL)`. We tally
+/// that for every shown principal in a single O(bucket · log page) pass: with
+/// the shown principals' distinct prior `PnL`s sorted ascending as `targets`, each
+/// bucket entry with `PnL` `v` contributes to exactly the targets it exceeds — the
+/// prefix `[0, j)` where `j` is the number of targets below `v` — accumulated as
+/// a range increment and resolved by a prefix sum.
+fn global_prior_ranks(
+    bucket: Option<&BTreeMap<User, PnlAggregate>>,
+    page: &[(Principal, PnlAggregate)],
+) -> HashMap<Principal, u64> {
+    let Some(bucket) = bucket else {
+        return HashMap::new();
+    };
+
+    // Prior `PnL` of each shown principal that actually appears in the prior bucket.
+    let present: Vec<(Principal, i128)> = page
+        .iter()
+        .filter_map(|(p, _)| bucket.get(&User(*p)).map(|agg| (*p, agg.realized_pnl)))
+        .collect();
+    if present.is_empty() {
+        return HashMap::new();
+    }
+
+    // Distinct shown `PnL`s, ascending, so a bucket `PnL` maps to the targets it
+    // exceeds via `partition_point`.
+    let mut targets: Vec<i128> = present.iter().map(|(_, pnl)| *pnl).collect();
+    targets.sort_unstable();
+    targets.dedup();
+
+    // `diff` is a range-increment buffer; after the pass, its prefix sum at `i`
+    // is the number of bucket entries with `PnL` strictly greater than `targets[i]`.
+    let mut diff = vec![0_i64; targets.len() + 1];
+    for agg in bucket.values() {
+        let j = targets.partition_point(|&t| t < agg.realized_pnl);
+        if j > 0 {
+            diff[0] += 1;
+            diff[j] -= 1;
+        }
+    }
+    let mut greater = vec![0_i64; targets.len()];
+    let mut running = 0_i64;
+    for (slot, d) in greater.iter_mut().zip(&diff) {
+        running += d;
+        *slot = running;
+    }
+
+    present
+        .into_iter()
+        .map(|(principal, pnl)| {
+            let i = targets.partition_point(|&t| t < pnl);
+            let rank = u64::try_from(greater[i] + 1).unwrap_or(1);
+            (principal, rank)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -468,5 +566,158 @@ mod tests {
             .unwrap();
         assert_eq!(p1_all.realized_pnl, 140);
         assert_eq!(p1_all.settled_count, 3);
+    }
+
+    /// Reference implementation: rank the whole population (and the whole prior
+    /// period) with a full sort, then page. Obviously correct, and what the
+    /// optimized `list_leaderboard_impl` must match byte-for-byte.
+    fn naive_impl(
+        idx: &LeaderboardIndex,
+        params: ListLeaderboardParams,
+        now_ns: u64,
+    ) -> LeaderboardPage {
+        let ListLeaderboardParams {
+            window,
+            members,
+            start_after,
+            limit,
+        } = params;
+        let members = members.as_deref();
+
+        let mut current = collect_population(idx, window, window.period_id(now_ns), members);
+        let total = current.len();
+        current.sort_by(by_rank);
+        let ranks = competition_ranks(&current);
+
+        let prior_ranks: Option<HashMap<Principal, u64>> =
+            window.prior_period_id(now_ns).map(|period| {
+                let mut prior = collect_population(idx, window, period, members);
+                prior.sort_by(by_rank);
+                let r = competition_ranks(&prior);
+                prior
+                    .into_iter()
+                    .map(|(principal, _)| principal)
+                    .zip(r)
+                    .collect()
+            });
+
+        let start = usize::try_from(start_after.unwrap_or(0))
+            .unwrap_or(usize::MAX)
+            .min(total);
+        let limit = usize::try_from(limit.unwrap_or(u64::MAX))
+            .unwrap_or(usize::MAX)
+            .max(1);
+        let end = start.saturating_add(limit).min(total);
+
+        let items = current[start..end]
+            .iter()
+            .enumerate()
+            .map(|(offset, (principal, agg))| LeaderboardEntry {
+                principal: *principal,
+                rank: ranks[start + offset],
+                prior_rank: prior_ranks.as_ref().and_then(|m| m.get(principal).copied()),
+                realized_pnl: agg.realized_pnl,
+                settled_count: agg.settled_count,
+                win_count: agg.win_count,
+            })
+            .collect();
+
+        let next_cursor = (end < total).then_some(end as u64);
+        LeaderboardPage {
+            items,
+            next_cursor,
+            total: total as u64,
+        }
+    }
+
+    #[test]
+    fn optimized_matches_naive_reference_over_random_inputs() {
+        // xorshift64 — a deterministic PRNG so failures reproduce without a dep.
+        let mut state = 0x1234_5678_9abc_def0_u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+
+        let windows = [
+            LeaderboardWindow::Week,
+            LeaderboardWindow::Month,
+            LeaderboardWindow::AllTime,
+        ];
+
+        for _ in 0..600 {
+            let window = windows[(next() % 3) as usize];
+            // Vary `now` across periods so prior is sometimes empty/at boundary.
+            let now = DAY_NS * (60 + next() % 400);
+            let cur = window.period_id(now);
+            let prior = window.prior_period_id(now);
+
+            // Up to 14 principals, each maybe in the current and/or prior bucket
+            // with a small `PnL` drawn from a tight range to force frequent ties.
+            let n_principals = 1 + (next() % 14) as u8;
+            let mut rows = Vec::new();
+            let pnl = |r: u64| i128::from(r % 7) - 3; // -3..=3
+            for n in 1..=n_principals {
+                if next() % 4 != 0 {
+                    rows.push((
+                        window,
+                        cur,
+                        principal(n),
+                        agg(pnl(next()), 1 + next() % 3, 0),
+                    ));
+                }
+                if let Some(prior) = prior {
+                    if next() % 4 != 0 {
+                        rows.push((window, prior, principal(n), agg(pnl(next()), 1, 0)));
+                    }
+                }
+            }
+            set_index(rows);
+
+            // Random params: maybe a league filter (subset + a duplicate + an
+            // absent principal), a random cursor, and a small/None/zero limit.
+            let members = if next() % 3 == 0 {
+                None
+            } else {
+                let mut m = Vec::new();
+                for n in 1..=n_principals {
+                    if next() % 2 == 0 {
+                        m.push(principal(n));
+                    }
+                }
+                if next() % 2 == 0 && !m.is_empty() {
+                    m.push(m[0]); // duplicate
+                }
+                m.push(principal(200)); // never-settled member
+                Some(m)
+            };
+            let start_after = if next() % 4 == 0 {
+                None
+            } else {
+                Some(next() % (u64::from(n_principals) + 2))
+            };
+            let limit = match next() % 4 {
+                0 => None,
+                1 => Some(0),
+                _ => Some(1 + next() % 5),
+            };
+            let params = ListLeaderboardParams {
+                window,
+                members,
+                start_after,
+                limit,
+            };
+
+            let (optimized, reference) = SETTLEMENT_LEADERBOARD.with(|idx| {
+                let idx = idx.borrow();
+                (
+                    list_leaderboard_impl(&idx, params.clone(), now),
+                    naive_impl(&idx, params, now),
+                )
+            });
+            assert_eq!(optimized, reference);
+        }
     }
 }

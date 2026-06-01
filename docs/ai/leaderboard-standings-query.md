@@ -131,6 +131,34 @@ Chosen design: a **per-`(window, period)` aggregate index**, mirroring the
   exposes no more than that, and the per-trade counterparty principals stay out
   of the market-wide reads (`list_series_trade_history` already omits them).
 
+### Ranking only the page, not the whole population
+
+The index removes the event-log scan, but ranking still has a per-call cost: a
+window can hold many principals while the FE shows a page of ~25. Two further
+optimizations keep that cost proportional to the page, not the population:
+
+- **Bounded top-K selection for the current period.** A competition rank counts
+  the strictly-higher PnLs, which for any shown entry are themselves within the
+  top `end` of the population. So the query uses `select_nth_unstable_by` to
+  partition the top `end` in `O(total)` and sorts only that prefix —
+  `O(total + end·log end)` — instead of an `O(total·log total)` full sort on
+  every call. The comparator is a strict total order (PnL desc, then principal),
+  so the top-K is well-defined even across PnL ties. It degrades to a full sort
+  only when the caller asks for everything (`limit = None`), i.e. never worse.
+- **Sort-free prior ranks.** The prior period is needed only for the shown
+  principals' `prior_rank` (the ↑/↓ delta), not a full prior ranking. Rather
+  than sort the whole prior bucket, `global_prior_ranks` computes
+  `1 + count(strictly-higher PnL)` for all shown principals in a single
+  `O(bucket·log page)` pass (distinct shown PnLs as sorted targets, a
+  range-increment tally resolved by a prefix sum). League queries
+  (`members = Some`) are bounded by the member set, so they just rank it in
+  full.
+
+Both are pure read-path algebra over the same index — no extra state, no cache
+to invalidate, output identical to a full-sort reference (asserted by a
+randomized equivalence test over 600 cases across all windows, league filters,
+cursors, and limits).
+
 ## Front-end wiring (separate vici-app PR)
 
 1. `npm run did` to regenerate bindings (already done in icdc-core; the FE
@@ -151,10 +179,13 @@ Chosen design: a **per-`(window, period)` aggregate index**, mirroring the
   with ties, prior-window rank populated / `None` (newcomer, all-time), the
   `members` league filter (excludes non-members, includes inactive members
   zeroed), stable cursor pagination with `limit = 0` clamp, the empty/unknown
-  window case, and a write-path test feeding `Settled` events through
-  `index_settled_events` and reading them back bucketed by window.
+  window case, a write-path test feeding `Settled` events through
+  `index_settled_events` and reading them back bucketed by window, and a
+  randomized equivalence test asserting the optimized read path (bounded
+  selection + sort-free prior ranks) matches a naive full-sort reference over
+  600 cases across all windows, league filters, cursors, and limits.
 
-`cargo test -p clearing --lib` — 80 passed (17 new). `npm run quality` and
+`cargo test -p clearing --lib` — 81 passed (18 new). `npm run quality` and
 `npm run did` pass.
 
 [`Event`]: ../../src/clearing/src/types/event.rs
