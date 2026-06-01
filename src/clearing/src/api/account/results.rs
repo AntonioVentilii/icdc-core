@@ -1,6 +1,6 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
-use shared::types::AssetId;
+use shared::types::{AssetId, OutcomeId, SeriesId};
 
 use super::errors::AccountStateError;
 use crate::types::margin::AccountState;
@@ -48,4 +48,41 @@ impl From<Result<AccountStateResponse, AccountStateError>> for GetAccountStateRe
             Err(e) => GetAccountStateResult::Err(e),
         }
     }
+}
+
+/// Aggregate lean of the supplied principal set on a single outcome of a
+/// series.
+///
+/// Carries **counts only** — no principal identities, sides, quantities, or
+/// P&L. Long is the number of net-long holders, short the number of net-short
+/// holders; flat (zero net) positions are excluded from both.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct OutcomeLean {
+    /// The outcome this lean is for. `None` is the series' binary payoff (long
+    /// vs short); `Some` identifies a categorical outcome.
+    pub outcome_id: Option<OutcomeId>,
+    /// Number of supplied principals net long on this outcome.
+    pub long: u64,
+    /// Number of supplied principals net short on this outcome.
+    pub short: u64,
+    /// `long + short`, the number of supplied principals with a non-flat
+    /// position on this outcome.
+    pub total: u64,
+}
+
+/// Aggregate long/short lean of a supplied set of principals on a series,
+/// broken down per outcome.
+///
+/// Privacy-safe by construction: it exposes only aggregate counts over the
+/// supplied set, never individual identities, sides, amounts, or P&L.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct AggregateLean {
+    /// The series this lean was computed for.
+    pub series_id: SeriesId,
+    /// Per-outcome aggregate lean, one entry per outcome on which at least one
+    /// supplied principal holds a non-flat position, ordered by outcome.
+    pub outcomes: Vec<OutcomeLean>,
+    /// Number of distinct supplied principals holding a non-flat position
+    /// anywhere on the series (a principal long on two outcomes counts once).
+    pub total: u64,
 }

@@ -11,8 +11,8 @@ use shared::types::{BalanceDomain, CollateralAssetInfo, DomainPolicy, Series, Se
 use crate::{
     api::{
         account::{
-            params::{GetAccountStateParams, GetPositionParams},
-            results::GetAccountStateResult,
+            params::{AggregateLeanParams, GetAccountStateParams, GetPositionParams},
+            results::{AggregateLean, GetAccountStateResult},
         },
         admin::{
             params::{
