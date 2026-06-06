@@ -2,20 +2,25 @@ pub mod guards;
 pub mod state;
 pub mod utils;
 
-use ic_cdk::{call::Call, export_candid, storage};
+use ic_cdk::{call::Call, export_candid, storage, trap};
 use ic_cdk_macros::{init, post_upgrade, pre_upgrade, query, update};
 use icrc_ledger_types::icrc1::transfer::{BlockIndex, TransferArg, TransferError};
-use shared::types::minter::{Config, ConfigResult, MintParams, MintResult};
+use shared::types::minter::{Config, ConfigResult, MintParams, MintResult, MinterArg};
 
 use crate::{
     guards::{caller_is_authorized, caller_is_controller, caller_is_not_anonymous},
-    state::{memory::CONFIG, read_config, set_config},
+    state::{apply_upgrade, memory::CONFIG, read_config, set_config},
     utils::to_account,
 };
 
 #[init]
-fn init(config: Config) {
-    set_config(config);
+fn init(arg: MinterArg) {
+    match arg {
+        MinterArg::Init(config) => set_config(config),
+        MinterArg::Upgrade(_) => {
+            trap("cannot install minter with an Upgrade argument; expected Init")
+        }
+    }
 }
 
 #[pre_upgrade]
@@ -26,10 +31,16 @@ fn pre_upgrade() {
 }
 
 #[post_upgrade]
-fn post_upgrade() {
+fn post_upgrade(arg: MinterArg) {
     let (config,): (Option<Config>,) = storage::stable_restore().expect("Failed to restore state");
 
     CONFIG.with(|c| *c.borrow_mut() = config);
+
+    match arg {
+        MinterArg::Upgrade(Some(upgrade)) => apply_upgrade(upgrade),
+        MinterArg::Upgrade(None) => {}
+        MinterArg::Init(_) => trap("cannot upgrade minter with an Init argument; expected Upgrade"),
+    }
 }
 
 #[query(guard = "caller_is_not_anonymous")]
