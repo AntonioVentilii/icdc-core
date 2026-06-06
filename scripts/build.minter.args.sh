@@ -13,7 +13,11 @@ set -euo pipefail
 #     a non-null `Upgrade` arg is only there for the rare migration case.
 #
 # Choosing Init vs Upgrade based on the current install state is what stops dfx
-# from prompting for the argument on every deploy.
+# from prompting for the argument on every deploy. The auto-detection can be
+# overridden with MINTER_ARGS_VARIANT=init|upgrade — needed e.g. for
+# `dfx deploy --mode reinstall` (which calls `init`, not `post_upgrade`, and
+# therefore requires the `Init` variant even though a module is installed) or
+# for disaster recovery.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -29,7 +33,16 @@ fi
 ARG_FILE="$(jq -re '.canisters.minter.init_arg_file' dfx.json)"
 mkdir -p "$(dirname "$ARG_FILE")"
 
-VARIANT="$(scripts/check.canister.installed.sh minter "$DFX_NETWORK" --print-variant)"
+VARIANT_OVERRIDE="${MINTER_ARGS_VARIANT:-auto}"
+case "$VARIANT_OVERRIDE" in
+init | Init) VARIANT="Init" ;;
+upgrade | Upgrade) VARIANT="Upgrade" ;;
+auto) VARIANT="$(scripts/check.canister.installed.sh minter "$DFX_NETWORK" --print-variant)" ;;
+*)
+  echo "ERROR: invalid MINTER_ARGS_VARIANT='${VARIANT_OVERRIDE}' (expected: init|upgrade|auto)"
+  exit 1
+  ;;
+esac
 
 if [[ "$VARIANT" == "Upgrade" ]]; then
   echo "Building minter Upgrade args for network=$DFX_NETWORK -> $ARG_FILE"

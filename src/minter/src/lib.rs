@@ -34,6 +34,9 @@ fn pre_upgrade() {
 fn post_upgrade(arg: MinterArg) {
     let (config,): (Option<Config>,) = storage::stable_restore().expect("Failed to restore state");
 
+    if config.is_none() {
+        trap("no persisted config restored on upgrade; refusing to upgrade into an unconfigured state");
+    }
     CONFIG.with(|c| *c.borrow_mut() = config);
 
     match arg {

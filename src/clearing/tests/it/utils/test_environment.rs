@@ -4,7 +4,10 @@ use candid::{encode_one, CandidType, Nat, Principal};
 use clearing::types::state::Config;
 use pocket_ic::{PocketIc, PocketIcBuilder};
 use serde::Deserialize;
-use shared::types::{minter::Config as MinterConfig, Asset, BalanceDomain, CollateralAssetConfig};
+use shared::types::{
+    minter::{Config as MinterConfig, MinterArg},
+    Asset, BalanceDomain, CollateralAssetConfig,
+};
 
 use crate::utils::{
     constants::{CKUSDC_LEDGER, ICP_LEDGER, VUSD_ASSET_ID, VUSD_LEDGER},
@@ -176,7 +179,7 @@ impl TestSetup {
         };
 
         let minter = PicCanisterBuilder::new("minter")
-            .with_arg(encode_one(minter_config).unwrap())
+            .with_arg(encode_one(MinterArg::Init(minter_config)).unwrap())
             .with_controllers(vec![controller])
             .deploy_to(&pic.clone());
 
