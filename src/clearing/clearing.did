@@ -1306,8 +1306,11 @@ service : (Config) -> {
 	//
 	// Served from the same `SERIES_TRADE_HISTORY` index as
 	// [`list_series_trade_history`], so it adds no write-path cost and no persisted
-	// state; aggregation is `O(trades in range)`. Guarded by
-	// `caller_is_not_anonymous`, matching the other series-scoped reads.
+	// state. Aggregation scans newest-first and stops once it has filled
+	// [`MAX_PRICE_HISTORY_POINTS`] buckets, so both the work and the payload are
+	// bounded even when `start_time`/`end_time` are open-ended (see
+	// [`aggregate_price_history`]). Guarded by `caller_is_not_anonymous`, matching
+	// the other series-scoped reads.
 	get_series_price_history : (GetSeriesPriceHistoryParams) -> (
 		SeriesPriceHistory
 	) query;
