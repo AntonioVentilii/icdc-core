@@ -12,11 +12,14 @@ use shared::{
 use super::{
     errors::TradeError,
     params::{
-        CancelLimitOrderParams, FreezePositionForTransferParams, ListOrdersParams,
-        ListSeriesTradeHistoryParams, SubmitLimitOrderParams, SubmitMarketOrderParams,
-        SubmitMatchedTradeParams,
+        CancelLimitOrderParams, FreezePositionForTransferParams, GetSeriesPriceHistoryParams,
+        ListOrdersParams, ListSeriesTradeHistoryParams, SubmitLimitOrderParams,
+        SubmitMarketOrderParams, SubmitMatchedTradeParams,
     },
-    results::{AcceptPositionTransferResult, SeriesTradeHistoryPage, SubmitMatchedTradeResult},
+    results::{
+        AcceptPositionTransferResult, SeriesPriceCandle, SeriesPriceHistory,
+        SeriesTradeHistoryPage, SubmitMatchedTradeResult,
+    },
 };
 use crate::{
     guards::{caller_is_controller, caller_is_not_anonymous},
@@ -31,8 +34,9 @@ use crate::{
     },
     types::{
         errors::CommonError,
-        event::{Event, EventType},
+        event::{Event, EventType, SeriesTradePoint},
         margin::{AccountState, Position, PositionsMap},
+        price_history::PriceHistoryInterval,
         state::PositionProof,
         trade::{LimitOrder, OrderId, Side, TradeId, TransferId},
         user::User,
@@ -663,6 +667,134 @@ pub fn list_series_trade_history(params: ListSeriesTradeHistoryParams) -> Series
 
         SeriesTradeHistoryPage { items, next_cursor }
     })
+}
+
+/// Upper bound on the candles one [`get_series_price_history`] call returns.
+/// Aggregated output is already far smaller than the raw tape, but an
+/// open-ended range at a fine interval (e.g. hourly over years) could still grow
+/// unboundedly; capping keeps the read within the replica's instruction and
+/// response-size budget. When the range yields more buckets than this, the most
+/// recent ones are kept (a chart reads the latest window). The cap bounds the
+/// *work* too, not just the payload — see [`aggregate_price_history`].
+const MAX_PRICE_HISTORY_POINTS: usize = 1_000;
+
+/// Returns a single series' executed trades aggregated into fixed-width
+/// [`PriceHistoryInterval`] candles (open/high/low/close + volume + trade
+/// count), time-ordered, so a front end can render a time-scoped consensus/price
+/// chart without fetching and re-bucketing the raw per-trade tape that
+/// [`list_series_trade_history`] returns.
+///
+/// `start_time`/`end_time` window the trades considered (inclusive lower,
+/// exclusive upper), letting the caller request just the window it draws; the
+/// `interval` selects hourly or daily resolution. Buckets with no trades are
+/// omitted — a young or untraded market returns an empty history rather than
+/// fabricated points — and the result is capped at [`MAX_PRICE_HISTORY_POINTS`]
+/// most-recent candles.
+///
+/// Served from the same `SERIES_TRADE_HISTORY` index as
+/// [`list_series_trade_history`], so it adds no write-path cost and no persisted
+/// state. Aggregation scans newest-first and stops once it has filled
+/// [`MAX_PRICE_HISTORY_POINTS`] buckets, so both the work and the payload are
+/// bounded even when `start_time`/`end_time` are open-ended (see
+/// [`aggregate_price_history`]). Guarded by `caller_is_not_anonymous`, matching
+/// the other series-scoped reads.
+#[query(guard = "caller_is_not_anonymous")]
+#[must_use]
+pub fn get_series_price_history(params: GetSeriesPriceHistoryParams) -> SeriesPriceHistory {
+    let GetSeriesPriceHistoryParams {
+        series_id,
+        interval,
+        start_time,
+        end_time,
+    } = params;
+
+    SERIES_TRADE_HISTORY.with(|idx| {
+        let idx = idx.borrow();
+        match idx.get(&series_id) {
+            Some(points) => aggregate_price_history(points, interval, start_time, end_time),
+            None => SeriesPriceHistory::default(),
+        }
+    })
+}
+
+/// Folds a trade *older* than the candle's current `open` into it. The scan in
+/// [`aggregate_price_history`] runs newest→oldest, so a bucket's first-seen
+/// point is its `close` (set on insert) and each subsequent point is older and
+/// becomes the new `open`; `high`/`low`/`volume`/`trade_count` accumulate
+/// regardless of direction.
+fn fold_older_point(candle: &mut SeriesPriceCandle, point: &SeriesTradePoint) {
+    if point.price.value() > candle.high.value() {
+        candle.high = point.price.clone();
+    }
+    if point.price.value() < candle.low.value() {
+        candle.low = point.price.clone();
+    }
+    candle.open = point.price.clone();
+    candle.volume += point.qty;
+    candle.trade_count += 1;
+}
+
+/// Buckets `points` (one series' executed trades, ascending `event_id`) into
+/// [`PriceHistoryInterval`] candles within `[start_time, end_time)`. Factored
+/// out of [`get_series_price_history`] so it can be unit-tested without the
+/// thread-local index.
+///
+/// Scans **newest→oldest** and stops as soon as it would open a
+/// (`MAX_PRICE_HISTORY_POINTS` + 1)-th bucket, so the work is bounded by the
+/// most recent capped window rather than the whole series — an open-ended
+/// (`None`/`None`) request on a long-lived market processes only the points in
+/// its newest `MAX_PRICE_HISTORY_POINTS` buckets, not every trade ever. `points`
+/// is ascending `event_id`, i.e. chronological (trades execute sequentially, so
+/// a higher `event_id` never carries an earlier timestamp), so reversing it
+/// visits buckets in strictly non-increasing `bucket_start_ns`: once the cap is
+/// full, the next not-yet-seen bucket is strictly older than every kept one and
+/// terminates the scan.
+fn aggregate_price_history(
+    points: &[SeriesTradePoint],
+    interval: PriceHistoryInterval,
+    start_time: Option<u64>,
+    end_time: Option<u64>,
+) -> SeriesPriceHistory {
+    // Keyed by bucket start, so the BTreeMap yields candles time-ordered with no
+    // separate sort.
+    let mut buckets: BTreeMap<u64, SeriesPriceCandle> = BTreeMap::new();
+
+    for point in points.iter().rev() {
+        if end_time.is_some_and(|to| point.timestamp >= to) {
+            // Above the window; older points may still qualify.
+            continue;
+        }
+        if start_time.is_some_and(|from| point.timestamp < from) {
+            // Below the window; every remaining (older) point is too.
+            break;
+        }
+
+        let bucket_start_ns = interval.bucket_start(point.timestamp);
+        if let Some(candle) = buckets.get_mut(&bucket_start_ns) {
+            fold_older_point(candle, point);
+        } else {
+            // A new, strictly-older bucket once the cap is full ends the scan.
+            if buckets.len() == MAX_PRICE_HISTORY_POINTS {
+                break;
+            }
+            buckets.insert(
+                bucket_start_ns,
+                SeriesPriceCandle {
+                    bucket_start_ns,
+                    open: point.price.clone(),
+                    high: point.price.clone(),
+                    low: point.price.clone(),
+                    close: point.price.clone(),
+                    volume: point.qty,
+                    trade_count: 1,
+                },
+            );
+        }
+    }
+
+    SeriesPriceHistory {
+        candles: buckets.into_values().collect(),
+    }
 }
 
 /// Returns a list of all active limit orders, potentially filtered by series.
