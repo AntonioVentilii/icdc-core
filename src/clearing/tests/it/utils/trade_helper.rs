@@ -24,7 +24,7 @@ use shared::types::{
     evm::NativeEvmAsset,
     series::{AddSeriesParams, AddSeriesResult, ForkSeriesParams},
     Asset, AssetMetrics, BalanceDomain, CollateralAssetConfig, DecimalValue, Description,
-    PayoffType, PayoutUnit, Price, SeriesId, TradingAccess,
+    PayoffType, PayoutUnit, Price, Resolution, SeriesId, TradingAccess,
 };
 
 use super::{
@@ -209,6 +209,7 @@ impl TradeHelperTrait for TestSetup {
         balance_domain: BalanceDomain,
     ) -> SeriesId {
         let series_params = AddSeriesParams {
+            resolution: Resolution::new("Resolved per oracle at expiry"),
             underlying: underlying.to_owned(),
             balance_domain,
             expiry_ns: 2_000_000_000_000_000_000,
@@ -426,6 +427,7 @@ impl TradeHelperTrait for TestSetup {
         engine_id: Option<EngineId>,
     ) -> AddSeriesResult {
         let fork_params = ForkSeriesParams {
+            resolution: None,
             source_series_id: source_id.clone(),
             title: None,
             description: None,

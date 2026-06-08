@@ -1018,7 +1018,8 @@ pub(crate) fn redeem_complete_set_logic(
 mod tests {
     use candid::Principal;
     use shared::types::{
-        BalanceDomain, Description, Outcome, PayoffType, PayoutUnit, Price, Series, SeriesId,
+        BalanceDomain, Description, Outcome, PayoffType, PayoutUnit, Price, Resolution, Series,
+        SeriesId,
     };
 
     use crate::{
@@ -1035,6 +1036,7 @@ mod tests {
 
     fn test_series(series_id: &SeriesId) -> Series {
         Series {
+            resolution: Resolution::new("Resolved per oracle at expiry"),
             series_id: series_id.clone(),
             underlying: "BTC".to_owned(),
             expiry_ns: 2_000_000_000,

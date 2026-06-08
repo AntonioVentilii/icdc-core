@@ -1,7 +1,7 @@
 use candid::Principal;
 use shared::types::{
-    BalanceDomain, Description, Outcome, OutcomeId, PayoffType, PayoutUnit, Price, Series,
-    SeriesId, SettlementInput,
+    BalanceDomain, Description, Outcome, OutcomeId, PayoffType, PayoutUnit, Price, Resolution,
+    Series, SeriesId, SettlementInput,
 };
 
 use crate::{
@@ -21,6 +21,7 @@ fn categorical_mint_redeem_complete_set() {
     let outcome_b = OutcomeId::from("B".to_owned());
 
     let series = Series {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         series_id: series_id.clone(),
         underlying: "ICP".to_owned(),
         expiry_ns: 2_000_000_000,
@@ -79,6 +80,7 @@ fn categorical_lifecycle_scenario() {
     let outcome_c = OutcomeId::from("C".to_owned());
 
     let series = Series {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         series_id: series_id.clone(),
         underlying: "EVENT_2024".to_owned(),
         expiry_ns: 2_000_000_000,
@@ -167,6 +169,7 @@ fn categorical_short_settlement() {
     let outcome_b = OutcomeId::from("B".to_owned());
 
     let series = Series {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         series_id: series_id.clone(),
         underlying: "EVENT".to_owned(),
         expiry_ns: 2_000_000_000,
@@ -242,6 +245,7 @@ fn categorical_short_loss() {
     let outcome_b = OutcomeId::from("B".to_owned());
 
     let series = Series {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         series_id: series_id.clone(),
         underlying: "EVENT".to_owned(),
         expiry_ns: 2_000_000_000,

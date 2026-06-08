@@ -3,8 +3,16 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use candid::Principal;
 use ic_cdk::{storage, trap};
-use shared::types::{
-    Engine, EngineId, EngineRole, Group, GroupId, Oracle, RoleGrant, Series, SeriesId, SocialLimits,
+use shared::{
+    migrations::LegacySeries,
+    types::{
+        Engine, EngineId, EngineRole, Group, GroupId, Oracle, RoleGrant, Series, SeriesId,
+        SocialLimits,
+    },
+};
+
+use crate::migrations::{
+    upgrade_series_map, LegacyStableStateV2, LegacyStableStateV3, LegacyStableStateV4,
 };
 
 thread_local! {
@@ -26,9 +34,14 @@ thread_local! {
     pub static NEXT_ENGINE_ID: RefCell<u64> = const { RefCell::new(0) };
 }
 
-/// Latest stable state schema.
+/// Latest stable state schema (V5: `Series` carries the compulsory
+/// `resolution` field).
+///
+/// Pre-resolution schemas (V4/V3/V2 and the legacy tuple) are decoded via the
+/// `LegacySeries`-based mirrors in [`crate::migrations`], which backfill
+/// `resolution` on restore. See `docs/ai/migrations.md`.
 #[derive(candid::CandidType, serde::Deserialize)]
-struct StableStateV4 {
+struct StableStateV5 {
     series: BTreeMap<SeriesId, Series>,
     oracles: BTreeMap<String, Oracle>,
     groups: BTreeMap<GroupId, Group>,
@@ -37,29 +50,6 @@ struct StableStateV4 {
     social_limits: SocialLimits,
     engines: BTreeMap<EngineId, Engine>,
     next_engine_id: u64,
-}
-
-/// V3 stable state (pre-engines: flat creator/forker maps).
-#[derive(candid::CandidType, serde::Deserialize)]
-struct StableStateV3 {
-    series: BTreeMap<SeriesId, Series>,
-    oracles: BTreeMap<String, Oracle>,
-    creators: BTreeMap<Principal, bool>,
-    groups: BTreeMap<GroupId, Group>,
-    next_group_id: u64,
-    forkers: BTreeMap<Principal, bool>,
-    social_creation_log: BTreeMap<Principal, Vec<u64>>,
-    social_limits: SocialLimits,
-}
-
-/// V2 stable state (pre-forkers/social).
-#[derive(candid::CandidType, serde::Deserialize)]
-struct StableStateV2 {
-    series: BTreeMap<SeriesId, Series>,
-    oracles: BTreeMap<String, Oracle>,
-    creators: BTreeMap<Principal, bool>,
-    groups: BTreeMap<GroupId, Group>,
-    next_group_id: u64,
 }
 
 /// Migrates V3 flat creator/forker maps into a "Legacy" Engine (`eng_0`).
@@ -106,7 +96,7 @@ fn migrate_v3_to_engines(
 }
 
 pub fn save_state() {
-    let state = StableStateV4 {
+    let state = StableStateV5 {
         series: SERIES_STORE.with(|s| s.borrow().clone()),
         oracles: ORACLE_STORE.with(|o| o.borrow().clone()),
         groups: GROUPS_STORE.with(|g| g.borrow().clone()),
@@ -122,9 +112,9 @@ pub fn save_state() {
 }
 
 pub fn restore_state() {
-    // Try V4 (latest) first.
-    let v4: Result<(StableStateV4,), String> = storage::stable_restore();
-    if let Ok((state,)) = v4 {
+    // Try V5 (latest) first — `Series` already carries `resolution`.
+    let v5: Result<(StableStateV5,), String> = storage::stable_restore();
+    if let Ok((state,)) = v5 {
         SERIES_STORE.with(|w| *w.borrow_mut() = state.series);
         ORACLE_STORE.with(|w| *w.borrow_mut() = state.oracles);
         GROUPS_STORE.with(|w| *w.borrow_mut() = state.groups);
@@ -136,10 +126,25 @@ pub fn restore_state() {
         return;
     }
 
-    // Fallback: V3 format (flat creator/forker maps → migrate to engines).
-    let v3: Result<(StableStateV3,), String> = storage::stable_restore();
+    // Fallback: pre-resolution V4 — decode via the legacy mirror and backfill
+    // `resolution` from each series' description.
+    let v4: Result<(LegacyStableStateV4,), String> = storage::stable_restore();
+    if let Ok((state,)) = v4 {
+        SERIES_STORE.with(|w| *w.borrow_mut() = upgrade_series_map(state.series));
+        ORACLE_STORE.with(|w| *w.borrow_mut() = state.oracles);
+        GROUPS_STORE.with(|w| *w.borrow_mut() = state.groups);
+        NEXT_GROUP_ID.with(|w| *w.borrow_mut() = state.next_group_id);
+        SOCIAL_CREATION_LOG.with(|w| *w.borrow_mut() = state.social_creation_log);
+        SOCIAL_LIMITS.with(|w| *w.borrow_mut() = state.social_limits);
+        ENGINE_STORE.with(|w| *w.borrow_mut() = state.engines);
+        NEXT_ENGINE_ID.with(|w| *w.borrow_mut() = state.next_engine_id);
+        return;
+    }
+
+    // Fallback: pre-resolution V3 (flat creator/forker maps → migrate to engines).
+    let v3: Result<(LegacyStableStateV3,), String> = storage::stable_restore();
     if let Ok((state,)) = v3 {
-        SERIES_STORE.with(|w| *w.borrow_mut() = state.series);
+        SERIES_STORE.with(|w| *w.borrow_mut() = upgrade_series_map(state.series));
         ORACLE_STORE.with(|w| *w.borrow_mut() = state.oracles);
         GROUPS_STORE.with(|w| *w.borrow_mut() = state.groups);
         NEXT_GROUP_ID.with(|w| *w.borrow_mut() = state.next_group_id);
@@ -152,10 +157,10 @@ pub fn restore_state() {
         return;
     }
 
-    // Fallback: V2 format (pre-forkers/social).
-    let v2: Result<(StableStateV2,), String> = storage::stable_restore();
+    // Fallback: pre-resolution V2 (pre-forkers/social).
+    let v2: Result<(LegacyStableStateV2,), String> = storage::stable_restore();
     if let Ok((state,)) = v2 {
-        SERIES_STORE.with(|w| *w.borrow_mut() = state.series);
+        SERIES_STORE.with(|w| *w.borrow_mut() = upgrade_series_map(state.series));
         ORACLE_STORE.with(|w| *w.borrow_mut() = state.oracles);
         GROUPS_STORE.with(|w| *w.borrow_mut() = state.groups);
         NEXT_GROUP_ID.with(|w| *w.borrow_mut() = state.next_group_id);
@@ -166,15 +171,15 @@ pub fn restore_state() {
         return;
     }
 
-    // Fallback: legacy tuple format (pre-groups).
+    // Fallback: legacy tuple format (pre-groups, pre-resolution).
     let (series, oracles, creators): (
-        BTreeMap<SeriesId, Series>,
+        BTreeMap<SeriesId, LegacySeries>,
         BTreeMap<String, Oracle>,
         BTreeMap<Principal, bool>,
     ) = storage::stable_restore()
         .unwrap_or_else(|e| trap(format!("Failed to restore from stable storage: {e:?}")));
 
-    SERIES_STORE.with(|w| *w.borrow_mut() = series);
+    SERIES_STORE.with(|w| *w.borrow_mut() = upgrade_series_map(series));
     ORACLE_STORE.with(|w| *w.borrow_mut() = oracles);
 
     let (engines, next_id) = migrate_v3_to_engines(&creators, &BTreeMap::new());

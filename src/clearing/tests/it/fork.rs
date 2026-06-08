@@ -101,6 +101,7 @@ fn fork_must_be_restricted() {
     setup.pic.tick();
 
     let fork_params = ForkSeriesParams {
+        resolution: None,
         source_series_id: source_id,
         title: None,
         description: None,
@@ -131,6 +132,7 @@ fn fork_nonexistent_source() {
     let setup = TestSetup::with_icp();
 
     let fork_params = ForkSeriesParams {
+        resolution: None,
         source_series_id: SeriesId::from("nonexistent".to_owned()),
         title: None,
         description: None,
@@ -196,6 +198,7 @@ fn fork_empty_trading_access_rejected() {
     setup.pic.tick();
 
     let fork_params = ForkSeriesParams {
+        resolution: None,
         source_series_id: source_id,
         title: None,
         description: None,
@@ -229,6 +232,7 @@ fn fork_mixed_open_and_restricted_rejected() {
     setup.pic.tick();
 
     let fork_params = ForkSeriesParams {
+        resolution: None,
         source_series_id: source_id,
         title: None,
         description: None,
@@ -267,6 +271,7 @@ fn fork_title_too_long_rejected() {
     setup.pic.tick();
 
     let fork_params = ForkSeriesParams {
+        resolution: None,
         source_series_id: source_id,
         title: Some("x".repeat(129)),
         description: None,
@@ -302,6 +307,7 @@ fn fork_description_too_long_rejected() {
     setup.pic.tick();
 
     let fork_params = ForkSeriesParams {
+        resolution: None,
         source_series_id: source_id,
         title: None,
         description: Some(Description::plain("y".repeat(1025))),

@@ -1,7 +1,7 @@
 use candid::Principal;
 use shared::types::{
-    BalanceDomain, Description, NonMonetaryUnit, PayoffType, PayoutUnit, Price, Series, SeriesId,
-    SettlementInput, SocialReward,
+    BalanceDomain, Description, NonMonetaryUnit, PayoffType, PayoutUnit, Price, Resolution, Series,
+    SeriesId, SettlementInput, SocialReward,
 };
 
 use crate::{
@@ -19,6 +19,7 @@ fn social_trade_scenario() {
     let series_id = SeriesId::from("social_pizza_bet".to_owned());
 
     let series = Series {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         series_id: series_id.clone(),
         underlying: "PIZZA_CHALLENGE".to_owned(),
         expiry_ns: 2_000_000_000,

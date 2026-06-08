@@ -28,6 +28,7 @@ The system is built with a focus on modularity and bounded contexts.
   - [General Instructions](file:///Users/antonio.ventilii/projects/icdc-core/.agents/instructions.md)
   - [Patterns & Conventions](file:///Users/antonio.ventilii/projects/icdc-core/.agents/patterns.md)
   - [Domain Logic](file:///Users/antonio.ventilii/projects/icdc-core/.agents/domain_logic.md)
+- **Stable-State Migrations**: [docs/ai/migrations.md](file:///Users/antonio.ventilii/projects/icdc-core/docs/ai/migrations.md)
 
 ## Quality & Testing
 

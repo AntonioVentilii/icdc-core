@@ -1,6 +1,7 @@
 use candid::Principal;
 use shared::types::{
-    BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId, SettlementInput,
+    BalanceDomain, Description, PayoffType, PayoutUnit, Price, Resolution, Series, SeriesId,
+    SettlementInput,
 };
 
 use crate::{api::trade::tests::utils::*, trade::types::ExecuteTradeParams, types::trade::TradeId};
@@ -12,6 +13,7 @@ fn binary_lifecycle_scenario() {
     let series_id = SeriesId::from("binary_test".to_owned());
 
     let series = Series {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         series_id: series_id.clone(),
         underlying: "BITCOIN_UP_50K".to_owned(),
         expiry_ns: 2_000_000_000,
@@ -83,6 +85,7 @@ fn binary_settle_no() {
     let series_id = SeriesId::from("binary_test_no".to_owned());
 
     let series = Series {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         series_id: series_id.clone(),
         underlying: "BITCOIN_UP_50K".to_owned(),
         expiry_ns: 2_000_000_000,

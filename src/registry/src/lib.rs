@@ -1,6 +1,7 @@
 pub mod api;
 pub mod guards;
 pub mod memory;
+pub mod migrations;
 pub mod utils;
 
 use candid::Principal;

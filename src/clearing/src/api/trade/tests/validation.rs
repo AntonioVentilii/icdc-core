@@ -1,6 +1,7 @@
 use candid::Principal;
 use shared::types::{
-    BalanceDomain, Description, Outcome, OutcomeId, PayoffType, PayoutUnit, Price, Series, SeriesId,
+    BalanceDomain, Description, Outcome, OutcomeId, PayoffType, PayoutUnit, Price, Resolution,
+    Series, SeriesId,
 };
 
 use crate::{
@@ -19,6 +20,7 @@ fn categorical_arbitrage_validation() {
     let outcome_no = OutcomeId::from("No".to_owned());
 
     let series = Series {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         series_id: series_id.clone(),
         underlying: "ARB_TEST".to_owned(),
         expiry_ns: 2_000_000_000,
@@ -120,6 +122,7 @@ fn categorical_arbitrage_validation() {
 fn binary_arbitrage_validation() {
     let series_id = SeriesId::from("binary_arb".to_owned());
     let series = Series {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         series_id: series_id.clone(),
         underlying: "BTC".to_owned(),
         expiry_ns: 2_000_000_000,
