@@ -25,3 +25,6 @@ dist/
 
 # environment variables
 .env
+
+# Claude Code git worktrees
+.claude/worktrees/

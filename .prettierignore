@@ -13,5 +13,3 @@ yarn.lock
 /target
 
 .dfx
-
-.claude/worktrees/
