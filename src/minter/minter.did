@@ -5,7 +5,19 @@ type Config = record {
 type ConfigResult = variant { Ok : Config; Err : text };
 type MintParams = record { to : principal; amount : nat };
 type MintResult = variant { Ok : nat; Err : text };
-service : (Config) -> {
+// Argument supplied to the minter canister on install and upgrade.
+//
+// Mirrors the ICRC ledger-suite `LedgerArg` convention: `Init` carries the
+// full configuration required on first install, while `Upgrade` carries only
+// the fields an operator wants to change. On upgrade the persisted [`Config`]
+// is restored from stable memory first, so `Upgrade(None)` keeps the existing
+// configuration untouched.
+type MinterArg = variant { Upgrade : opt UpgradeArg; Init : Config };
+type UpgradeArg = record {
+	authorized_callers : opt vec principal;
+	ledger_canister : opt principal
+};
+service : (MinterArg) -> {
 	config : () -> (ConfigResult) query;
 	mint : (MintParams) -> (MintResult);
 	update_config : (Config) -> ()
