@@ -41,7 +41,7 @@ thread_local! {
 /// `LegacySeries`-based mirrors in [`crate::migrations`], which backfill
 /// `resolution` on restore. See `docs/ai/migrations.md`.
 #[derive(candid::CandidType, serde::Deserialize)]
-struct StableStateV5 {
+pub(crate) struct StableStateV5 {
     series: BTreeMap<SeriesId, Series>,
     oracles: BTreeMap<String, Oracle>,
     groups: BTreeMap<GroupId, Group>,

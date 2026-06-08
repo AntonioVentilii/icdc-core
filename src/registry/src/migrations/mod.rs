@@ -74,6 +74,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::memory::StableStateV5;
 
     fn legacy_series(id: &str, description: Description) -> LegacySeries {
         LegacySeries {
@@ -126,6 +127,12 @@ mod tests {
         };
 
         let bytes = encode_one(state).unwrap();
+
+        // The current (post-resolution) schema must NOT decode a pre-resolution
+        // V4 blob: candid rejects the missing compulsory `Series.resolution`.
+        // This is what makes the legacy fallback + backfill necessary.
+        assert!(decode_one::<StableStateV5>(&bytes).is_err());
+
         let decoded: LegacyStableStateV4 = decode_one(&bytes).unwrap();
 
         assert_eq!(decoded.next_group_id, 7);

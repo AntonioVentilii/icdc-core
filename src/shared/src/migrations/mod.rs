@@ -173,6 +173,12 @@ mod tests {
         // A blob encoded from the legacy shape must decode into `LegacySeries`
         // (the basis of the migration), proving the shadow type matches.
         let bytes = encode_one(legacy(Description::plain("d"))).unwrap();
+
+        // ...and the current `Series` schema must NOT decode it: candid rejects
+        // the missing compulsory `resolution` field. This locks in the gotcha
+        // that motivates the migration.
+        assert!(decode_one::<Series>(&bytes).is_err());
+
         let decoded: LegacySeries = decode_one(&bytes).unwrap();
         assert_eq!(decoded.title, "t");
     }

@@ -152,9 +152,15 @@ pub fn restore_state() {
     // schema and backfill `Series::resolution` (see `crate::migrations`).
     let state = match storage::stable_restore::<(StableState,)>() {
         Ok((s,)) => s,
-        Err(_) => match storage::stable_restore::<(LegacyStableState,)>() {
+        Err(current_err) => match storage::stable_restore::<(LegacyStableState,)>() {
             Ok((legacy,)) => into_current(legacy),
-            Err(e) => trap(format!("Failed to restore stable state: {e:?}")),
+            // Surface BOTH decode errors: which schema was expected to win
+            // depends on the deployed version, so keeping both makes a failed
+            // post_upgrade decode debuggable.
+            Err(legacy_err) => trap(format!(
+                "Failed to restore stable state: current-schema decode failed \
+                 ({current_err:?}); legacy-schema decode failed ({legacy_err:?})"
+            )),
         },
     };
 
