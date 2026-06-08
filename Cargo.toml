@@ -27,6 +27,13 @@ ic-cdk-macros = "0.20"
 ic-cdk-timers = "1.0"
 pocket-ic = "13.0.0"
 
+# Compile dependencies (PocketIC, candid, serde, …) optimized even in debug
+# builds. Our own crates stay at the default unoptimized setting so
+# incremental rebuilds remain fast, while the heavy third-party runtime that
+# dominates integration-test execution runs at -O2. One-time recompile cost.
+[profile.dev.package."*"]
+opt-level = 2
+
 [workspace.lints.rust]
 warnings = "deny"
 unused_attributes = "deny"
