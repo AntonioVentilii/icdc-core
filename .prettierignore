@@ -14,7 +14,4 @@ yarn.lock
 
 .dfx
 
-# Claude Code git worktrees: nested checkouts of this repo. Prettier reads
-# .prettierignore/.gitignore but not .git/info/exclude (where these live), so
-# exclude them here to avoid linting/formatting in-progress files from other branches.
 .claude/worktrees/
