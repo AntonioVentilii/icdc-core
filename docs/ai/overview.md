@@ -43,3 +43,4 @@ For more technical details, refer to:
 - [AI Architecture](file:///Users/antonio.ventilii/projects/icdc-core/docs/ai/architecture.md)
 - [AI Glossary](file:///Users/antonio.ventilii/projects/icdc-core/docs/ai/glossary.md)
 - [Implementation Patterns](file:///Users/antonio.ventilii/projects/icdc-core/.agents/patterns.md)
+- [Stable-State Migrations](file:///Users/antonio.ventilii/projects/icdc-core/docs/ai/migrations.md)

@@ -729,6 +729,19 @@ type RegisterIcrcAssetParams = record {
 	asset_id : text
 };
 type RegisterIcrcAssetResult = variant { Ok; Err : RegisterIcrcAssetError };
+// Settlement terms for a series. Compulsory on every market.
+//
+// Modeled as a struct (not a bare `String`) so it can grow without a breaking
+// candid change: future fields — e.g. structured `rules` (named source +
+// settle date + day-count, see issue #64) — are added as `opt` fields, which
+// candid can decode against records persisted before the field existed.
+// Variants were considered and rejected: adding an enum variant risks decode
+// failures in already-deployed consumers, whereas appending `opt` record
+// fields is forward-compatible.
+type Resolution = record {
+	// Human-readable clause describing how the market settles.
+	clause : text
+};
 // Defines a specific derivative series (contract).
 type Series = record {
 	// A short, descriptive title for the series.
@@ -769,6 +782,13 @@ type Series = record {
 	locale : opt text;
 	// A detailed description of the series.
 	description : Description;
+	// The settlement terms describing how this market resolves.
+	//
+	// Compulsory metadata: every series carries resolution terms. Like
+	// `title`/`description`/`locale`, it does NOT participate in `series_id`
+	// hashing (see [`Series::generate_id`]), so the same economic contract
+	// keeps a single id regardless of its resolution wording.
+	resolution : Resolution;
 	// The defined outcomes for categorical markets (ordered).
 	outcomes : opt vec Outcome;
 	// Timestamp of series creation in nanoseconds since UNIX epoch.

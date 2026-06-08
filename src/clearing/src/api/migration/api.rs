@@ -271,7 +271,7 @@ fn check_no_inflight_plans(user: User, domain: BalanceDomain) -> Result<(), Migr
 mod tests {
     use candid::Principal;
     use shared::types::{
-        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId,
+        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Resolution, Series, SeriesId,
     };
 
     use crate::{
@@ -287,6 +287,7 @@ mod tests {
 
     fn setup_test_series(series_id: &SeriesId, domain: BalanceDomain) {
         let series = Series {
+            resolution: Resolution::new("Resolved per oracle at expiry"),
             series_id: series_id.clone(),
             underlying: "BTC".to_owned(),
             expiry_ns: 2_000_000_000,

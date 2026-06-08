@@ -7,7 +7,7 @@ use crate::{
     constants::{DEFAULT_SOCIAL_MAX_PER_HOUR, DEFAULT_SOCIAL_MAX_PER_USER, MAX_LOCALE_LEN},
     types::{
         description::Description, domain::BalanceDomain, engine::EngineId, groups::TradingAccess,
-        payout::PayoutUnit, price::Price,
+        payout::PayoutUnit, price::Price, resolution::Resolution,
     },
 };
 
@@ -123,6 +123,13 @@ pub struct Series {
     pub title: String,
     /// A detailed description of the series.
     pub description: Description,
+    /// The settlement terms describing how this market resolves.
+    ///
+    /// Compulsory metadata: every series carries resolution terms. Like
+    /// `title`/`description`/`locale`, it does NOT participate in `series_id`
+    /// hashing (see [`Series::generate_id`]), so the same economic contract
+    /// keeps a single id regardless of its resolution wording.
+    pub resolution: Resolution,
     /// An optional icon URL for the market.
     pub icon_url: Option<String>,
     /// An optional banner URL for the market.
@@ -318,6 +325,10 @@ pub enum SeriesError {
     TitleTooLong,
     /// Returned when the provided description exceeds the maximum allowed length.
     DescriptionTooLong,
+    /// Returned when the resolution clause is empty (a non-empty clause is compulsory).
+    ResolutionClauseEmpty,
+    /// Returned when the resolution clause exceeds the maximum allowed length.
+    ResolutionClauseTooLong,
     /// Returned when the caller is not authorized to add a series.
     Unauthorized,
     /// Returned when the provided payout unit is not supported by the protocol.
@@ -373,6 +384,9 @@ pub struct AddSeriesParams {
     pub title: String,
     /// A detailed description of the series.
     pub description: Description,
+    /// The settlement terms describing how this market resolves.
+    /// Compulsory — every new series must state how it settles.
+    pub resolution: Resolution,
     /// The defined outcomes for categorical markets (ordered).
     pub outcomes: Option<Vec<Outcome>>,
     /// An optional icon URL for the market.
@@ -415,6 +429,8 @@ pub struct ForkSeriesParams {
     pub title: Option<String>,
     /// Optional description override. Falls back to the source series description.
     pub description: Option<Description>,
+    /// Optional resolution override. Falls back to the source series resolution.
+    pub resolution: Option<Resolution>,
     /// Trading access policies for the forked series. Must be `Restricted`.
     pub trading_access: Vec<TradingAccess>,
     /// The Engine on whose behalf this fork is created.
@@ -673,7 +689,7 @@ mod tests {
 
     use crate::types::{
         series::{is_valid_locale, PaginationParams},
-        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId,
+        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Resolution, Series, SeriesId,
         SeriesIdParams, TradingAccess,
     };
 
@@ -694,6 +710,7 @@ mod tests {
             created_at_ns: 0,
             title: "t".to_owned(),
             description: Description::plain("d"),
+            resolution: Resolution::new("r"),
             icon_url: None,
             banner_url: None,
             balance_domain: BalanceDomain::Settlement,
@@ -1183,6 +1200,7 @@ mod tests {
             created_at_ns: 1_700_000_000,
             title: "Long ICP Call".to_owned(),
             description: Description::plain("A vanilla call option on ICP"),
+            resolution: Resolution::new("Settles to Coingecko ICP/USD at expiry"),
             icon_url: None,
             banner_url: None,
             balance_domain: BalanceDomain::Settlement,
@@ -1238,6 +1256,7 @@ mod tests {
             created_at_ns: 0,
             title: "Long ICP Call".to_owned(),
             description: Description::plain("EN"),
+            resolution: Resolution::new("EN"),
             icon_url: None,
             banner_url: None,
             balance_domain: BalanceDomain::Settlement,

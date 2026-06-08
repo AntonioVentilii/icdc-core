@@ -290,8 +290,8 @@ pub fn get_required_margin(
 mod tests {
     use candid::Principal;
     use shared::types::{
-        BalanceDomain, Description, OutcomeId, PayoffType, PayoutUnit, Price, Series, SeriesId,
-        SettlementInput,
+        BalanceDomain, Description, OutcomeId, PayoffType, PayoutUnit, Price, Resolution, Series,
+        SeriesId, SettlementInput,
     };
 
     use crate::{
@@ -306,6 +306,7 @@ mod tests {
         payout_unit: PayoutUnit,
     ) -> Series {
         Series {
+            resolution: Resolution::new("Resolved per oracle at expiry"),
             series_id: SeriesId::from("test".to_owned()),
             underlying: "ICP".to_owned(),
             expiry_ns: 0,

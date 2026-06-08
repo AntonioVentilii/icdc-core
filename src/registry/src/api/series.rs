@@ -5,7 +5,8 @@ use ic_cdk::api::{is_controller, msg_caller, time};
 use ic_cdk_macros::{query, update};
 use shared::{
     constants::{
-        HOUR_NS, MAX_FORKS_PER_SOURCE_PER_USER, MAX_SERIES_DESCRIPTION_LEN, MAX_SERIES_TITLE_LEN,
+        HOUR_NS, MAX_FORKS_PER_SOURCE_PER_USER, MAX_SERIES_DESCRIPTION_LEN,
+        MAX_SERIES_RESOLUTION_CLAUSE_LEN, MAX_SERIES_TITLE_LEN,
     },
     types::{
         series::{
@@ -94,6 +95,7 @@ fn add_series_impl(
         oracle_source,
         title,
         description,
+        resolution,
         outcomes,
         icon_url,
         banner_url,
@@ -147,6 +149,14 @@ fn add_series_impl(
         return Err(SeriesError::DescriptionTooLong).into();
     }
 
+    if resolution.clause.trim().is_empty() {
+        return Err(SeriesError::ResolutionClauseEmpty).into();
+    }
+
+    if resolution.clause.chars().count() > MAX_SERIES_RESOLUTION_CLAUSE_LEN {
+        return Err(SeriesError::ResolutionClauseTooLong).into();
+    }
+
     if let Some(ref tag) = locale {
         if !is_valid_locale(tag) {
             return Err(SeriesError::InvalidLocale).into();
@@ -192,6 +202,7 @@ fn add_series_impl(
         created_at_ns: now,
         title,
         description,
+        resolution,
         icon_url,
         banner_url,
         trading_access,
@@ -299,6 +310,9 @@ fn fork_series_impl(
         let description = params
             .description
             .unwrap_or_else(|| source.description.clone());
+        let resolution = params
+            .resolution
+            .unwrap_or_else(|| source.resolution.clone());
         let locale = params.locale.or_else(|| source.locale.clone());
 
         if title.chars().count() > MAX_SERIES_TITLE_LEN {
@@ -306,6 +320,12 @@ fn fork_series_impl(
         }
         if description.plain.chars().count() > MAX_SERIES_DESCRIPTION_LEN {
             return Err(SeriesError::DescriptionTooLong);
+        }
+        if resolution.clause.trim().is_empty() {
+            return Err(SeriesError::ResolutionClauseEmpty);
+        }
+        if resolution.clause.chars().count() > MAX_SERIES_RESOLUTION_CLAUSE_LEN {
+            return Err(SeriesError::ResolutionClauseTooLong);
         }
         if let Some(ref tag) = locale {
             if !is_valid_locale(tag) {
@@ -356,6 +376,7 @@ fn fork_series_impl(
             created_at_ns: now,
             title,
             description,
+            resolution,
             icon_url: source.icon_url,
             banner_url: source.banner_url,
             trading_access: params.trading_access,
@@ -477,7 +498,7 @@ mod tests {
         constants::{HOUR_NS, MAX_FORKS_PER_SOURCE_PER_USER},
         types::{
             groups::GroupId, BalanceDomain, Description, FiatUnit, Group, NonMonetaryUnit,
-            PayoffType, PayoutUnit, SocialLimits, SocialReward, TradingAccess,
+            PayoffType, PayoutUnit, Resolution, SocialLimits, SocialReward, TradingAccess,
         },
     };
 
@@ -520,6 +541,7 @@ mod tests {
             oracle_source: "oracle".to_owned(),
             title: "Test".to_owned(),
             description: Description::plain("Test"),
+            resolution: Resolution::new("Settles per oracle at expiry"),
             outcomes: None,
             icon_url: None,
             banner_url: None,
@@ -546,6 +568,7 @@ mod tests {
             oracle_source: "social".to_owned(),
             title: "Pizza Bet".to_owned(),
             description: Description::plain("Bet a pizza"),
+            resolution: Resolution::new("Winner decided by the group host"),
             outcomes: None,
             icon_url: None,
             banner_url: None,
@@ -681,6 +704,7 @@ mod tests {
                 source_series_id: source_id,
                 title: None,
                 description: None,
+                resolution: None,
                 trading_access: vec![TradingAccess::Restricted {
                     groups: vec![group],
                 }],
@@ -717,6 +741,7 @@ mod tests {
                 source_series_id: source_id,
                 title: Some("Mercato in italiano".to_owned()),
                 description: None,
+                resolution: None,
                 trading_access: vec![TradingAccess::Restricted {
                     groups: vec![group],
                 }],
@@ -762,6 +787,7 @@ mod tests {
             source_series_id: source_id.clone(),
             title: Some("Forked Test".to_owned()),
             description: None,
+            resolution: None,
             trading_access: vec![TradingAccess::Restricted {
                 groups: vec![group],
             }],
@@ -793,6 +819,7 @@ mod tests {
             source_series_id: SeriesId::from("nonexistent".to_owned()),
             title: None,
             description: None,
+            resolution: None,
             trading_access: vec![TradingAccess::Restricted {
                 groups: vec![GroupId::from("grp_1".to_owned())],
             }],
@@ -823,6 +850,7 @@ mod tests {
                 source_series_id: source_id.clone(),
                 title: Some("Fork 1".to_owned()),
                 description: None,
+                resolution: None,
                 trading_access: vec![TradingAccess::Restricted {
                     groups: vec![group.clone()],
                 }],
@@ -841,6 +869,7 @@ mod tests {
                 source_series_id: source_id.clone(),
                 title: Some("Fork 2".to_owned()),
                 description: None,
+                resolution: None,
                 trading_access: vec![TradingAccess::Restricted {
                     groups: vec![group],
                 }],
@@ -876,6 +905,7 @@ mod tests {
                     source_series_id: source_id.clone(),
                     title: None,
                     description: None,
+                    resolution: None,
                     trading_access: vec![TradingAccess::Restricted {
                         groups: vec![group.clone()],
                     }],
@@ -896,6 +926,7 @@ mod tests {
                 source_series_id: source_id,
                 title: None,
                 description: None,
+                resolution: None,
                 trading_access: vec![TradingAccess::Restricted {
                     groups: vec![group],
                 }],
@@ -1058,6 +1089,7 @@ mod tests {
                 source_series_id: source_id.clone(),
                 title: Some("Friends challenge".to_owned()),
                 description: None,
+                resolution: None,
                 trading_access: vec![TradingAccess::Restricted {
                     groups: vec![group],
                 }],
@@ -1102,6 +1134,7 @@ mod tests {
                 source_series_id: source_id.clone(),
                 title: None,
                 description: None,
+                resolution: None,
                 trading_access: vec![TradingAccess::Restricted {
                     groups: vec![group.clone()],
                 }],
@@ -1118,6 +1151,7 @@ mod tests {
                 source_series_id: source_id,
                 title: None,
                 description: None,
+                resolution: None,
                 trading_access: vec![TradingAccess::Restricted {
                     groups: vec![group],
                 }],

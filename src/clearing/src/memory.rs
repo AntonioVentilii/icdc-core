@@ -9,6 +9,7 @@ use shared::types::{
 };
 
 use crate::{
+    migrations::{into_current, LegacyStableState},
     types::{
         event::{Event, EventType, SeriesTradePoint},
         leaderboard::{LeaderboardWindow, PnlAggregate},
@@ -24,7 +25,7 @@ use crate::{
     PositionProof,
 };
 
-fn default_config() -> Config {
+pub(crate) fn default_config() -> Config {
     Config {
         insurance_fund_fee_ratio: 10,
         protocol_fee_ratio: 5,
@@ -147,13 +148,20 @@ pub fn save_state() {
 }
 
 pub fn restore_state() {
-    let result: Result<(StableState,), String> = storage::stable_restore();
-
-    let state = match result {
+    // Try the current schema first. On failure, fall back to the pre-resolution
+    // schema and backfill `Series::resolution` (see `crate::migrations`).
+    let state = match storage::stable_restore::<(StableState,)>() {
         Ok((s,)) => s,
-        Err(e) => {
-            trap(format!("Failed to restore stable state: {e:?}"));
-        }
+        Err(current_err) => match storage::stable_restore::<(LegacyStableState,)>() {
+            Ok((legacy,)) => into_current(legacy),
+            // Surface BOTH decode errors: which schema was expected to win
+            // depends on the deployed version, so keeping both makes a failed
+            // post_upgrade decode debuggable.
+            Err(legacy_err) => trap(format!(
+                "Failed to restore stable state: current-schema decode failed \
+                 ({current_err:?}); legacy-schema decode failed ({legacy_err:?})"
+            )),
+        },
     };
 
     let StableState {

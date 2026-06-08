@@ -1,5 +1,7 @@
 use candid::Principal;
-use shared::types::{BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId};
+use shared::types::{
+    BalanceDomain, Description, PayoffType, PayoutUnit, Price, Resolution, Series, SeriesId,
+};
 
 use crate::{
     api::trade::{
@@ -218,6 +220,7 @@ fn live_execution_populates_index() {
     let series_id = SeriesId::from("live_index_test".to_owned());
 
     let series = Series {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         series_id: series_id.clone(),
         underlying: "BTC".to_owned(),
         expiry_ns: 2_000_000_000,

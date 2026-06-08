@@ -352,7 +352,7 @@ pub(crate) fn execute_trade_impl(
 mod tests {
     use candid::Principal;
     use shared::types::{
-        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId,
+        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Resolution, Series, SeriesId,
     };
 
     use crate::{
@@ -371,6 +371,7 @@ mod tests {
         let series_id = SeriesId::from("test".to_owned());
 
         let series = Series {
+            resolution: Resolution::new("Resolved per oracle at expiry"),
             series_id: series_id.clone(),
             underlying: "BTC".to_owned(),
             expiry_ns: 2_000_000_000,
@@ -452,6 +453,7 @@ mod tests {
         let series_id = SeriesId::from("test".to_owned());
 
         let series = Series {
+            resolution: Resolution::new("Resolved per oracle at expiry"),
             series_id: series_id.clone(),
             underlying: "BTC".to_owned(),
             expiry_ns: 2_000_000_000,

@@ -36,6 +36,9 @@ type AddSeriesParams = record {
 	locale : opt text;
 	// A detailed description of the series.
 	description : Description;
+	// The settlement terms describing how this market resolves.
+	// Compulsory — every new series must state how it settles.
+	resolution : Resolution;
 	// The defined outcomes for categorical markets (ordered).
 	outcomes : opt vec Outcome;
 	// An optional icon URL for the market.
@@ -229,6 +232,8 @@ type ForkSeriesParams = record {
 	locale : opt text;
 	// Optional description override. Falls back to the source series description.
 	description : opt Description;
+	// Optional resolution override. Falls back to the source series resolution.
+	resolution : opt Resolution;
 	// Trading access policies for the forked series. Must be `Restricted`.
 	trading_access : vec TradingAccess
 };
@@ -456,6 +461,19 @@ type RegisterEngineParams = record {
 };
 // The result of a `register_engine` operation.
 type RegisterEngineResult = variant { Ok : text; Err : EngineError };
+// Settlement terms for a series. Compulsory on every market.
+//
+// Modeled as a struct (not a bare `String`) so it can grow without a breaking
+// candid change: future fields — e.g. structured `rules` (named source +
+// settle date + day-count, see issue #64) — are added as `opt` fields, which
+// candid can decode against records persisted before the field existed.
+// Variants were considered and rejected: adding an enum variant risks decode
+// failures in already-deployed consumers, whereas appending `opt` record
+// fields is forward-compatible.
+type Resolution = record {
+	// Human-readable clause describing how the market settles.
+	clause : text
+};
 // An audit record of a role grant within an Engine.
 type RoleGrant = record {
 	// The granted role.
@@ -507,6 +525,13 @@ type Series = record {
 	locale : opt text;
 	// A detailed description of the series.
 	description : Description;
+	// The settlement terms describing how this market resolves.
+	//
+	// Compulsory metadata: every series carries resolution terms. Like
+	// `title`/`description`/`locale`, it does NOT participate in `series_id`
+	// hashing (see [`Series::generate_id`]), so the same economic contract
+	// keeps a single id regardless of its resolution wording.
+	resolution : Resolution;
 	// The defined outcomes for categorical markets (ordered).
 	outcomes : opt vec Outcome;
 	// Timestamp of series creation in nanoseconds since UNIX epoch.
@@ -560,8 +585,12 @@ type SeriesError = variant {
 	UnsupportedPayoutUnit;
 	// The provided locale tag is not a valid BCP 47 shape or exceeds the length limit.
 	InvalidLocale;
+	// Returned when the resolution clause is empty (a non-empty clause is compulsory).
+	ResolutionClauseEmpty;
 	// The caller has exceeded the hourly social market creation limit.
 	SocialRateLimitExceeded;
+	// Returned when the resolution clause exceeds the maximum allowed length.
+	ResolutionClauseTooLong;
 	// Returned when attempting to add a series that already exists.
 	SeriesAlreadyExists;
 	// The source series specified in a fork does not exist.

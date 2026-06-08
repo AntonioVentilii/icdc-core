@@ -9,6 +9,7 @@ pub mod minter;
 pub mod oracle;
 pub mod payout;
 pub mod price;
+pub mod resolution;
 pub mod series;
 pub mod status;
 
@@ -22,5 +23,6 @@ pub use groups::*;
 pub use oracle::*;
 pub use payout::*;
 pub use price::*;
+pub use resolution::*;
 pub use series::*;
 pub use status::*;

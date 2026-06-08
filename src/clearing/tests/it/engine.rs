@@ -6,7 +6,7 @@ use shared::types::{
         UpdateEngineAdminsParams, UpdateEngineParams,
     },
     series::{AddSeriesParams, AddSeriesResult, SeriesError},
-    BalanceDomain, Description, PayoffType, PayoutUnit, Series,
+    BalanceDomain, Description, PayoffType, PayoutUnit, Resolution, Series,
 };
 
 use crate::utils::{
@@ -21,6 +21,7 @@ fn add_series_as(
     engine_id: Option<EngineId>,
 ) -> AddSeriesResult {
     let params = AddSeriesParams {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         underlying: "ETH".to_owned(),
         balance_domain: BalanceDomain::Settlement,
         expiry_ns: 3_000_000_000_000_000_000,

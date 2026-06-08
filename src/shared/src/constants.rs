@@ -23,6 +23,8 @@ pub const USD_DECIMALS: u8 = 4;
 pub const MAX_SERIES_TITLE_LEN: usize = 128;
 /// Maximum length of a series description in characters.
 pub const MAX_SERIES_DESCRIPTION_LEN: usize = 1024;
+/// Maximum length of a series resolution clause in characters.
+pub const MAX_SERIES_RESOLUTION_CLAUSE_LEN: usize = 1024;
 /// Maximum length of a series locale tag in characters.
 ///
 /// Locales follow [BCP 47](https://www.rfc-editor.org/info/bcp47) (e.g. `"en"`,
