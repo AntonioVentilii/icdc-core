@@ -597,6 +597,8 @@ type SeriesError = variant {
 	SourceSeriesNotFound;
 	// Social reward title exceeds limit.
 	RewardTitleTooLong;
+	// Returned when the targeted series does not exist.
+	SeriesNotFound;
 	// The specified Engine does not exist or the caller does not hold the required role on it.
 	EngineRoleNotHeld
 };
@@ -722,6 +724,43 @@ type UpdateOracleMetadataParams = record {
 	metadata : OracleMetadata;
 	// The unique identifier of the oracle to update.
 	oracle_id : text
+};
+// Input parameters for [`update_series_metadata`](../../registry/index.html).
+//
+// Edits only **non-critical, non-identity** fields of an existing series.
+// `title`, `resolution`, and every field that feeds the `series_id` hash
+// (underlying, expiry, payoff, strike, precision, payout unit, outcomes,
+// oracle source, balance domain) are intentionally **not** editable: changing
+// them would either break the series' identity or rewrite the terms a market
+// already trades on.
+//
+// Each field follows a tri-state convention so a single call can leave some
+// fields untouched, set others, and clear nullable ones:
+//
+// - `None` → leave the current value unchanged.
+// - `Some(value)` → replace with `value`.
+// - For the `Option<Option<_>>` fields, `Some(None)` → clear the field to
+// `null` (e.g. remove a banner).
+type UpdateSeriesMetadataParams = record {
+	// New banner URL. `None` leaves it unchanged; `Some(None)` clears it.
+	banner_url : opt opt text;
+	// The series to update.
+	series_id : text;
+	// New [BCP 47](https://www.rfc-editor.org/info/bcp47) locale tag. `None`
+	// leaves it unchanged; `Some(None)` clears it; `Some(Some(tag))` validates
+	// and sets it.
+	locale : opt opt text;
+	// New plain/markdown/html description. `None` leaves it unchanged.
+	description : opt Description;
+	// New icon URL. `None` leaves it unchanged; `Some(None)` clears it.
+	icon_url : opt opt text
+};
+// The result of an `update_series_metadata` operation.
+type UpdateSeriesResult = variant {
+	// Successfully updated; returns the series in its new state.
+	Ok : Series;
+	// Failed to update the series.
+	Err : SeriesError
 };
 // Input parameters for replacing the trading access policies on a series.
 //
@@ -970,6 +1009,17 @@ service : {
 	//
 	// Controllers, the oracle's manager, and Engine `OracleAdmin` role holders may update metadata.
 	update_oracle_metadata : (UpdateOracleMetadataParams) -> (OracleResult);
+	// Updates **non-critical** metadata on an existing series.
+	//
+	// Only `description`, `icon_url`, `banner_url`, and `locale` can be changed.
+	// The series' identity-bearing economic fields, `title`, and `resolution` are
+	// immutable here by design — see [`UpdateSeriesMetadataParams`].
+	//
+	// # Authorization
+	//
+	// Controllers, the series' `creator`, and admins of the series' Engine may
+	// update metadata. All other callers receive [`SeriesError::Unauthorized`].
+	update_series_metadata : (UpdateSeriesMetadataParams) -> (UpdateSeriesResult);
 	// Atomically replaces the trading access policies on an existing series.
 	//
 	// The entire `trading_access` vector is overwritten. To make a series open,
