@@ -233,8 +233,14 @@ pub(crate) fn pending_settlement_params() -> Vec<SettleSeriesParams> {
 /// cursor advances atomically per message and a `Finalised` plan is a no-op,
 /// so a redundant resume can never double-apply accounting.
 pub(crate) fn resume_pending_settlements() {
-    for params in pending_settlement_params() {
-        set_timer(Duration::from_millis(0), async move {
+    // Stagger the resumptions rather than firing them all at once: a burst of
+    // simultaneous timer callbacks right after an upgrade could spike work and
+    // cycles. The step mirrors the 50ms cadence the self-resumption chain in
+    // `settle_series_inner` already uses between chunks.
+    const STAGGER_STEP: Duration = Duration::from_millis(50);
+    for (index, params) in pending_settlement_params().into_iter().enumerate() {
+        let slot = u32::try_from(index).unwrap_or(u32::MAX).saturating_add(1);
+        set_timer(STAGGER_STEP * slot, async move {
             let _ = settle_series_inner(params).await;
         });
     }
