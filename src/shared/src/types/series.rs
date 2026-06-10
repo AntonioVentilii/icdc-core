@@ -359,6 +359,8 @@ pub enum SeriesError {
     EngineIdRequired,
     /// The provided locale tag is not a valid BCP 47 shape or exceeds the length limit.
     InvalidLocale,
+    /// Returned when the targeted series does not exist.
+    SeriesNotFound,
 }
 
 /// Input parameters for registering a new derivative series.
@@ -652,6 +654,59 @@ impl From<Result<SeriesId, SeriesError>> for AddSeriesResult {
         match value {
             Ok(v) => AddSeriesResult::Ok(v),
             Err(e) => AddSeriesResult::Err(e),
+        }
+    }
+}
+
+/// Input parameters for [`update_series_metadata`](../../registry/index.html).
+///
+/// Edits only **non-critical, non-identity** fields of an existing series.
+/// `title`, `resolution`, and every field that feeds the `series_id` hash
+/// (underlying, expiry, payoff, strike, precision, payout unit, outcomes,
+/// oracle source, balance domain) are intentionally **not** editable: changing
+/// them would either break the series' identity or rewrite the terms a market
+/// already trades on.
+///
+/// Each field follows a tri-state convention so a single call can leave some
+/// fields untouched, set others, and clear nullable ones:
+///
+/// - `None` → leave the current value unchanged.
+/// - `Some(value)` → replace with `value`.
+/// - For the `Option<Option<_>>` fields, `Some(None)` → clear the field to `null` (e.g. remove a
+///   banner).
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct UpdateSeriesMetadataParams {
+    /// The series to update.
+    pub series_id: SeriesId,
+    /// New plain/markdown/html description. `None` leaves it unchanged.
+    pub description: Option<Description>,
+    /// New icon URL. `None` leaves it unchanged; `Some(None)` clears it.
+    pub icon_url: Option<Option<String>>,
+    /// New banner URL. `None` leaves it unchanged; `Some(None)` clears it.
+    pub banner_url: Option<Option<String>>,
+    /// New [BCP 47](https://www.rfc-editor.org/info/bcp47) locale tag. `None`
+    /// leaves it unchanged; `Some(None)` clears it; `Some(Some(tag))` validates
+    /// and sets it.
+    pub locale: Option<Option<String>>,
+}
+
+/// The result of an `update_series_metadata` operation.
+///
+/// The success payload is boxed because [`Series`] is far larger than
+/// [`SeriesError`]; candid serializes `Box<Series>` identically to `Series`.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub enum UpdateSeriesResult {
+    /// Successfully updated; returns the series in its new state.
+    Ok(Box<Series>),
+    /// Failed to update the series.
+    Err(SeriesError),
+}
+
+impl From<Result<Series, SeriesError>> for UpdateSeriesResult {
+    fn from(value: Result<Series, SeriesError>) -> Self {
+        match value {
+            Ok(v) => UpdateSeriesResult::Ok(Box::new(v)),
+            Err(e) => UpdateSeriesResult::Err(e),
         }
     }
 }

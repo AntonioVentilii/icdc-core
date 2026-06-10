@@ -11,7 +11,8 @@ use shared::{
     types::{
         series::{
             is_valid_locale, AddSeriesParams, AddSeriesResult, ForkSeriesParams, ListSeriesParams,
-            PaginationParams, Series, SeriesError, SeriesPage,
+            PaginationParams, Series, SeriesError, SeriesPage, UpdateSeriesMetadataParams,
+            UpdateSeriesResult,
         },
         BalanceDomain, EngineRole, NonMonetaryUnit, PayoutUnit, SeriesId, SeriesIdParams,
         TradingAccess,
@@ -21,7 +22,7 @@ use shared::{
 use crate::{
     api::groups::can_principal_see_series,
     guards::{caller_is_not_anonymous, has_engine_role_on},
-    memory::{SERIES_STORE, SOCIAL_CREATION_LOG, SOCIAL_LIMITS},
+    memory::{ENGINE_STORE, SERIES_STORE, SOCIAL_CREATION_LOG, SOCIAL_LIMITS},
     utils::canonical_id_part,
 };
 
@@ -427,6 +428,96 @@ fn record_social_creation(caller: &Principal, now: u64) {
     });
 }
 
+/// Returns `true` if `caller` may edit metadata on `series`, given whether the
+/// caller is a canister controller.
+///
+/// Authorized callers are: canister controllers, the series' original
+/// `creator`, and the admins of the series' owning Engine (if any). The
+/// controller status is passed in (rather than read via `is_controller` here)
+/// so this predicate stays a pure function of the store and is unit-testable.
+fn caller_can_manage_series_metadata(
+    series: &Series,
+    caller: &Principal,
+    caller_is_controller: bool,
+) -> bool {
+    if caller_is_controller || series.creator == *caller {
+        return true;
+    }
+
+    series.engine_id.as_ref().is_some_and(|eid| {
+        ENGINE_STORE.with(|store| {
+            store
+                .borrow()
+                .get(eid)
+                .is_some_and(|engine| engine.admins.contains(caller))
+        })
+    })
+}
+
+/// Updates **non-critical** metadata on an existing series.
+///
+/// Only `description`, `icon_url`, `banner_url`, and `locale` can be changed.
+/// The series' identity-bearing economic fields, `title`, and `resolution` are
+/// immutable here by design — see [`UpdateSeriesMetadataParams`].
+///
+/// # Authorization
+///
+/// Controllers, the series' `creator`, and admins of the series' Engine may
+/// update metadata. All other callers receive [`SeriesError::Unauthorized`].
+#[update(guard = "caller_is_not_anonymous")]
+#[must_use]
+pub fn update_series_metadata(params: UpdateSeriesMetadataParams) -> UpdateSeriesResult {
+    let caller = msg_caller();
+    update_series_metadata_impl(params, caller, is_controller(&caller)).into()
+}
+
+/// Implementation of [`update_series_metadata`] with an injectable caller and
+/// controller flag for unit tests.
+fn update_series_metadata_impl(
+    params: UpdateSeriesMetadataParams,
+    caller: Principal,
+    caller_is_controller: bool,
+) -> Result<Series, SeriesError> {
+    // Validate inputs before taking the store borrow.
+    if let Some(ref description) = params.description {
+        if description.plain.chars().count() > MAX_SERIES_DESCRIPTION_LEN {
+            return Err(SeriesError::DescriptionTooLong);
+        }
+    }
+
+    if let Some(Some(ref tag)) = params.locale {
+        if !is_valid_locale(tag) {
+            return Err(SeriesError::InvalidLocale);
+        }
+    }
+
+    SERIES_STORE.with(|store| {
+        let mut store = store.borrow_mut();
+        let series = store
+            .get_mut(&params.series_id)
+            .ok_or(SeriesError::SeriesNotFound)?;
+
+        if !caller_can_manage_series_metadata(series, &caller, caller_is_controller) {
+            return Err(SeriesError::Unauthorized);
+        }
+
+        if let Some(description) = params.description {
+            series.description = description;
+        }
+        if let Some(icon_url) = params.icon_url {
+            series.icon_url = icon_url;
+        }
+        if let Some(banner_url) = params.banner_url {
+            series.banner_url = banner_url;
+        }
+        if let Some(locale) = params.locale {
+            series.locale = locale;
+        }
+
+        Ok(series.clone())
+    })
+}
+
 /// Retrieves a specific [`Series`] by its [`SeriesId`].
 #[query]
 #[must_use]
@@ -495,18 +586,23 @@ mod tests {
 
     use candid::Principal;
     use shared::{
-        constants::{HOUR_NS, MAX_FORKS_PER_SOURCE_PER_USER},
+        constants::{HOUR_NS, MAX_FORKS_PER_SOURCE_PER_USER, MAX_SERIES_DESCRIPTION_LEN},
         types::{
-            groups::GroupId, BalanceDomain, Description, FiatUnit, Group, NonMonetaryUnit,
-            PayoffType, PayoutUnit, Resolution, SocialLimits, SocialReward, TradingAccess,
+            engine::{Engine, EngineId},
+            groups::GroupId,
+            BalanceDomain, Description, FiatUnit, Group, NonMonetaryUnit, PayoffType, PayoutUnit,
+            Resolution, SocialLimits, SocialReward, TradingAccess,
         },
     };
 
-    use super::{add_series_impl, fork_series_impl, list_series_with_impl, CreationTier};
+    use super::{
+        add_series_impl, fork_series_impl, list_series_with_impl, update_series_metadata_impl,
+        CreationTier,
+    };
     use crate::{
-        memory::{GROUPS_STORE, SERIES_STORE, SOCIAL_CREATION_LOG, SOCIAL_LIMITS},
+        memory::{ENGINE_STORE, GROUPS_STORE, SERIES_STORE, SOCIAL_CREATION_LOG, SOCIAL_LIMITS},
         AddSeriesParams, AddSeriesResult, ForkSeriesParams, ListSeriesParams, PaginationParams,
-        SeriesError, SeriesId,
+        Series, SeriesError, SeriesId, UpdateSeriesMetadataParams,
     };
 
     fn test_principal(id: u8) -> Principal {
@@ -1322,5 +1418,218 @@ mod tests {
                 .map(|s| s.series_id)
                 .collect();
         assert!(visible.contains(&id));
+    }
+
+    // --- update_series_metadata ---
+
+    /// Adds a series via the creator tier and returns its id. Panics on failure.
+    fn seed_series(creator: Principal) -> SeriesId {
+        let AddSeriesResult::Ok(id) = add_as_creator(base_params(), creator, 0) else {
+            panic!("seed_series: add failed");
+        };
+        id
+    }
+
+    /// Reads a series out of the store, cloning it. Panics if absent.
+    fn fetch(id: &SeriesId) -> Series {
+        SERIES_STORE.with(|s| s.borrow().get(id).cloned().expect("series present"))
+    }
+
+    fn empty_update(id: SeriesId) -> UpdateSeriesMetadataParams {
+        UpdateSeriesMetadataParams {
+            series_id: id,
+            description: None,
+            icon_url: None,
+            banner_url: None,
+            locale: None,
+        }
+    }
+
+    #[test]
+    fn creator_can_update_metadata_and_critical_fields_are_untouched() {
+        cleanup();
+        let creator = test_principal(1);
+        let id = seed_series(creator);
+        let before = fetch(&id);
+
+        let params = UpdateSeriesMetadataParams {
+            description: Some(Description::plain("A short context line")),
+            icon_url: Some(Some("https://example.test/icon.png".to_owned())),
+            banner_url: Some(Some("https://example.test/banner.png".to_owned())),
+            locale: Some(Some("en-US".to_owned())),
+            ..empty_update(id.clone())
+        };
+
+        let updated = update_series_metadata_impl(params, creator, false).expect("update ok");
+
+        assert_eq!(updated.description.plain, "A short context line");
+        assert_eq!(
+            updated.icon_url.as_deref(),
+            Some("https://example.test/icon.png")
+        );
+        assert_eq!(
+            updated.banner_url.as_deref(),
+            Some("https://example.test/banner.png")
+        );
+        assert_eq!(updated.locale.as_deref(), Some("en-US"));
+
+        // Identity and trust-critical fields must be preserved verbatim.
+        assert_eq!(updated.series_id, before.series_id);
+        assert_eq!(updated.title, before.title);
+        assert_eq!(updated.resolution.clause, before.resolution.clause);
+        assert_eq!(updated.creator, before.creator);
+        assert_eq!(updated.expiry_ns, before.expiry_ns);
+
+        // Persisted, not just returned.
+        assert_eq!(fetch(&id).description.plain, "A short context line");
+    }
+
+    #[test]
+    fn controller_can_update_metadata_even_when_not_creator() {
+        cleanup();
+        let creator = test_principal(1);
+        let stranger = test_principal(99);
+        let id = seed_series(creator);
+
+        let params = UpdateSeriesMetadataParams {
+            description: Some(Description::plain("Controller edit")),
+            ..empty_update(id.clone())
+        };
+
+        // caller_is_controller = true overrides the creator check.
+        update_series_metadata_impl(params, stranger, true).expect("controller update ok");
+        assert_eq!(fetch(&id).description.plain, "Controller edit");
+    }
+
+    #[test]
+    fn engine_admin_can_update_metadata() {
+        cleanup();
+        ENGINE_STORE.with(|s| s.borrow_mut().clear());
+
+        let creator = test_principal(1);
+        let admin = test_principal(2);
+        let eid = EngineId::from("eng_test".to_owned());
+
+        let engine = Engine {
+            engine_id: eid.clone(),
+            name: "Test Engine".to_owned(),
+            description: None,
+            icon_url: None,
+            creator,
+            admins: BTreeSet::from([admin]),
+            allowed_roles: BTreeSet::new(),
+            role_grants: Vec::new(),
+            social_limits: None,
+            created_at_ns: 0,
+            updated_at_ns: 0,
+            updated_by: creator,
+        };
+        ENGINE_STORE.with(|s| s.borrow_mut().insert(eid.clone(), engine));
+
+        let id = seed_series(creator);
+        SERIES_STORE.with(|s| {
+            s.borrow_mut().get_mut(&id).unwrap().engine_id = Some(eid.clone());
+        });
+
+        let params = UpdateSeriesMetadataParams {
+            description: Some(Description::plain("Engine admin edit")),
+            ..empty_update(id.clone())
+        };
+
+        // admin is neither controller nor creator — authorized via the engine.
+        update_series_metadata_impl(params, admin, false).expect("engine admin update ok");
+        assert_eq!(fetch(&id).description.plain, "Engine admin edit");
+
+        ENGINE_STORE.with(|s| s.borrow_mut().clear());
+    }
+
+    #[test]
+    fn unauthorized_caller_is_rejected() {
+        cleanup();
+        let creator = test_principal(1);
+        let stranger = test_principal(99);
+        let id = seed_series(creator);
+
+        let params = UpdateSeriesMetadataParams {
+            description: Some(Description::plain("nope")),
+            ..empty_update(id.clone())
+        };
+
+        let err = update_series_metadata_impl(params, stranger, false).unwrap_err();
+        assert!(matches!(err, SeriesError::Unauthorized));
+        // Unchanged.
+        assert_eq!(fetch(&id).description.plain, "Test");
+    }
+
+    #[test]
+    fn unknown_series_is_rejected() {
+        cleanup();
+        let params = empty_update(SeriesId::from("does_not_exist".to_owned()));
+        let err = update_series_metadata_impl(params, test_principal(1), true).unwrap_err();
+        assert!(matches!(err, SeriesError::SeriesNotFound));
+    }
+
+    #[test]
+    fn description_too_long_is_rejected() {
+        cleanup();
+        let creator = test_principal(1);
+        let id = seed_series(creator);
+
+        let too_long = "x".repeat(MAX_SERIES_DESCRIPTION_LEN + 1);
+        let params = UpdateSeriesMetadataParams {
+            description: Some(Description::plain(too_long)),
+            ..empty_update(id.clone())
+        };
+
+        let err = update_series_metadata_impl(params, creator, false).unwrap_err();
+        assert!(matches!(err, SeriesError::DescriptionTooLong));
+    }
+
+    #[test]
+    fn invalid_locale_is_rejected() {
+        cleanup();
+        let creator = test_principal(1);
+        let id = seed_series(creator);
+
+        let params = UpdateSeriesMetadataParams {
+            locale: Some(Some("not a locale!!".to_owned())),
+            ..empty_update(id.clone())
+        };
+
+        let err = update_series_metadata_impl(params, creator, false).unwrap_err();
+        assert!(matches!(err, SeriesError::InvalidLocale));
+    }
+
+    #[test]
+    fn some_none_clears_a_nullable_field_and_none_leaves_unchanged() {
+        cleanup();
+        let creator = test_principal(1);
+        let id = seed_series(creator);
+
+        // First set a banner and locale.
+        update_series_metadata_impl(
+            UpdateSeriesMetadataParams {
+                banner_url: Some(Some("https://example.test/b.png".to_owned())),
+                locale: Some(Some("es".to_owned())),
+                ..empty_update(id.clone())
+            },
+            creator,
+            false,
+        )
+        .expect("set ok");
+
+        // Now clear banner (Some(None)) while leaving locale untouched (None).
+        let updated = update_series_metadata_impl(
+            UpdateSeriesMetadataParams {
+                banner_url: Some(None),
+                ..empty_update(id.clone())
+            },
+            creator,
+            false,
+        )
+        .expect("clear ok");
+
+        assert_eq!(updated.banner_url, None);
+        assert_eq!(updated.locale.as_deref(), Some("es"));
     }
 }
