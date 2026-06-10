@@ -739,8 +739,8 @@ type UpdateOracleMetadataParams = record {
 //
 // - `None` → leave the current value unchanged.
 // - `Some(value)` → replace with `value`.
-// - For the `Option<Option<_>>` fields, `Some(None)` → clear the field to
-// `null` (e.g. remove a banner).
+// - For the `Option<Option<_>>` fields, `Some(None)` → clear the field to `null` (e.g. remove a
+// banner).
 type UpdateSeriesMetadataParams = record {
 	// New banner URL. `None` leaves it unchanged; `Some(None)` clears it.
 	banner_url : opt opt text;
@@ -756,6 +756,9 @@ type UpdateSeriesMetadataParams = record {
 	icon_url : opt opt text
 };
 // The result of an `update_series_metadata` operation.
+//
+// The success payload is boxed because [`Series`] is far larger than
+// [`SeriesError`]; candid serializes `Box<Series>` identically to `Series`.
 type UpdateSeriesResult = variant {
 	// Successfully updated; returns the series in its new state.
 	Ok : Series;
