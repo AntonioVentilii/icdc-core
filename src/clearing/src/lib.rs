@@ -89,6 +89,10 @@ fn pre_upgrade() {
 #[post_upgrade]
 fn post_upgrade() {
     memory::restore_state();
+    // IC timers do not survive an upgrade, so any settlement that was still in
+    // flight would otherwise stall until a manual `resume_settlement`. Re-drive
+    // them here so they catch up on their own.
+    api::settlement::api::resume_pending_settlements();
 }
 
 export_candid!();

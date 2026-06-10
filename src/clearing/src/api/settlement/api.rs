@@ -203,6 +203,43 @@ pub async fn resume_settlement(series_id: SeriesId) -> SettleSeriesResult {
     }
 }
 
+/// Returns resume parameters for every settlement plan that has not yet reached
+/// [`PlanStatus::Finalised`].
+///
+/// Extracted from [`resume_pending_settlements`] so the selection logic is
+/// unit-testable without the IC timer runtime.
+pub(crate) fn pending_settlement_params() -> Vec<SettleSeriesParams> {
+    SETTLEMENT_PLANS.with(|m| {
+        m.borrow()
+            .values()
+            .filter(|plan| plan.status != PlanStatus::Finalised)
+            .map(|plan| SettleSeriesParams {
+                series_id: plan.series_id.clone(),
+                settlement: plan.settlement.clone(),
+            })
+            .collect()
+    })
+}
+
+/// Re-drives every settlement plan that is still in flight.
+///
+/// IC timers do not survive a canister upgrade, so a plan left in
+/// `Planned`/`Executing` when the canister is upgraded keeps a consistent —
+/// but no longer advancing — state. Calling this from `post_upgrade`
+/// re-schedules background processing for each such plan so it catches up on
+/// its own instead of waiting for a manual [`resume_settlement`].
+///
+/// Re-driving is safe: `settle_series_inner` is idempotent. The accounting
+/// cursor advances atomically per message and a `Finalised` plan is a no-op,
+/// so a redundant resume can never double-apply accounting.
+pub(crate) fn resume_pending_settlements() {
+    for params in pending_settlement_params() {
+        set_timer(Duration::from_millis(0), async move {
+            let _ = settle_series_inner(params).await;
+        });
+    }
+}
+
 /// Internal settlement logic — caller has already been authorized.
 ///
 /// This function is also used by the timer-based self-resumption so that
@@ -1746,6 +1783,60 @@ mod tests {
         });
         assert_eq!(page.items, vec![SeriesId::from("s1".to_owned())]);
         assert_eq!(page.next_cursor, Some(SeriesId::from("s1".to_owned())));
+
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+    }
+
+    #[test]
+    fn pending_settlement_params_selects_only_unfinalised_plans() {
+        use crate::api::settlement::api::pending_settlement_params;
+
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+
+        let plan = |id: &str, status: PlanStatus| SettlementPlan {
+            series_id: SeriesId::from(id.to_owned()),
+            settlement: SettlementInput::Price(Price::new(1, 0)),
+            oracle_source: "oracle".to_owned(),
+            fee_usd: 0,
+            insurance_fee_usd: 0,
+            positions: vec![],
+            accounting_cursor: 0,
+            accounting_applied: false,
+            status,
+            idempotency_ns: 1_700_000_000_000_000_000_u64.into(),
+            balance_domain: BalanceDomain::Settlement,
+        };
+
+        SETTLEMENT_PLANS.with(|m| {
+            let mut m = m.borrow_mut();
+            m.insert(
+                "planned".to_owned().into(),
+                plan("planned", PlanStatus::Planned),
+            );
+            m.insert(
+                "executing".to_owned().into(),
+                plan("executing", PlanStatus::Executing),
+            );
+            m.insert(
+                "finalised".to_owned().into(),
+                plan("finalised", PlanStatus::Finalised),
+            );
+        });
+
+        let mut ids: Vec<SeriesId> = pending_settlement_params()
+            .into_iter()
+            .map(|p| p.series_id)
+            .collect();
+        ids.sort();
+
+        // Planned and Executing plans are re-driven; Finalised is skipped.
+        assert_eq!(
+            ids,
+            vec![
+                SeriesId::from("executing".to_owned()),
+                SeriesId::from("planned".to_owned()),
+            ]
+        );
 
         SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
     }
