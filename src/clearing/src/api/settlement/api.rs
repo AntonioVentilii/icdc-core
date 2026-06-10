@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use candid::Principal;
 use ic_cdk::api::{instruction_counter, is_controller, msg_caller};
 use ic_cdk_macros::{query, update};
-use ic_cdk_timers::set_timer;
+use ic_cdk_timers::{set_timer, set_timer_interval};
 use shared::types::{BalanceDomain, Price, Series, SeriesId, SettlementInput};
 
 use super::{
@@ -244,6 +244,32 @@ pub(crate) fn resume_pending_settlements() {
             let _ = settle_series_inner(params).await;
         });
     }
+}
+
+/// How often the heartbeat sweeps for stalled settlement plans.
+///
+/// The 50ms self-resumption chain handles the common case within seconds, so
+/// this interval only needs to be short enough that a settlement whose chain
+/// broke (a trapping accounting chunk consumes the timer that would have
+/// scheduled the next chunk) recovers promptly without burning cycles on
+/// needless sweeps.
+const SETTLEMENT_HEARTBEAT_INTERVAL: Duration = Duration::from_mins(5);
+
+/// Arms a periodic sweep that re-drives any settlement plan stuck in
+/// `Planned`/`Executing`.
+///
+/// The self-resumption chain in `settle_series_inner` only schedules the next
+/// chunk when the current chunk succeeds; if a chunk traps, that scheduling is
+/// rolled back with it and the chain stops, leaving the plan consistent but
+/// not advancing. This heartbeat is the safety net that picks such plans back
+/// up. Re-driving is idempotent — see [`resume_pending_settlements`].
+///
+/// Must be armed from both `init` and `post_upgrade`, since interval timers do
+/// not survive an upgrade.
+pub(crate) fn start_settlement_heartbeat() {
+    set_timer_interval(SETTLEMENT_HEARTBEAT_INTERVAL, || async {
+        resume_pending_settlements();
+    });
 }
 
 /// Internal settlement logic — caller has already been authorized.

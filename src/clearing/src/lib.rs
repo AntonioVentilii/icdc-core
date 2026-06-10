@@ -79,6 +79,7 @@ fn init(config: Config) {
     CONFIG.with(|c: &RefCell<Config>| {
         *c.borrow_mut() = config;
     });
+    api::settlement::api::start_settlement_heartbeat();
 }
 
 #[pre_upgrade]
@@ -93,6 +94,9 @@ fn post_upgrade() {
     // flight would otherwise stall until a manual `resume_settlement`. Re-drive
     // them here so they catch up on their own.
     api::settlement::api::resume_pending_settlements();
+    // Interval timers also do not survive an upgrade, so re-arm the heartbeat
+    // that recovers any settlement whose self-resumption chain later breaks.
+    api::settlement::api::start_settlement_heartbeat();
 }
 
 export_candid!();
