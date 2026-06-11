@@ -32,6 +32,10 @@ pub struct SubmitMarketOrderParams {
     pub trade_id: TradeId,
     /// The identifier of the limit order to be matched.
     pub matching_order_id: OrderId,
+    /// Optional taker quantity. Must be positive when provided. The trade executes for
+    /// `min(qty, resting order qty)` and the unfilled remainder stays on the book with
+    /// proportionally reduced blocked margin. `None` fills the entire resting order.
+    pub qty: Option<i128>,
 }
 
 /// Input parameters for submitting a matched trade from an exchange.

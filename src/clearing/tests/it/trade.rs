@@ -80,6 +80,7 @@ fn submit_market_order_nonexistent_order() {
     let params = SubmitMarketOrderParams {
         trade_id: "trade_1".to_owned().into(),
         matching_order_id: "nonexistent_order".to_owned().into(),
+        qty: None,
     };
 
     let result: SubmitMatchedTradeResult = assert_ok_value(
@@ -468,6 +469,7 @@ fn insufficient_margin() {
             (SubmitMarketOrderParams {
                 trade_id: TradeId::from("neg_market".to_owned()),
                 matching_order_id: OrderId::from("large_maker".to_owned()),
+                qty: None,
             },),
         )
         .unwrap();
@@ -568,6 +570,7 @@ fn limit_market_match() {
             (SubmitMarketOrderParams {
                 trade_id: TradeId::from("taker_trade".to_owned()),
                 matching_order_id: OrderId::from("maker_limit".to_owned()),
+                qty: None,
             },),
         )
         .unwrap();
@@ -581,6 +584,99 @@ fn limit_market_match() {
     let pos_b: Vec<Position> = env.clearing.query(user_b, "get_positions", ()).unwrap();
     assert_eq!(pos_b.len(), 1);
     assert_eq!(pos_b[0].net_qty, -5);
+}
+
+#[test]
+fn limit_market_partial_fill() {
+    let env = TestSetup::with_icp();
+    let user_a = test_user(56);
+    let user_b = test_user(57);
+
+    env.setup_vusd();
+
+    let series_id = env.add_binary_series("LM-PARTIAL-TEST", 1_000_000, BalanceDomain::Settlement);
+
+    let deposit_amount = Nat::from(10_000_000_000_u128);
+    env.deposit_collateral(
+        user_a,
+        "ICP",
+        deposit_amount.clone(),
+        Some(BalanceDomain::Settlement),
+    );
+    env.deposit_collateral(
+        user_b,
+        "ICP",
+        deposit_amount,
+        Some(BalanceDomain::Settlement),
+    );
+
+    // User A: Submit Limit Order (Maker, Buy 10 @ 0.5)
+    let res_maker = env.submit_limit_order(
+        user_a,
+        "partial_maker",
+        series_id.clone(),
+        Side::Buy,
+        10,
+        500_000,
+    );
+    assert!(matches!(res_maker, SubmitMatchedTradeResult::Ok(_)));
+
+    let orders: Vec<LimitOrder> = env.clearing.query(user_a, "get_orders", ()).unwrap();
+    assert_eq!(orders.len(), 1);
+    let full_blocked = orders[0].blocked_margin_usd;
+
+    // User B: Take only 4 of the 10 resting units.
+    let res_taker: SubmitMatchedTradeResult = env
+        .clearing
+        .update(
+            user_b,
+            "submit_market_order",
+            (SubmitMarketOrderParams {
+                trade_id: TradeId::from("partial_trade_1".to_owned()),
+                matching_order_id: OrderId::from("partial_maker".to_owned()),
+                qty: Some(4),
+            },),
+        )
+        .unwrap();
+    assert!(matches!(res_taker, SubmitMatchedTradeResult::Ok(_)));
+
+    let pos_a: Vec<Position> = env.clearing.query(user_a, "get_positions", ()).unwrap();
+    assert_eq!(pos_a.len(), 1);
+    assert_eq!(pos_a[0].net_qty, 4);
+
+    let pos_b: Vec<Position> = env.clearing.query(user_b, "get_positions", ()).unwrap();
+    assert_eq!(pos_b.len(), 1);
+    assert_eq!(pos_b[0].net_qty, -4);
+
+    // The remainder stays on the book with proportionally reduced blocked margin.
+    let orders: Vec<LimitOrder> = env.clearing.query(user_a, "get_orders", ()).unwrap();
+    assert_eq!(orders.len(), 1);
+    assert_eq!(orders[0].qty, 6);
+    assert_eq!(orders[0].blocked_margin_usd, full_blocked * 6 / 10);
+
+    // A second market order fills the remainder and removes the order.
+    let res_taker_2: SubmitMatchedTradeResult = env
+        .clearing
+        .update(
+            user_b,
+            "submit_market_order",
+            (SubmitMarketOrderParams {
+                trade_id: TradeId::from("partial_trade_2".to_owned()),
+                matching_order_id: OrderId::from("partial_maker".to_owned()),
+                qty: Some(6),
+            },),
+        )
+        .unwrap();
+    assert!(matches!(res_taker_2, SubmitMatchedTradeResult::Ok(_)));
+
+    let orders: Vec<LimitOrder> = env.clearing.query(user_a, "get_orders", ()).unwrap();
+    assert!(orders.is_empty(), "Fully filled order should be removed");
+
+    let pos_a: Vec<Position> = env.clearing.query(user_a, "get_positions", ()).unwrap();
+    assert_eq!(pos_a[0].net_qty, 10);
+
+    let pos_b: Vec<Position> = env.clearing.query(user_b, "get_positions", ()).unwrap();
+    assert_eq!(pos_b[0].net_qty, -10);
 }
 
 #[test]
@@ -636,6 +732,7 @@ fn multi_user_journey() {
             (SubmitMarketOrderParams {
                 trade_id: TradeId::from("b_match_a".to_owned()),
                 matching_order_id: OrderId::from("a_sell_1".to_owned()),
+                qty: None,
             },),
         )
         .unwrap();

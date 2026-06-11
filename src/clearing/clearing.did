@@ -1027,6 +1027,10 @@ type SubmitLimitOrderParams = record {
 };
 // Input parameters for submitting a market order (taking an existing limit order).
 type SubmitMarketOrderParams = record {
+	// Optional taker quantity. Must be positive when provided. The trade executes for
+	// `min(qty, resting order qty)` and the unfilled remainder stays on the book with
+	// proportionally reduced blocked margin. `None` fills the entire resting order.
+	qty : opt int;
 	// Unique identifier for the trade resulting from this match.
 	trade_id : text;
 	// The identifier of the limit order to be matched.
@@ -1476,7 +1480,10 @@ service : (Config) -> {
 	submit_limit_order : (SubmitLimitOrderParams) -> (SubmitMatchedTradeResult);
 	// Submits a market order to match an existing limit order.
 	//
-	// The caller is the taker.
+	// The caller is the taker. An optional `qty` caps the fill: the trade executes for
+	// `min(qty, resting order qty)` at the order's price and the unfilled remainder stays
+	// on the book with proportionally reduced blocked margin. `None` fills the entire
+	// resting order.
 	submit_market_order : (SubmitMarketOrderParams) -> (SubmitMatchedTradeResult);
 	// Submits a matched trade from an exchange for clearing.
 	//

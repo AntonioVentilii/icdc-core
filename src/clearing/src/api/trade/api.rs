@@ -25,7 +25,8 @@ use crate::{
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
         ACCEPTED_TRANSFERS, ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, EVENTS,
-        FROZEN_TRANSFERS, LIMIT_ORDERS, POSITIONS, REGISTRY_CANISTER, SERIES_TRADE_HISTORY,
+        EXECUTED_TRADES, FROZEN_TRANSFERS, LIMIT_ORDERS, POSITIONS, REGISTRY_CANISTER,
+        SERIES_TRADE_HISTORY,
     },
     payoffs::{get_required_margin, scale_price, RoundingMode},
     trade::{
@@ -143,7 +144,10 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
 
 /// Submits a market order to match an existing limit order.
 ///
-/// The caller is the taker.
+/// The caller is the taker. An optional `qty` caps the fill: the trade executes for
+/// `min(qty, resting order qty)` at the order's price and the unfilled remainder stays
+/// on the book with proportionally reduced blocked margin. `None` fills the entire
+/// resting order.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatchedTradeResult {
     let result: Result<bool, TradeError> = (async {
@@ -152,6 +156,7 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
         let SubmitMarketOrderParams {
             trade_id,
             matching_order_id,
+            qty,
         } = params;
 
         let order = LIMIT_ORDERS.with(|m| {
@@ -165,7 +170,7 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
 
         check_trading_access(&series, taker.0).await?;
 
-        submit_market_order_impl(taker, order, &trade_id, &series)
+        submit_market_order_impl(taker, &order, &trade_id, &series, qty)
     })
     .await;
 
@@ -174,41 +179,94 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
 
 pub(crate) fn submit_market_order_impl(
     taker: User,
-    order: LimitOrder,
+    order: &LimitOrder,
     trade_id: &TradeId,
     series: &Series,
+    requested_qty: Option<i128>,
 ) -> Result<bool, TradeError> {
-    // Verify the order still exists — it may have been cancelled during the await.
-    LIMIT_ORDERS.with(|m| {
+    if requested_qty.is_some_and(|q| q <= 0) {
+        return Err(TradeError::Common(CommonError::InvalidInput(
+            "Quantity must be positive".to_owned(),
+        )));
+    }
+
+    // Idempotency: if this trade already executed, return success without touching the
+    // book again — re-applying the book mutation would shrink the resting order a
+    // second time without a matching fill.
+    if EXECUTED_TRADES.with(|m| m.borrow().contains_key(trade_id)) {
+        return Ok(true);
+    }
+
+    // Re-read the order — it may have been cancelled or partially filled by a
+    // concurrent call during the await, so the pre-await copy's remaining quantity and
+    // blocked margin cannot be trusted.
+    let order = LIMIT_ORDERS.with(|m| {
         m.borrow()
-            .contains_key(&order.order_id)
-            .then_some(())
+            .get(&order.order_id)
+            .cloned()
             .ok_or_else(|| TradeError::OrderNotFound(order.order_id.clone()))
     })?;
 
+    let fill_qty = requested_qty.map_or(order.qty, |q| q.min(order.qty));
+    let remaining_qty = order.qty - fill_qty;
+
+    // Remaining blocked margin is recomputed with the same formula used when the limit
+    // order was placed, so `blocked - remaining` releases exactly the filled share and
+    // the leftover order stays fully collateralized.
+    let remaining_blocked_margin_usd = if remaining_qty == 0 {
+        0
+    } else {
+        let margin_qty = if order.side == Side::Sell {
+            -remaining_qty
+        } else {
+            remaining_qty
+        };
+        get_required_margin(series, &order.price, margin_qty, &order.outcome_id).map_err(|e| {
+            TradeError::Common(CommonError::Internal(format!(
+                "Payoff calculation failed: {e:?}"
+            )))
+        })?
+    };
+    let unblock_amount = order
+        .blocked_margin_usd
+        .saturating_sub(remaining_blocked_margin_usd);
+
     let (buyer, seller, b_unblock, s_unblock) = match order.side {
-        Side::Buy => (order.creator, taker, Some(order.blocked_margin_usd), None),
-        Side::Sell => (taker, order.creator, None, Some(order.blocked_margin_usd)),
+        Side::Buy => (order.creator, taker, Some(unblock_amount), None),
+        Side::Sell => (taker, order.creator, None, Some(unblock_amount)),
     };
 
     execute_trade_impl(
         series,
         ExecuteTradeParams {
             trade_id: trade_id.clone(),
-            series_id: order.series_id,
-            outcome_id: order.outcome_id,
+            series_id: order.series_id.clone(),
+            outcome_id: order.outcome_id.clone(),
             buyer,
             seller,
-            qty: order.qty,
-            price: order.price,
+            qty: fill_qty,
+            price: order.price.clone(),
             buyer_unblock_amount: b_unblock,
             seller_unblock_amount: s_unblock,
         },
     )?;
 
-    // Only remove the order after successful execution
+    // Only mutate the book after successful execution.
     LIMIT_ORDERS.with(|m| {
-        m.borrow_mut().remove(&order.order_id);
+        let mut m = m.borrow_mut();
+        if remaining_qty == 0 {
+            m.remove(&order.order_id);
+        } else {
+            let order_id = order.order_id.clone();
+            m.insert(
+                order_id,
+                LimitOrder {
+                    qty: remaining_qty,
+                    blocked_margin_usd: remaining_blocked_margin_usd,
+                    ..order
+                },
+            );
+        }
     });
 
     Ok(true)
@@ -1123,7 +1181,8 @@ mod tests {
             acc.insert(taker, t_acc);
         });
 
-        let result = submit_market_order_impl(taker, order, &trade_id, &test_series(&series_id));
+        let result =
+            submit_market_order_impl(taker, &order, &trade_id, &test_series(&series_id), None);
 
         assert!(result.is_err());
 
@@ -1164,7 +1223,8 @@ mod tests {
             acc.insert(taker, t_acc);
         });
 
-        let result = submit_market_order_impl(taker, order, &trade_id, &test_series(&series_id));
+        let result =
+            submit_market_order_impl(taker, &order, &trade_id, &test_series(&series_id), None);
 
         assert!(result.is_ok());
 
@@ -1192,7 +1252,8 @@ mod tests {
         LIMIT_ORDERS.with(|m| m.borrow_mut().clear());
         ACCOUNT_STATES.with(|acc| acc.borrow_mut().clear());
 
-        let result = submit_market_order_impl(taker, order, &trade_id, &test_series(&series_id));
+        let result =
+            submit_market_order_impl(taker, &order, &trade_id, &test_series(&series_id), None);
 
         assert!(
             matches!(&result, Err(TradeError::OrderNotFound(id)) if *id == order_id),
