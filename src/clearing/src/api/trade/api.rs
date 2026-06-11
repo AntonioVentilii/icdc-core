@@ -25,7 +25,8 @@ use crate::{
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
         ACCEPTED_TRANSFERS, ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, EVENTS,
-        FROZEN_TRANSFERS, LIMIT_ORDERS, POSITIONS, REGISTRY_CANISTER, SERIES_TRADE_HISTORY,
+        EXECUTED_TRADES, FROZEN_TRANSFERS, LIMIT_ORDERS, POSITIONS, REGISTRY_CANISTER,
+        SERIES_TRADE_HISTORY,
     },
     payoffs::{get_required_margin, scale_price, RoundingMode},
     trade::{
@@ -143,7 +144,10 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
 
 /// Submits a market order to match an existing limit order.
 ///
-/// The caller is the taker.
+/// The caller is the taker. An optional `qty` caps the fill: the trade executes for
+/// `min(qty, resting order qty)` at the order's price and the unfilled remainder stays
+/// on the book with proportionally reduced blocked margin. `None` fills the entire
+/// resting order.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatchedTradeResult {
     let result: Result<bool, TradeError> = (async {
@@ -152,6 +156,7 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
         let SubmitMarketOrderParams {
             trade_id,
             matching_order_id,
+            qty,
         } = params;
 
         let order = LIMIT_ORDERS.with(|m| {
@@ -165,7 +170,7 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
 
         check_trading_access(&series, taker.0).await?;
 
-        submit_market_order_impl(taker, order, &trade_id, &series)
+        submit_market_order_impl(taker, &order, &trade_id, &series, qty)
     })
     .await;
 
@@ -174,41 +179,122 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
 
 pub(crate) fn submit_market_order_impl(
     taker: User,
-    order: LimitOrder,
+    order: &LimitOrder,
     trade_id: &TradeId,
     series: &Series,
+    requested_qty: Option<i128>,
 ) -> Result<bool, TradeError> {
-    // Verify the order still exists — it may have been cancelled during the await.
-    LIMIT_ORDERS.with(|m| {
+    if requested_qty.is_some_and(|q| q <= 0) {
+        return Err(TradeError::Common(CommonError::InvalidInput(
+            "Quantity must be positive".to_owned(),
+        )));
+    }
+
+    // Idempotency: if this trade already executed, return success without touching the
+    // book again — re-applying the book mutation would shrink the resting order a
+    // second time without a matching fill.
+    if EXECUTED_TRADES.with(|m| m.borrow().contains_key(trade_id)) {
+        return Ok(true);
+    }
+
+    // Re-read the order — it may have been cancelled or partially filled by a
+    // concurrent call during the await, so the pre-await copy's remaining quantity and
+    // blocked margin cannot be trusted.
+    let current = LIMIT_ORDERS.with(|m| {
         m.borrow()
-            .contains_key(&order.order_id)
-            .then_some(())
+            .get(&order.order_id)
+            .cloned()
             .ok_or_else(|| TradeError::OrderNotFound(order.order_id.clone()))
     })?;
 
+    // Order ids are client-chosen and become reusable the moment an order leaves the
+    // book, so the entry under this id may be a *different* order than the one the
+    // pre-await series and access checks validated. Only the quantity (and the margin
+    // blocked for it) may legitimately change — partial fills shrink both — so any
+    // other field diverging means the validated order is gone and was replaced:
+    // reject so the caller re-validates against the current book.
+    if current.creator != order.creator
+        || current.series_id != order.series_id
+        || current.outcome_id != order.outcome_id
+        || current.side != order.side
+        || current.price != order.price
+    {
+        return Err(TradeError::OrderNotFound(order.order_id.clone()));
+    }
+
+    let order = current;
+
+    let fill_qty = requested_qty.map_or(order.qty, |q| q.min(order.qty));
+    let remaining_qty = order.qty - fill_qty;
+
+    // Remaining blocked margin is recomputed with the same formula used when the limit
+    // order was placed, so `blocked - remaining` releases exactly the filled share and
+    // the leftover order stays fully collateralized.
+    let remaining_blocked_margin_usd = if remaining_qty == 0 {
+        0
+    } else {
+        let margin_qty = if order.side == Side::Sell {
+            -remaining_qty
+        } else {
+            remaining_qty
+        };
+        get_required_margin(series, &order.price, margin_qty, &order.outcome_id).map_err(|e| {
+            TradeError::Common(CommonError::Internal(format!(
+                "Payoff calculation failed: {e:?}"
+            )))
+        })?
+    };
+    // `get_required_margin` is linear in `abs(qty)`, so the margin for the remaining
+    // quantity can never exceed what the full order blocked; a violation means the
+    // order and series data are out of sync, and silently unblocking too little would
+    // strand the maker's collateral. Surface it instead — nothing has been mutated yet.
+    let unblock_amount = order
+        .blocked_margin_usd
+        .checked_sub(remaining_blocked_margin_usd)
+        .ok_or_else(|| {
+            TradeError::Common(CommonError::Internal(format!(
+                "Remaining blocked margin {remaining_blocked_margin_usd} exceeds blocked margin \
+                 {} for order {:?}",
+                order.blocked_margin_usd, order.order_id
+            )))
+        })?;
+
     let (buyer, seller, b_unblock, s_unblock) = match order.side {
-        Side::Buy => (order.creator, taker, Some(order.blocked_margin_usd), None),
-        Side::Sell => (taker, order.creator, None, Some(order.blocked_margin_usd)),
+        Side::Buy => (order.creator, taker, Some(unblock_amount), None),
+        Side::Sell => (taker, order.creator, None, Some(unblock_amount)),
     };
 
     execute_trade_impl(
         series,
         ExecuteTradeParams {
             trade_id: trade_id.clone(),
-            series_id: order.series_id,
-            outcome_id: order.outcome_id,
+            series_id: order.series_id.clone(),
+            outcome_id: order.outcome_id.clone(),
             buyer,
             seller,
-            qty: order.qty,
-            price: order.price,
+            qty: fill_qty,
+            price: order.price.clone(),
             buyer_unblock_amount: b_unblock,
             seller_unblock_amount: s_unblock,
         },
     )?;
 
-    // Only remove the order after successful execution
+    // Only mutate the book after successful execution.
     LIMIT_ORDERS.with(|m| {
-        m.borrow_mut().remove(&order.order_id);
+        let mut m = m.borrow_mut();
+        if remaining_qty == 0 {
+            m.remove(&order.order_id);
+        } else {
+            let order_id = order.order_id.clone();
+            m.insert(
+                order_id,
+                LimitOrder {
+                    qty: remaining_qty,
+                    blocked_margin_usd: remaining_blocked_margin_usd,
+                    ..order
+                },
+            );
+        }
     });
 
     Ok(true)
@@ -1123,7 +1209,8 @@ mod tests {
             acc.insert(taker, t_acc);
         });
 
-        let result = submit_market_order_impl(taker, order, &trade_id, &test_series(&series_id));
+        let result =
+            submit_market_order_impl(taker, &order, &trade_id, &test_series(&series_id), None);
 
         assert!(result.is_err());
 
@@ -1164,7 +1251,8 @@ mod tests {
             acc.insert(taker, t_acc);
         });
 
-        let result = submit_market_order_impl(taker, order, &trade_id, &test_series(&series_id));
+        let result =
+            submit_market_order_impl(taker, &order, &trade_id, &test_series(&series_id), None);
 
         assert!(result.is_ok());
 
@@ -1192,12 +1280,70 @@ mod tests {
         LIMIT_ORDERS.with(|m| m.borrow_mut().clear());
         ACCOUNT_STATES.with(|acc| acc.borrow_mut().clear());
 
-        let result = submit_market_order_impl(taker, order, &trade_id, &test_series(&series_id));
+        let result =
+            submit_market_order_impl(taker, &order, &trade_id, &test_series(&series_id), None);
 
         assert!(
             matches!(&result, Err(TradeError::OrderNotFound(id)) if *id == order_id),
             "expected OrderNotFound for a cancelled order, got: {result:?}"
         );
+    }
+
+    /// Simulates the scenario where the limit order is removed and a *different*
+    /// order is created under the same (client-chosen, reusable) id during the
+    /// await. The impl must not execute against the replacement order that the
+    /// pre-await checks never validated.
+    #[test]
+    fn market_order_replaced_during_await() {
+        let maker = User(Principal::from_slice(&[1]));
+        let taker = User(Principal::from_slice(&[2]));
+        let series_id = SeriesId::from("test_ser".to_owned());
+        let order_id = OrderId::from("order_1".to_owned());
+        let trade_id = TradeId::from("trade_1".to_owned());
+
+        // Snapshot read before the await: maker's Buy order.
+        let order = test_order(&order_id, &series_id, maker, Side::Buy);
+
+        // During the await the order is cancelled and the id reused for a Sell
+        // order at a different price.
+        let mut replacement = test_order(&order_id, &series_id, maker, Side::Sell);
+        replacement.price = Price::new(40_000_000, 6);
+
+        LIMIT_ORDERS.with(|m| {
+            let mut m = m.borrow_mut();
+            m.clear();
+            m.insert(order_id.clone(), replacement);
+        });
+
+        ACCOUNT_STATES.with(|acc| {
+            let mut acc = acc.borrow_mut();
+            acc.clear();
+
+            let mut m_acc = AccountState::new(maker);
+            m_acc.set_cash_balance_usd(BalanceDomain::Settlement, 1_000_000_000);
+            m_acc.set_reserved_margin_usd(BalanceDomain::Settlement, 60_000_000);
+            acc.insert(maker, m_acc);
+
+            let mut t_acc = AccountState::new(taker);
+            t_acc.set_cash_balance_usd(BalanceDomain::Settlement, 1_000_000_000);
+            acc.insert(taker, t_acc);
+        });
+
+        let result =
+            submit_market_order_impl(taker, &order, &trade_id, &test_series(&series_id), None);
+
+        assert!(
+            matches!(&result, Err(TradeError::OrderNotFound(id)) if *id == order_id),
+            "expected OrderNotFound for a replaced order, got: {result:?}"
+        );
+
+        // The replacement order must remain untouched on the book.
+        LIMIT_ORDERS.with(|m| {
+            let m = m.borrow();
+            let on_book = m.get(&order_id).expect("replacement order must remain");
+            assert_eq!(on_book.side, Side::Sell);
+            assert_eq!(on_book.qty, 1);
+        });
     }
 
     #[test]
