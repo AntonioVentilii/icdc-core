@@ -7,8 +7,6 @@ on:
     tags:
       - v*
   pull_request:
-    # `edited` so a PR-title fix re-runs the pr-title gate without a new push.
-    types: [opened, synchronize, reopened, edited]
   merge_group:
   workflow_dispatch:
 
@@ -21,8 +19,8 @@ jobs:
     concurrency:
       group: checks-pr-title-${{ github.ref }}
       cancel-in-progress: false
-    permissions:
-      pull-requests: read
+    # No API access needed — the title comes from the event payload, not the API.
+    permissions: {}
 
     steps:
       - name: Skip outside pull requests
@@ -37,11 +35,16 @@ jobs:
           # Scope is REQUIRED: type(scope): description — or type(scope)!: … for a breaking change.
           pattern='^(feat|fix|perf|deps|revert|docs|style|chore|refactor|test|build|ci)\([-a-zA-Z0-9,._/]+\)!?: .+$'
 
-          if [[ ! "$PR_TITLE" =~ $pattern ]]; then
-            echo "::error::PR title must be a Conventional Commit WITH A SCOPE: 'type(scope): description' (or 'type(scope)!: …' for a breaking change)."
-            echo "::error::Use the affected area/crate as the scope, or 'ci' for infrastructure. Got: $PR_TITLE"
-            exit 1
+          if [[ "$PR_TITLE" =~ $pattern ]]; then
+            echo "PR title OK."
+            exit 0
           fi
+
+          # Keep the title off the start of a line so it can't inject a ::workflow:: command.
+          echo "::error::PR title must be a Conventional Commit WITH A SCOPE: 'type(scope): description' (or 'type(scope)!: …' for a breaking change)."
+          echo "::error::Scope = the affected area/crate, or a short area such as 'deps' for tooling. E.g. 'feat(clearing): add settlement guard'."
+          echo "Got title: $PR_TITLE"
+          exit 1
 
   format:
     name: Format
