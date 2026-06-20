@@ -1,6 +1,9 @@
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
-use shared::types::{Price, SeriesId};
+use shared::{
+    constants::USD_DECIMALS,
+    types::{Price, SeriesId},
+};
 
 use crate::types::user::User;
 
@@ -58,4 +61,47 @@ pub struct SeriesTradePoint {
     pub qty: i128,
     /// Execution timestamp in nanoseconds since UNIX epoch.
     pub timestamp: u64,
+}
+
+impl SeriesTradePoint {
+    /// Traded notional of this single trade — `qty · price` — in USD base units
+    /// (the `USD_DECIMALS` scale).
+    ///
+    /// Scales by the decimal *delta* between the price's precision and
+    /// `USD_DECIMALS`, so when a series prices in `USD_DECIMALS` (the common
+    /// case) the result is exactly `qty · value` — no intermediate
+    /// `×10^USD_DECIMALS` that could clamp before a later divide cancels it.
+    /// Saturating, so a pathological trade clamps rather than overflows.
+    #[must_use]
+    pub fn notional_usd_base(&self) -> i128 {
+        let value = i128::try_from(self.price.value()).unwrap_or(i128::MAX);
+        let base = self.qty.saturating_mul(value);
+        let delta = i32::from(USD_DECIMALS) - i32::from(self.price.decimals());
+
+        if delta >= 0 {
+            base.saturating_mul(10_i128.saturating_pow(u32::try_from(delta).unwrap_or(0)))
+        } else {
+            base / 10_i128.saturating_pow(u32::try_from(-delta).unwrap_or(0))
+        }
+    }
+}
+
+/// Running per-series traded-volume totals, maintained alongside the trade
+/// index so a batch volume read stays `O(#series)` instead of scanning each
+/// series' tape. A pure projection of the executed rows in `EVENTS` (not
+/// persisted) — rebuilt on upgrade and folded incrementally on each trade.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SeriesVolumeAggregate {
+    /// Cumulative traded notional (Σ `qty · price`) in USD base units.
+    pub notional_usd: i128,
+    /// Number of executed trades folded in.
+    pub trade_count: u64,
+}
+
+impl SeriesVolumeAggregate {
+    /// Folds one trade's notional (USD base units) into the running totals.
+    pub fn record(&mut self, notional_usd: i128) {
+        self.notional_usd = self.notional_usd.saturating_add(notional_usd);
+        self.trade_count = self.trade_count.saturating_add(1);
+    }
 }

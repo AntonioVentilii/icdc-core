@@ -13,12 +13,12 @@ use super::{
     errors::TradeError,
     params::{
         CancelLimitOrderParams, FreezePositionForTransferParams, GetSeriesPriceHistoryParams,
-        ListOrdersParams, ListSeriesTradeHistoryParams, SubmitLimitOrderParams,
-        SubmitMarketOrderParams, SubmitMatchedTradeParams,
+        ListOrdersParams, ListSeriesTradeHistoryParams, ListSeriesTradedVolumesParams,
+        SubmitLimitOrderParams, SubmitMarketOrderParams, SubmitMatchedTradeParams,
     },
     results::{
         AcceptPositionTransferResult, SeriesPriceCandle, SeriesPriceHistory,
-        SeriesTradeHistoryPage, SubmitMatchedTradeResult,
+        SeriesTradeHistoryPage, SeriesTradedVolume, SubmitMatchedTradeResult,
     },
 };
 use crate::{
@@ -26,7 +26,7 @@ use crate::{
     memory::{
         ACCEPTED_TRANSFERS, ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, EVENTS,
         EXECUTED_TRADES, FROZEN_TRANSFERS, LIMIT_ORDERS, POSITIONS, REGISTRY_CANISTER,
-        SERIES_TRADE_HISTORY,
+        SERIES_TRADED_VOLUME, SERIES_TRADE_HISTORY,
     },
     payoffs::{get_required_margin, scale_price, RoundingMode},
     trade::{
@@ -881,6 +881,44 @@ fn aggregate_price_history(
     SeriesPriceHistory {
         candles: buckets.into_values().collect(),
     }
+}
+
+/// Returns each requested series' cumulative market-wide traded volume — the
+/// notional that changed hands (sum of `qty · price`) in USD base units — plus
+/// its executed-trade count, one entry per requested id in request order.
+///
+/// Lets a front end label a page of market cards in a single call instead of a
+/// per-card read. An unknown or untraded series totals zero. Reads the
+/// `SERIES_TRADED_VOLUME` aggregate that [`index_executed_trade`] maintains
+/// alongside the trade index, so the work is `O(#series_ids)` lookups — bounded
+/// regardless of how many trades a series has accumulated, rather than scanning
+/// each series' tape. Guarded by `caller_is_not_anonymous`, matching the other
+/// series-scoped reads.
+///
+/// [`index_executed_trade`]: crate::memory::index_executed_trade
+#[query(guard = "caller_is_not_anonymous")]
+#[must_use]
+pub fn list_series_traded_volumes(
+    params: ListSeriesTradedVolumesParams,
+) -> Vec<SeriesTradedVolume> {
+    let ListSeriesTradedVolumesParams { series_ids } = params;
+
+    SERIES_TRADED_VOLUME.with(|agg| {
+        let agg = agg.borrow();
+
+        series_ids
+            .into_iter()
+            .map(|series_id| {
+                let totals = agg.get(&series_id);
+
+                SeriesTradedVolume {
+                    volume: totals.map_or(0_i128, |t| t.notional_usd),
+                    trade_count: totals.map_or(0_u64, |t| t.trade_count),
+                    series_id,
+                }
+            })
+            .collect()
+    })
 }
 
 /// Returns a list of all active limit orders, potentially filtered by series.

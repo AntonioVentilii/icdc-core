@@ -11,7 +11,7 @@ use shared::types::{
 use crate::{
     migrations::{into_current, LegacyStableState},
     types::{
-        event::{Event, EventType, SeriesTradePoint},
+        event::{Event, EventType, SeriesTradePoint, SeriesVolumeAggregate},
         leaderboard::{LeaderboardWindow, PnlAggregate},
         margin::{AccountState, Position, PositionsMap},
         plans::{
@@ -59,6 +59,13 @@ thread_local! {
     /// serve a market's price history in O(log series + page) instead of
     /// scanning the whole event log per call.
     pub static SERIES_TRADE_HISTORY: RefCell<BTreeMap<SeriesId, Vec<SeriesTradePoint>>> = const { RefCell::new(BTreeMap::new()) };
+    /// Per-series cumulative traded-volume totals (notional + trade count),
+    /// maintained alongside [`SERIES_TRADE_HISTORY`] so `list_series_traded_volumes`
+    /// reads `O(#series_ids)` instead of summing each series' tape per call. Same
+    /// lifecycle as the trade index: a non-persisted projection of the executed
+    /// rows in `EVENTS`, rebuilt in `post_upgrade` via
+    /// [`rebuild_series_trade_history`] and folded incrementally on each trade.
+    pub static SERIES_TRADED_VOLUME: RefCell<BTreeMap<SeriesId, SeriesVolumeAggregate>> = const { RefCell::new(BTreeMap::new()) };
     /// Per-window leaderboard index: realized settlement `PnL` aggregated per
     /// principal, keyed by `(window, period_id)` (see [`LeaderboardWindow`]).
     /// Each settled position folds its signed `cashflow_usd` into the current
@@ -230,6 +237,18 @@ pub fn restore_state() {
 /// Trades execute in monotonically increasing `event_id` order, so appending
 /// keeps each series' vector sorted without a re-sort.
 pub(crate) fn index_executed_trade(series_id: &SeriesId, point: SeriesTradePoint) {
+    // Fold this trade's notional into the per-series aggregate before the point
+    // is moved into the history vector, so the volume totals stay in lockstep
+    // with the index they accompany.
+    let notional = point.notional_usd_base();
+
+    SERIES_TRADED_VOLUME.with(|agg| {
+        agg.borrow_mut()
+            .entry(series_id.clone())
+            .or_default()
+            .record(notional);
+    });
+
     SERIES_TRADE_HISTORY.with(|idx| {
         idx.borrow_mut()
             .entry(series_id.clone())
@@ -248,27 +267,37 @@ pub(crate) fn index_executed_trade(series_id: &SeriesId, point: SeriesTradePoint
 /// robust to any future change in `EVENTS` ordering.
 pub(crate) fn rebuild_series_trade_history() {
     SERIES_TRADE_HISTORY.with(|idx| {
-        let mut idx = idx.borrow_mut();
-        idx.clear();
+        SERIES_TRADED_VOLUME.with(|agg| {
+            let mut idx = idx.borrow_mut();
+            let mut agg = agg.borrow_mut();
+            idx.clear();
+            agg.clear();
 
-        EVENTS.with(|events| {
-            for e in events.borrow().iter() {
-                if matches!(e.event_type, EventType::Executed) && e.qty > 0 {
-                    idx.entry(e.series_id.clone())
-                        .or_default()
-                        .push(SeriesTradePoint {
+            EVENTS.with(|events| {
+                for e in events.borrow().iter() {
+                    if matches!(e.event_type, EventType::Executed) && e.qty > 0 {
+                        let point = SeriesTradePoint {
                             event_id: e.event_id,
                             price: e.price.clone(),
                             qty: e.qty,
                             timestamp: e.timestamp,
-                        });
+                        };
+
+                        // The notional sum is order-independent, so folding here
+                        // (before the per-series sort below) is fine.
+                        agg.entry(e.series_id.clone())
+                            .or_default()
+                            .record(point.notional_usd_base());
+
+                        idx.entry(e.series_id.clone()).or_default().push(point);
+                    }
                 }
+            });
+
+            for points in idx.values_mut() {
+                points.sort_by_key(|p| p.event_id);
             }
         });
-
-        for points in idx.values_mut() {
-            points.sort_by_key(|p| p.event_id);
-        }
     });
 }
 
