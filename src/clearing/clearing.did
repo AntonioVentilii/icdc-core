@@ -1428,12 +1428,14 @@ service : (Config) -> {
 	// its executed-trade count, one entry per requested id in request order.
 	//
 	// Lets a front end label a page of market cards in a single call instead of a
-	// per-card read. An unknown or untraded series totals zero. Served from the
-	// same `SERIES_TRADE_HISTORY` index as [`list_series_trade_history`] — no
-	// write-path cost and no persisted aggregate — by summing each series' tape on
-	// read, so the work scales with the trades on the requested series; callers
-	// should pass the bounded page they render. Guarded by
-	// `caller_is_not_anonymous`, matching the other series-scoped reads.
+	// per-card read. An unknown or untraded series totals zero. Reads the
+	// `SERIES_TRADED_VOLUME` aggregate that [`index_executed_trade`] maintains
+	// alongside the trade index, so the work is `O(#series_ids)` lookups — bounded
+	// regardless of how many trades a series has accumulated, rather than scanning
+	// each series' tape. Guarded by `caller_is_not_anonymous`, matching the other
+	// series-scoped reads.
+	//
+	// [`index_executed_trade`]: crate::memory::index_executed_trade
 	list_series_traded_volumes : (ListSeriesTradedVolumesParams) -> (
 		vec SeriesTradedVolume
 	) query;
