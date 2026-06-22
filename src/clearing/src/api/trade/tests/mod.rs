@@ -5,5 +5,6 @@ pub mod partial_fill;
 pub mod price_history;
 pub mod series_history;
 pub mod social;
+pub mod traded_volume;
 pub(crate) mod utils;
 pub mod validation;
