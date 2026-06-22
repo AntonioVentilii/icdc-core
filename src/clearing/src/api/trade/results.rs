@@ -1,6 +1,6 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
-use shared::types::Price;
+use shared::types::{Price, SeriesId};
 
 use crate::{api::trade::errors::TradeError, types::event::SeriesTradePoint};
 
@@ -88,4 +88,20 @@ pub struct SeriesPriceHistory {
     /// young or untraded market returns an empty vector rather than fabricated
     /// points.
     pub candles: Vec<SeriesPriceCandle>,
+}
+
+/// One series' cumulative market-wide traded volume.
+///
+/// `volume` is the traded *notional* — the sum over executed trades of
+/// `qty · price`, the value that changed hands — in USD base units (the
+/// `USD_DECIMALS` scale), not a contract count. `trade_count` is the number of
+/// executed trades. An untraded or unknown series totals zero on both.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct SeriesTradedVolume {
+    /// The series these totals are for (echoes the requested id).
+    pub series_id: SeriesId,
+    /// Cumulative traded notional (sum of `qty · price`) in USD base units.
+    pub volume: i128,
+    /// Number of executed trades on the series.
+    pub trade_count: u64,
 }

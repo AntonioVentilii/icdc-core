@@ -132,3 +132,17 @@ pub struct GetSeriesPriceHistoryParams {
     /// the series' latest trade.
     pub end_time: Option<u64>,
 }
+
+/// Input parameters for
+/// [`list_series_traded_volumes`](super::list_series_traded_volumes).
+///
+/// Totals each series' market-wide traded volume in one call so a front end can
+/// label a page of market cards without a per-card round-trip. Unknown or
+/// untraded ids simply total zero. Callers should request a bounded page of
+/// series (the set they render): the read sums each series' trade tape, so the
+/// work scales with the trades on the requested series.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct ListSeriesTradedVolumesParams {
+    /// The series to total. Results are returned one per id, in this order.
+    pub series_ids: Vec<SeriesId>,
+}

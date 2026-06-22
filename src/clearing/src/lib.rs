@@ -42,11 +42,12 @@ use crate::{
             params::{
                 CancelLimitOrderParams, FreezePositionForTransferParams,
                 GetSeriesPriceHistoryParams, ListOrdersParams, ListSeriesTradeHistoryParams,
-                SubmitLimitOrderParams, SubmitMarketOrderParams, SubmitMatchedTradeParams,
+                ListSeriesTradedVolumesParams, SubmitLimitOrderParams, SubmitMarketOrderParams,
+                SubmitMatchedTradeParams,
             },
             results::{
                 AcceptPositionTransferResult, SeriesPriceHistory, SeriesTradeHistoryPage,
-                SubmitMatchedTradeResult,
+                SeriesTradedVolume, SubmitMatchedTradeResult,
             },
         },
     },
