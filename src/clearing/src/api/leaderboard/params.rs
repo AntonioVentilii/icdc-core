@@ -1,5 +1,6 @@
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
+use shared::types::SeriesId;
 
 use crate::types::leaderboard::LeaderboardWindow;
 
@@ -63,5 +64,5 @@ pub struct AggregateSettlementAccuracyParams {
     /// battle scoped to one tag passes that tag's series). An empty `Some(vec)`
     /// therefore matches nothing. The clearing layer ascribes no meaning to the
     /// set; how it is chosen is entirely a consumer concern.
-    pub series_ids: Option<Vec<String>>,
+    pub series_ids: Option<Vec<SeriesId>>,
 }

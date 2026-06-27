@@ -107,7 +107,7 @@ fn aggregate_settlement_accuracy_impl(
     // Optional series allow-list. `Some(empty)` matches nothing, so skip the
     // scan; `None` counts every series (no filtering below).
     let series_filter: Option<BTreeSet<SeriesId>> =
-        series_ids.map(|ids| ids.into_iter().map(SeriesId::from).collect());
+        series_ids.map(|ids| ids.into_iter().collect());
 
     if series_filter.as_ref().is_some_and(BTreeSet::is_empty) {
         return Vec::new();
@@ -964,7 +964,7 @@ mod tests {
                 members: vec![principal(1)],
                 from_ts: None,
                 to_ts: None,
-                series_ids: Some(vec!["wc-1".to_owned(), "wc-2".to_owned()]),
+                series_ids: Some(vec!["wc-1".to_owned().into(), "wc-2".to_owned().into()]),
             },
         );
         assert_eq!(scoped.len(), 1);
