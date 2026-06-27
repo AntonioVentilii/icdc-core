@@ -57,4 +57,11 @@ pub struct AggregateSettlementAccuracyParams {
     /// to_ts)` so two adjacent windows that share an endpoint never both count
     /// the same settlement.
     pub to_ts: Option<u64>,
+    /// Optional series allow-list. `None` counts settlements on every series;
+    /// `Some(set)` counts only settlements whose `series_id` is in the set, so
+    /// a consumer can scope a cohort's accuracy to a market category (e.g. a
+    /// battle scoped to one tag passes that tag's series). An empty `Some(vec)`
+    /// therefore matches nothing. The clearing layer ascribes no meaning to the
+    /// set; how it is chosen is entirely a consumer concern.
+    pub series_ids: Option<Vec<String>>,
 }
