@@ -5,13 +5,14 @@ use candid::Principal;
 use ic_cdk_macros::query;
 
 use super::{
-    params::ListLeaderboardParams,
-    results::{LeaderboardEntry, LeaderboardPage},
+    params::{AggregateSettlementAccuracyParams, ListLeaderboardParams},
+    results::{LeaderboardEntry, LeaderboardPage, SettlementAccuracyEntry},
 };
 use crate::{
     guards::caller_is_not_anonymous,
-    memory::SETTLEMENT_LEADERBOARD,
+    memory::{EVENTS, SETTLEMENT_LEADERBOARD},
     types::{
+        event::{Event, EventType},
         leaderboard::{LeaderboardWindow, PnlAggregate},
         user::User,
     },
@@ -48,6 +49,84 @@ const MAX_LEADERBOARD_MEMBERS: usize = 10_000;
 #[must_use]
 pub fn list_leaderboard(params: ListLeaderboardParams) -> LeaderboardPage {
     SETTLEMENT_LEADERBOARD.with(|idx| list_leaderboard_impl(&idx.borrow(), params, now_ns()))
+}
+
+/// Aggregates each supplied principal's settled-position win/total counts (and
+/// net realized `PnL`) over an arbitrary half-open window `[from_ts, to_ts)`.
+///
+/// `win_count / settled_count` per entry is that principal's window accuracy —
+/// the same metric [`list_leaderboard`] exposes, but over a caller-chosen span
+/// rather than a fixed calendar bucket. A consumer scoring a cohort (e.g. one
+/// league side of a "battle") sums the entries it gets back for that side's
+/// members.
+///
+/// Unlike [`list_leaderboard`], the arbitrary window cannot use the
+/// `(window, period)` index, so this scans the raw `EVENTS` log once —
+/// `O(events)`, the same cost class as [`get_trade_history`] and the
+/// post-upgrade leaderboard rebuild. Only `Settled` events count; a `Settled`
+/// event's `qty` is the position's signed `cashflow_usd`, so a win is
+/// `qty > 0`, matching the leaderboard's rule exactly. Guarded by
+/// `caller_is_not_anonymous`, matching the other settlement-derived reads.
+///
+/// [`get_trade_history`]: crate::api::trade::get_trade_history
+#[query(guard = "caller_is_not_anonymous")]
+#[must_use]
+pub fn aggregate_settlement_accuracy(
+    params: AggregateSettlementAccuracyParams,
+) -> Vec<SettlementAccuracyEntry> {
+    EVENTS.with(|events| aggregate_settlement_accuracy_impl(&events.borrow(), params))
+}
+
+/// Storage-injectable core of [`aggregate_settlement_accuracy`]: folds the
+/// supplied `events` slice so tests can pass a fixed log. Returns entries
+/// ordered by principal for a deterministic response.
+fn aggregate_settlement_accuracy_impl(
+    events: &[Event],
+    params: AggregateSettlementAccuracyParams,
+) -> Vec<SettlementAccuracyEntry> {
+    let AggregateSettlementAccuracyParams {
+        members,
+        from_ts,
+        to_ts,
+    } = params;
+
+    let members: BTreeSet<User> = members
+        .into_iter()
+        .take(MAX_LEADERBOARD_MEMBERS)
+        .map(User)
+        .collect();
+
+    if members.is_empty() {
+        return Vec::new();
+    }
+
+    // An inverted or empty window `[from_ts, to_ts)` with `from_ts >= to_ts`
+    // matches no event, so skip the O(events) scan entirely.
+    if let (Some(from), Some(to)) = (from_ts, to_ts) {
+        if from >= to {
+            return Vec::new();
+        }
+    }
+
+    let mut acc: BTreeMap<User, PnlAggregate> = BTreeMap::new();
+    for e in events {
+        if matches!(e.event_type, EventType::Settled)
+            && members.contains(&e.user)
+            && from_ts.is_none_or(|from| e.timestamp >= from)
+            && to_ts.is_none_or(|to| e.timestamp < to)
+        {
+            acc.entry(e.user).or_default().record(e.qty);
+        }
+    }
+
+    acc.into_iter()
+        .map(|(user, agg)| SettlementAccuracyEntry {
+            principal: user.0,
+            settled_count: agg.settled_count,
+            win_count: agg.win_count,
+            realized_pnl: agg.realized_pnl,
+        })
+        .collect()
 }
 
 /// Clock-injectable core of [`list_leaderboard`]. `now_ns` selects the current
@@ -289,10 +368,7 @@ mod tests {
     use shared::types::Price;
 
     use super::*;
-    use crate::{
-        memory::index_settled_events,
-        types::event::{Event, EventType},
-    };
+    use crate::memory::index_settled_events;
 
     const DAY_NS: u64 = 86_400_000_000_000;
 
@@ -745,6 +821,101 @@ mod tests {
                 )
             });
             assert_eq!(optimized, reference);
+        }
+    }
+
+    #[test]
+    fn aggregate_settlement_accuracy_folds_members_over_half_open_window() {
+        let event = |p: u8, qty: i128, ts: u64, kind: EventType| Event {
+            event_id: 0,
+            clearing_id: Principal::anonymous(),
+            series_id: "s".to_owned().into(),
+            user: User(principal(p)),
+            qty,
+            price: Price::new(1, 0),
+            event_type: kind,
+            timestamp: ts,
+        };
+
+        let events = vec![
+            event(1, 100, 1_000, EventType::Settled),  // in window, win
+            event(1, -40, 2_000, EventType::Settled),  // in window, loss
+            event(2, 0, 1_500, EventType::Settled),    // in window, break-even (not a win)
+            event(1, 999, 5_000, EventType::Settled),  // == to_ts → excluded (half-open)
+            event(1, 999, 500, EventType::Settled),    // < from_ts → excluded
+            event(1, 999, 1_200, EventType::Executed), // not a settlement → excluded
+            event(3, 999, 1_200, EventType::Settled),  // not a listed member → excluded
+        ];
+
+        let out = aggregate_settlement_accuracy_impl(
+            &events,
+            AggregateSettlementAccuracyParams {
+                members: vec![principal(1), principal(2)],
+                from_ts: Some(1_000),
+                to_ts: Some(5_000),
+            },
+        );
+
+        let p1 = out.iter().find(|e| e.principal == principal(1)).unwrap();
+        assert_eq!(
+            (p1.settled_count, p1.win_count, p1.realized_pnl),
+            (2, 1, 60) // 100 + (-40), one net-positive
+        );
+        let p2 = out.iter().find(|e| e.principal == principal(2)).unwrap();
+        assert_eq!((p2.settled_count, p2.win_count, p2.realized_pnl), (1, 0, 0));
+        // A non-member settled in-window is never folded in.
+        assert!(out.iter().all(|e| e.principal != principal(3)));
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn aggregate_settlement_accuracy_unbounded_window_and_empty_members() {
+        let settled = |p: u8, qty: i128, ts: u64| Event {
+            event_id: 0,
+            clearing_id: Principal::anonymous(),
+            series_id: "s".to_owned().into(),
+            user: User(principal(p)),
+            qty,
+            price: Price::new(1, 0),
+            event_type: EventType::Settled,
+            timestamp: ts,
+        };
+        let events = vec![settled(1, 10, 1), settled(1, -5, 9_999_999)];
+
+        // No bounds → every settlement in the log counts.
+        let all = aggregate_settlement_accuracy_impl(
+            &events,
+            AggregateSettlementAccuracyParams {
+                members: vec![principal(1)],
+                from_ts: None,
+                to_ts: None,
+            },
+        );
+        assert_eq!(all.len(), 1);
+        assert_eq!((all[0].settled_count, all[0].win_count), (2, 1));
+
+        // Empty member set → empty result without scanning.
+        let none = aggregate_settlement_accuracy_impl(
+            &events,
+            AggregateSettlementAccuracyParams {
+                members: vec![],
+                from_ts: None,
+                to_ts: None,
+            },
+        );
+        assert!(none.is_empty());
+
+        // Inverted/empty window `from_ts >= to_ts` → empty result, no scan.
+        for (from, to) in [(5_000, 5_000), (5_000, 1_000)] {
+            let out = aggregate_settlement_accuracy_impl(
+                &events,
+                AggregateSettlementAccuracyParams {
+                    members: vec![principal(1)],
+                    from_ts: Some(from),
+                    to_ts: Some(to),
+                },
+            );
+            assert!(out.is_empty());
         }
     }
 }
