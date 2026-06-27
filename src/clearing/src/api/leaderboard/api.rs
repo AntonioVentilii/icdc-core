@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use candid::Principal;
 use ic_cdk_macros::query;
+use shared::types::SeriesId;
 
 use super::{
     params::{AggregateSettlementAccuracyParams, ListLeaderboardParams},
@@ -65,8 +66,10 @@ pub fn list_leaderboard(params: ListLeaderboardParams) -> LeaderboardPage {
 /// `O(events)`, the same cost class as [`get_trade_history`] and the
 /// post-upgrade leaderboard rebuild. Only `Settled` events count; a `Settled`
 /// event's `qty` is the position's signed `cashflow_usd`, so a win is
-/// `qty > 0`, matching the leaderboard's rule exactly. Guarded by
-/// `caller_is_not_anonymous`, matching the other settlement-derived reads.
+/// `qty > 0`, matching the leaderboard's rule exactly. Pass `series_ids` to
+/// scope the count to a set of series (e.g. one market category); `None`
+/// counts every series. Guarded by `caller_is_not_anonymous`, matching the
+/// other settlement-derived reads.
 ///
 /// [`get_trade_history`]: crate::api::trade::get_trade_history
 #[query(guard = "caller_is_not_anonymous")]
@@ -88,6 +91,7 @@ fn aggregate_settlement_accuracy_impl(
         members,
         from_ts,
         to_ts,
+        series_ids,
     } = params;
 
     let members: BTreeSet<User> = members
@@ -97,6 +101,14 @@ fn aggregate_settlement_accuracy_impl(
         .collect();
 
     if members.is_empty() {
+        return Vec::new();
+    }
+
+    // Optional series allow-list. `Some(empty)` matches nothing, so skip the
+    // scan; `None` counts every series (no filtering below).
+    let series_filter: Option<BTreeSet<SeriesId>> = series_ids.map(|ids| ids.into_iter().collect());
+
+    if series_filter.as_ref().is_some_and(BTreeSet::is_empty) {
         return Vec::new();
     }
 
@@ -112,6 +124,9 @@ fn aggregate_settlement_accuracy_impl(
     for e in events {
         if matches!(e.event_type, EventType::Settled)
             && members.contains(&e.user)
+            && series_filter
+                .as_ref()
+                .is_none_or(|allow| allow.contains(&e.series_id))
             && from_ts.is_none_or(|from| e.timestamp >= from)
             && to_ts.is_none_or(|to| e.timestamp < to)
         {
@@ -853,6 +868,7 @@ mod tests {
                 members: vec![principal(1), principal(2)],
                 from_ts: Some(1_000),
                 to_ts: Some(5_000),
+                series_ids: None,
             },
         );
 
@@ -889,6 +905,7 @@ mod tests {
                 members: vec![principal(1)],
                 from_ts: None,
                 to_ts: None,
+                series_ids: None,
             },
         );
         assert_eq!(all.len(), 1);
@@ -901,6 +918,7 @@ mod tests {
                 members: vec![],
                 from_ts: None,
                 to_ts: None,
+                series_ids: None,
             },
         );
         assert!(none.is_empty());
@@ -913,9 +931,66 @@ mod tests {
                     members: vec![principal(1)],
                     from_ts: Some(from),
                     to_ts: Some(to),
+                    series_ids: None,
                 },
             );
             assert!(out.is_empty());
         }
+    }
+
+    #[test]
+    fn aggregate_settlement_accuracy_filters_by_series() {
+        let settled = |p: u8, qty: i128, series: &str| Event {
+            event_id: 0,
+            clearing_id: Principal::anonymous(),
+            series_id: series.to_owned().into(),
+            user: User(principal(p)),
+            qty,
+            price: Price::new(1, 0),
+            event_type: EventType::Settled,
+            timestamp: 1_000,
+        };
+        let events = vec![
+            settled(1, 100, "wc-1"),  // in-scope, win
+            settled(1, -10, "wc-2"),  // in-scope, loss
+            settled(1, 999, "other"), // out-of-scope → excluded
+        ];
+
+        // Some(set) → only settlements on listed series count.
+        let scoped = aggregate_settlement_accuracy_impl(
+            &events,
+            AggregateSettlementAccuracyParams {
+                members: vec![principal(1)],
+                from_ts: None,
+                to_ts: None,
+                series_ids: Some(vec!["wc-1".to_owned().into(), "wc-2".to_owned().into()]),
+            },
+        );
+        assert_eq!(scoped.len(), 1);
+        assert_eq!((scoped[0].settled_count, scoped[0].win_count), (2, 1));
+
+        // None → every series counts (the "other" settlement is included).
+        let unscoped = aggregate_settlement_accuracy_impl(
+            &events,
+            AggregateSettlementAccuracyParams {
+                members: vec![principal(1)],
+                from_ts: None,
+                to_ts: None,
+                series_ids: None,
+            },
+        );
+        assert_eq!(unscoped[0].settled_count, 3);
+
+        // Some(empty) → matches nothing.
+        let empty = aggregate_settlement_accuracy_impl(
+            &events,
+            AggregateSettlementAccuracyParams {
+                members: vec![principal(1)],
+                from_ts: None,
+                to_ts: None,
+                series_ids: Some(vec![]),
+            },
+        );
+        assert!(empty.is_empty());
     }
 }
