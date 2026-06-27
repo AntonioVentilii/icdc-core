@@ -100,6 +100,14 @@ fn aggregate_settlement_accuracy_impl(
         return Vec::new();
     }
 
+    // An inverted or empty window `[from_ts, to_ts)` with `from_ts >= to_ts`
+    // matches no event, so skip the O(events) scan entirely.
+    if let (Some(from), Some(to)) = (from_ts, to_ts) {
+        if from >= to {
+            return Vec::new();
+        }
+    }
+
     let mut acc: BTreeMap<User, PnlAggregate> = BTreeMap::new();
     for e in events {
         if matches!(e.event_type, EventType::Settled)
@@ -896,5 +904,18 @@ mod tests {
             },
         );
         assert!(none.is_empty());
+
+        // Inverted/empty window `from_ts >= to_ts` → empty result, no scan.
+        for (from, to) in [(5_000, 5_000), (5_000, 1_000)] {
+            let out = aggregate_settlement_accuracy_impl(
+                &events,
+                AggregateSettlementAccuracyParams {
+                    members: vec![principal(1)],
+                    from_ts: Some(from),
+                    to_ts: Some(to),
+                },
+            );
+            assert!(out.is_empty());
+        }
     }
 }
