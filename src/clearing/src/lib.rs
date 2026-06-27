@@ -31,7 +31,10 @@ use crate::{
             params::{DepositCollateralParams, WithdrawCollateralParams},
             results::{DepositCollateralResult, WithdrawCollateralResult},
         },
-        leaderboard::{params::ListLeaderboardParams, results::LeaderboardPage},
+        leaderboard::{
+            params::{AggregateSettlementAccuracyParams, ListLeaderboardParams},
+            results::{LeaderboardPage, SettlementAccuracyEntry},
+        },
         migration::{params::MigrateDomainParams, results::MigrateDomainResult},
         settlement::{
             params::{BackfillSettlementEventsParams, ListSettledSeriesParams, SettleSeriesParams},
