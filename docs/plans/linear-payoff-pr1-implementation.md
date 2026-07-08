@@ -25,6 +25,7 @@ Title: `feat(clearing,registry,shared): add Linear payoff (bounded forwards/NDF)
 ## Steps (ordered; each compiles + tests green before the next)
 
 ### 1. `shared` — type surface
+
 - [`types/series.rs`](../../src/shared/src/types/series.rs): add
   `PayoffType::Linear`; add `PayoffType::Linear => b"LINEAR"` to `as_id_bytes()`.
 - Add `settlement_cap: Option<Price>` to `Series` and `AddSeriesParams` (`opt`).
@@ -35,6 +36,7 @@ Title: `feat(clearing,registry,shared): add Linear payoff (bounded forwards/NDF)
   settlement path).
 
 ### 2. No signature change — reuse the existing signed cashflow
+
 The settlement layer already turns a non-negative gross payout into a signed
 cashflow: `cashflow = payout − reserved_margin − fees`
 ([`api/settlement/api.rs` ~L430](../../src/clearing/src/api/settlement/api.rs)).
@@ -43,7 +45,9 @@ reserved margin so `payout − reserved = net_qty·(S_T − K)`. `get_settlement
 stays `-> u128`. No `i128` refactor.
 
 ### 3. `clearing/payoffs/mod.rs` — the three arms (band-bounded, zero-sum)
+
 Let `S* = clamp(S_T, 0, cap)`, all scaled to `USD_DECIMALS` via `scale_price`.
+
 - `get_unit_payoff`: `Linear` ⇒ per-unit **long** gross payout `S*` (requires
   `strike` for the id/margin; requires `settlement_cap` to clamp). Reused by
   `get_settlement_value` exactly like the Binary/Categorical `max − unit` pattern.
@@ -55,6 +59,7 @@ Let `S* = clamp(S_T, 0, cap)`, all scaled to `USD_DECIMALS` via `scale_price`.
   band (clamp guarantees it).
 
 ### 4. `clearing/api/trade/api.rs` — trade-path arms
+
 - Audit the `match series.payoff_type` at
   [`api/trade/api.rs:614`](../../src/clearing/src/api/trade/api.rs) and the
   `!= PayoffType::Categorical` guards (`:977`, `:1077`): `Linear` is scalar
@@ -62,12 +67,14 @@ Let `S* = clamp(S_T, 0, cap)`, all scaled to `USD_DECIMALS` via `scale_price`.
   an explicit `Linear` arm where the match is exhaustive.
 
 ### 5. `registry/api/series.rs` — validation
+
 - In `add_series_impl`, add Linear invariants: **require** `strike` (the agreed
   forward rate `K`); **require** `settlement_cap` and `cap > K`; **reject**
   `outcomes`. New `SeriesError` variants:
   `LinearRequiresStrike`, `LinearRequiresSettlementCap`, `LinearRejectsOutcomes`.
 
 ### 6. Migrations — re-verify, don't add
+
 - Confirm the `Legacy*` shadows in
   [`src/shared/src/migrations/`](../../src/shared/src/migrations/),
   `src/clearing/src/migrations/`, `src/registry/src/migrations/` still decode
@@ -75,6 +82,7 @@ Let `S* = clamp(S_T, 0, cap)`, all scaled to `USD_DECIMALS` via `scale_price`.
   round-trip decode test if not already covered.
 
 ### 7. Candid
+
 - `npm run did` → regenerate `clearing.did`, `registry.did`. Commit the diff.
 
 ## Tests (mirror existing suites)

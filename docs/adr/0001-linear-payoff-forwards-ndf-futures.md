@@ -18,9 +18,10 @@ liquidation.**
 We want to offer **FX-style linear instruments**: outright forwards,
 non-deliverable forwards (NDFs), and (dated) futures. These are the natural
 underlying/hedging leg of an FX book and, for NDFs, the dominant product on
-non-convertible pairs. The Deribit-style demo (`../icdc-deribit-demo`) already
-shows Futures/Forwards tabs, but they are **synthetic client-side facades** —
-the clearing engine does not know about them.
+non-convertible pairs. A separate Deribit-style demo front-end (a private
+sibling repo, not part of this repository) already shows Futures/Forwards tabs,
+but they are **synthetic client-side facades** — the clearing engine does not
+know about them.
 
 ### What "linear" means here
 
@@ -32,16 +33,17 @@ per-unit PnL, long  =  S_T − K
 per-unit PnL, short =  K − S_T
 ```
 
-where `K` is the agreed forward rate (the series **strike**) and `S_T` is the
-oracle fixing at expiry. A deliverable forward, an NDF, and a dated future
-differ **only** in margining cadence and delivery — none of which changes the
-payoff:
+where `K` is the agreed forward rate and `S_T` is the oracle fixing at expiry.
+Note `K` is the **trade price** at which the position is opened (captured in
+reserved margin, like an option premium) — a `Linear` series carries **no**
+series-level `strike`. A deliverable forward, an NDF, and a dated future differ
+**only** in margining cadence and delivery — none of which changes the payoff:
 
 - On a USD cash-settled CCP there is no delivery leg, so **forward ≡ NDF** here
   (both cash-settle `S_T − K` in USD at the fixing).
-- A **dated future** has the *same* `S_T − K` payoff; it differs from a forward
+- A **dated future** has the _same_ `S_T − K` payoff; it differs from a forward
   only by daily variation margin — a **margining** concern, not a payoff type.
-- A **perpetual future** has *no* `expiry_ns` and needs continuous funding +
+- A **perpetual future** has _no_ `expiry_ns` and needs continuous funding +
   MTM; it does **not** fit the expiry-triggered settlement pipeline and is
   explicitly **out of scope** (see "Rejected alternatives").
 
@@ -54,26 +56,26 @@ payoff a dated future will later reuse.
 Linear settlement must reuse the engine's existing numeric machinery, not
 introduce a parallel one. The mapping:
 
-| Concern | Existing model reused | Change for `Linear` |
-| --- | --- | --- |
-| Per-unit payoff at fixing | [`get_unit_payoff`](../../src/clearing/src/payoffs/mod.rs) | New arm: `S_T − K` **without** the `saturating_sub`-to-zero clamp that Call/Put use |
-| Position settlement value | [`get_settlement_value`](../../src/clearing/src/payoffs/mod.rs) | New arm: gross payout `≥ 0` within a `[0, cap]` band (see below) |
-| Signed PnL / cashflow | [`api/settlement/api.rs`](../../src/clearing/src/api/settlement/api.rs) `cashflow = payout − reserved_margin − fees` (line ~430) | **Reused verbatim** — already `i128`; produces the signed PnL for us |
-| Margin at trade time | [`get_required_margin`](../../src/clearing/src/payoffs/mod.rs) | New arm: max loss within a declared price band (see below) |
-| Decimal / precision scaling | [`scale_price`](../../src/clearing/src/payoffs/utils.rs) | Reused verbatim |
-| Money representation | `Price` / `DecimalValue` ([`price.rs`](../../src/shared/src/types/price.rs), [`decimal.rs`](../../src/shared/src/types/decimal.rs)) | Reused verbatim |
-| Equity / reserved margin | [`types/margin.rs`](../../src/clearing/src/types/margin.rs) (`calculate_equity_usd`, `calculate_raw_equity_i128`, reserved-margin) | Reused; already `i128`-aware |
-| Settlement lifecycle | `SettlementInput::Price(Price)` at `expiry_ns` | Reused verbatim — Linear settles to a single oracle `Price`, exactly like Call/Put |
+| Concern                     | Existing model reused                                                                                                               | Change for `Linear`                                                                 |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Per-unit payoff at fixing   | [`get_unit_payoff`](../../src/clearing/src/payoffs/mod.rs)                                                                          | New arm: `S_T − K` **without** the `saturating_sub`-to-zero clamp that Call/Put use |
+| Position settlement value   | [`get_settlement_value`](../../src/clearing/src/payoffs/mod.rs)                                                                     | New arm: gross payout `≥ 0` within a `[0, cap]` band (see below)                    |
+| Signed PnL / cashflow       | [`api/settlement/api.rs`](../../src/clearing/src/api/settlement/api.rs) `cashflow = payout − reserved_margin − fees` (line ~430)    | **Reused verbatim** — already `i128`; produces the signed PnL for us                |
+| Margin at trade time        | [`get_required_margin`](../../src/clearing/src/payoffs/mod.rs)                                                                      | New arm: max loss within a declared price band (see below)                          |
+| Decimal / precision scaling | [`scale_price`](../../src/clearing/src/payoffs/utils.rs)                                                                            | Reused verbatim                                                                     |
+| Money representation        | `Price` / `DecimalValue` ([`price.rs`](../../src/shared/src/types/price.rs), [`decimal.rs`](../../src/shared/src/types/decimal.rs)) | Reused verbatim                                                                     |
+| Equity / reserved margin    | [`types/margin.rs`](../../src/clearing/src/types/margin.rs) (`calculate_equity_usd`, `calculate_raw_equity_i128`, reserved-margin)  | Reused; already `i128`-aware                                                        |
+| Settlement lifecycle        | `SettlementInput::Price(Price)` at `expiry_ns`                                                                                      | Reused verbatim — Linear settles to a single oracle `Price`, exactly like Call/Put  |
 
 **No new pricing model is added.** Interest-rate-parity forward pricing
-(`F = S · e^{(r_q − r_b)·τ}`) governs the *fair quote / mark* of a forward, not
+(`F = S · e^{(r_q − r_b)·τ}`) governs the _fair quote / mark_ of a forward, not
 its settlement. Quotes are formed by the order book (`list_orders`); the mark is
 the oracle price. IRP therefore belongs in the front-end / market-making layer,
 **not** in the clearing core, and is out of scope for these PRs.
 
 ## How losses are represented (no signature change needed)
 
-`get_unit_payoff` / `get_settlement_value` return **`u128`** and *cannot*
+`get_unit_payoff` / `get_settlement_value` return **`u128`** and _cannot_
 represent a loss — but they don't need to. The settlement layer already derives
 a **signed** cashflow from a non-negative gross payout:
 
@@ -86,8 +88,8 @@ let cashflow: i128 = payoff_u128.cast_signed()
 
 A position's loss is realised as `payout < reserved_margin ⇒ cashflow < 0`.
 This is exactly the mechanism Binary/Categorical already use. **Linear reuses it
-unchanged** — we only need to define Linear's *gross payout* (`≥ 0`) and its
-*reserved margin* so that `payout − reserved` equals the intended signed PnL
+unchanged** — we only need to define Linear's _gross payout_ (`≥ 0`) and its
+_reserved margin_ so that `payout − reserved` equals the intended signed PnL
 `net_qty · (S_T − K)`. No `i128` refactor of the payoff API, no new settlement
 plumbing. This is why the change is contained.
 
@@ -130,7 +132,7 @@ short gross payout = |qty| · (cap − S*)  reserved = |qty|·(cap−K) ⇒ PnL 
 ```
 
 `long PnL + short PnL = 0` for all `S*` — **provably solvent with zero
-liquidation engine**, existing model untouched. The instrument is a *capped*
+liquidation engine**, existing model untouched. The instrument is a _capped_
 linear forward/NDF, which for FX (wide, realistic bands) is economically fine.
 Result: a real forward/NDF you can trade and settle end-to-end. The `cap` doubles
 as the margin bound and the settlement clamp; PR 2 removes it.
@@ -159,13 +161,15 @@ against unbounded upside ([`get_required_margin`](../../src/clearing/src/payoffs
 ## Consequences
 
 **Positive**
+
 - Completes the FX suite: `Call` + `Put` + `Linear`.
 - One payoff type, maximal reuse, no new math stack, no pricing model in-core.
 - PR 1 is solvency-safe by construction and independently shippable.
 - PR 2 generalises margining and repairs a pre-existing short-Call gap.
 
 **Negative / risks**
-- PR 1's instrument is *capped*; a mispriced/too-tight band would truncate
+
+- PR 1's instrument is _capped_; a mispriced/too-tight band would truncate
   extreme settlements. Mitigation: bands set generously per pair; documented in
   the series `resolution` clause.
 - Signed settlement touches the settlement hot path — covered by unit +
@@ -177,7 +181,7 @@ against unbounded upside ([`get_required_margin`](../../src/clearing/src/payoffs
 
 ## Rejected alternatives
 
-- **Separate `Future` payoff type** — a dated future's payoff *is* the forward's
+- **Separate `Future` payoff type** — a dated future's payoff _is_ the forward's
   (`S_T − K`); the difference is margining. Modelling it as a distinct payoff
   duplicates logic (violates [patterns.md](../../.agents/patterns.md) / the
   "No Redundancy" policy rule).
