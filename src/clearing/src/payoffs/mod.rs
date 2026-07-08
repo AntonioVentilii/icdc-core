@@ -346,7 +346,11 @@ pub fn get_required_margin(
             // forward rate F (captured like an option premium):
             //   long  reserves |qty| · F         (loss floor at S_T = 0)
             //   short reserves |qty| · (cap − F)  (loss cap at S_T = cap)
-            // Ceil so the reservation never rounds below the true max loss.
+            // Rounding must mirror settlement to stay exactly zero-sum: the
+            // entry `F` is ceiled (both legs reference the same ceiled `F`, so
+            // it cancels) and the `cap` is floored to match the settlement clamp
+            // in `get_unit_payoff` (a ceiled cap here would leave rounding dust
+            // between `payout` and `reserved_margin`).
             let source_precision = u32::from(price.decimals());
             let entry_scaled = scale_price(
                 price.value(),
@@ -366,7 +370,7 @@ pub fn get_required_margin(
                         cap.value(),
                         asset_decimals,
                         u32::from(cap.decimals()),
-                        RoundingMode::Ceil,
+                        RoundingMode::Floor,
                     );
                     Ok(abs_qty * cap_scaled.saturating_sub(entry_scaled))
                 }
@@ -756,6 +760,39 @@ mod tests {
                 .unwrap()
                 .cast_signed();
         assert_eq!(pnl_long + pnl_short, 0);
+    }
+
+    #[test]
+    fn linear_zero_sum_with_cap_not_aligned_to_usd_decimals() {
+        // Cap $20.000050 does not divide evenly into USD_DECIMALS (4dp): it
+        // floors to 200_000 but ceils to 200_001. Margin and settlement must
+        // both use the *floored* cap, else the short over-reserves by 1 base
+        // unit and long+short PnL no longer nets to zero.
+        let series = linear_series(20_0000_5000); // $20.00005000 (8dp)
+        let entry = Price::new(5_0000_0000, 8); // $5.00
+        let settle = SettlementInput::Price(Price::new(8_0000_0000, 8)); // $8.00
+
+        let long = linear_pos(&series, 1);
+        let short = linear_pos(&series, -1);
+
+        let pnl_long = get_settlement_value(&series, &long, &settle)
+            .unwrap()
+            .cast_signed()
+            - get_required_margin(&series, &entry, 1, &None)
+                .unwrap()
+                .cast_signed();
+        let pnl_short = get_settlement_value(&series, &short, &settle)
+            .unwrap()
+            .cast_signed()
+            - get_required_margin(&series, &entry, -1, &None)
+                .unwrap()
+                .cast_signed();
+
+        assert_eq!(
+            pnl_long + pnl_short,
+            0,
+            "unaligned cap must still net to zero (long {pnl_long}, short {pnl_short})"
+        );
     }
 
     #[test]

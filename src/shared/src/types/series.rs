@@ -246,7 +246,8 @@ impl Series {
         hasher.update(params.oracle_source.as_bytes());
 
         // Appended only when present so existing (cap-less) series ids are
-        // unchanged; distinguishes `Linear` series that differ only by band.
+        // unchanged; distinguishes `Linear` series that differ only by their
+        // settlement cap.
         if let Some(cap) = params.settlement_cap {
             hasher.update(b"|SETTLEMENT_CAP|");
             hasher.update(cap.value().to_be_bytes());
