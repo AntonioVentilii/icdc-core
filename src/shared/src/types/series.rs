@@ -71,6 +71,12 @@ pub enum PayoffType {
     Put,
     /// A categorical market with multiple mutually exclusive outcomes.
     Categorical,
+    /// A linear (delta-one) payoff `net_qty · (S_T − F)`: outright forwards,
+    /// non-deliverable forwards (NDFs), and dated futures. The agreed forward
+    /// rate `F` is the trade price (captured in reserved margin, like an option
+    /// premium); settlement is bounded to `[0, settlement_cap]` to keep the
+    /// system solvent without a running liquidation engine. See ADR 0001.
+    Linear,
 }
 impl PayoffType {
     /// Returns the unique identifier bytes used for ID generation.
@@ -81,6 +87,7 @@ impl PayoffType {
             PayoffType::Call => b"CALL",
             PayoffType::Put => b"PUT",
             PayoffType::Categorical => b"CATEGORICAL",
+            PayoffType::Linear => b"LINEAR",
         }
     }
 }
@@ -107,6 +114,11 @@ pub struct Series {
     pub payoff_type: PayoffType,
     /// Target price for options, if applicable.
     pub strike: Option<Price>,
+    /// Upper settlement bound for `Linear` series (forwards/NDF/futures): the
+    /// fixing is clamped to `[0, settlement_cap]` at settlement and short margin
+    /// is reserved as `cap − entry`. Compulsory for `Linear`, `None` otherwise.
+    /// Additive `opt` field — no state migration required (see ADR 0001).
+    pub settlement_cap: Option<Price>,
     /// The canonical number of decimals used for prices and strikes in this series.
     pub price_precision: u8,
     /// The unit in which the contract payoff is expressed.
@@ -233,6 +245,14 @@ impl Series {
         hasher.update(b"|ORACLE|");
         hasher.update(params.oracle_source.as_bytes());
 
+        // Appended only when present so existing (cap-less) series ids are
+        // unchanged; distinguishes `Linear` series that differ only by band.
+        if let Some(cap) = params.settlement_cap {
+            hasher.update(b"|SETTLEMENT_CAP|");
+            hasher.update(cap.value().to_be_bytes());
+            hasher.update([cap.decimals()]);
+        }
+
         if let Some(source) = params.forked_from {
             hasher.update(b"|FORKED_FROM|");
             hasher.update(source.as_str().as_bytes());
@@ -303,6 +323,8 @@ pub struct SeriesIdParams<'a> {
     pub expiry_ns: u64,
     pub payoff_type: &'a PayoffType,
     pub strike: Option<&'a Price>,
+    /// Upper settlement bound for `Linear` series; hashed only when present.
+    pub settlement_cap: Option<&'a Price>,
     pub price_precision: u8,
     pub payout_unit: &'a PayoutUnit,
     pub outcomes: Option<&'a [Outcome]>,
@@ -361,6 +383,17 @@ pub enum SeriesError {
     InvalidLocale,
     /// Returned when the targeted series does not exist.
     SeriesNotFound,
+    /// A `Linear` series requires a `settlement_cap`.
+    LinearRequiresSettlementCap,
+    /// A `Linear` series must not define categorical `outcomes`.
+    LinearRejectsOutcomes,
+    /// A `Linear` series must not define a `strike`: the forward rate is the
+    /// trade price, not a series-fixed strike.
+    LinearRejectsStrike,
+    /// `settlement_cap` was provided on a non-`Linear` series.
+    SettlementCapOnlyForLinear,
+    /// The provided `settlement_cap` is not strictly positive.
+    InvalidSettlementCap,
 }
 
 /// Input parameters for registering a new derivative series.
@@ -376,6 +409,9 @@ pub struct AddSeriesParams {
     pub payoff_type: PayoffType,
     /// The option strike price, if applicable.
     pub strike: Option<Price>,
+    /// Upper settlement bound for `Linear` series (forwards/NDF/futures).
+    /// Compulsory for `Linear`, `None` otherwise. See `Series::settlement_cap`.
+    pub settlement_cap: Option<Price>,
     /// The number of decimals used for prices and strikes in this series.
     pub price_precision: u8,
     /// The unit in which the contract payoff is expressed.
@@ -757,6 +793,7 @@ mod tests {
             expiry_ns: 1_000,
             payoff_type: PayoffType::Binary,
             strike: None,
+            settlement_cap: None,
             price_precision: 8,
             payout_unit: PayoutUnit::usd(),
             outcomes: None,
@@ -958,6 +995,7 @@ mod tests {
             expiry_ns: expiry,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -973,6 +1011,7 @@ mod tests {
             expiry_ns: expiry,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1000,6 +1039,7 @@ mod tests {
             expiry_ns: 100,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1015,6 +1055,7 @@ mod tests {
             expiry_ns: 200,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1042,6 +1083,7 @@ mod tests {
             expiry_ns: expiry,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: 8,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1057,6 +1099,7 @@ mod tests {
             expiry_ns: expiry,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: 10,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1086,6 +1129,7 @@ mod tests {
             expiry_ns: expiry,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1101,6 +1145,7 @@ mod tests {
             expiry_ns: expiry,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1130,6 +1175,7 @@ mod tests {
             expiry_ns: expiry,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1145,6 +1191,7 @@ mod tests {
             expiry_ns: expiry,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1160,6 +1207,7 @@ mod tests {
             expiry_ns: expiry,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1193,6 +1241,7 @@ mod tests {
             expiry_ns: expiry,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1208,6 +1257,7 @@ mod tests {
             expiry_ns: expiry,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1223,6 +1273,7 @@ mod tests {
             expiry_ns: expiry,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1247,6 +1298,7 @@ mod tests {
             expiry_ns: 1_735_689_600,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(100, 8)),
+            settlement_cap: None,
             price_precision: 8,
             payout_unit: PayoutUnit::usd(),
             outcomes: None,
@@ -1286,6 +1338,7 @@ mod tests {
                 expiry_ns: series.expiry_ns,
                 payoff_type: &series.payoff_type,
                 strike: series.strike.as_ref(),
+                settlement_cap: None,
                 price_precision: series.price_precision,
                 payout_unit: &series.payout_unit,
                 outcomes: series.outcomes.as_deref(),
@@ -1303,6 +1356,7 @@ mod tests {
             expiry_ns: 1_735_689_600,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(100, 8)),
+            settlement_cap: None,
             price_precision: 8,
             payout_unit: PayoutUnit::usd(),
             outcomes: None,

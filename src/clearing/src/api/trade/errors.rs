@@ -50,4 +50,13 @@ pub enum TradeError {
     /// economically closed: positions are gone, winners' cash is booked,
     /// and opening a new position could only create unbacked exposure.
     SeriesAlreadySettled(SeriesId),
+    /// A `Linear` (forward/NDF/future) order price exceeds the series
+    /// settlement cap. The agreed forward rate must stay within `[0, cap]` so
+    /// the short leg is fully collateralized under the bounded-linear model.
+    PriceExceedsSettlementCap {
+        /// The submitted order price, scaled to USD base units.
+        price_usd: u128,
+        /// The series settlement cap, scaled to USD base units.
+        cap_usd: u128,
+    },
 }

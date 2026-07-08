@@ -293,6 +293,7 @@ mod tests {
             expiry_ns: 2_000_000_000,
             payoff_type: PayoffType::Binary,
             strike: Some(Price::new(50_000, 6)),
+            settlement_cap: None,
             price_precision: 6,
             payout_unit: PayoutUnit::usd(),
             oracle_source: "oracle".to_owned(),
