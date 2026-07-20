@@ -213,6 +213,7 @@ impl TradeHelperTrait for TestSetup {
             underlying: underlying.to_owned(),
             balance_domain,
             expiry_ns: 2_000_000_000_000_000_000,
+            start_ns: None,
             payoff_type: PayoffType::Binary,
             strike: Some(Price::new(strike_value, 6)),
             price_precision: 6,
