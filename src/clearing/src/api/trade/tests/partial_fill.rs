@@ -27,6 +27,7 @@ fn binary_series(series_id: &SeriesId) -> Series {
         series_id: series_id.clone(),
         underlying: "BITCOIN_UP_50K".to_owned(),
         expiry_ns: 2_000_000_000,
+        start_ns: None,
         payoff_type: PayoffType::Binary,
         strike: Some(Price::new(50_000, 0)),
         settlement_cap: None,

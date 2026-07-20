@@ -813,6 +813,23 @@ type Series = record {
 	expiry_ns : nat64;
 	// An optional banner URL for the market.
 	banner_url : opt text;
+	// Optional timestamp in nanoseconds since UNIX epoch at which trading opens.
+	//
+	// `None` means the series is tradeable from the moment it is registered —
+	// the historical behavior, and the canonical way to express "live now".
+	// `Some(t)` schedules the series: it is listed and discoverable immediately
+	// but trading is rejected until `t`. The window is inclusive at the open
+	// (`now >= start_ns` is live) and exclusive at the close (`now < expiry_ns`
+	// is unexpired), so a series is tradeable over `[start_ns, expiry_ns)`.
+	//
+	// Participates in `series_id` hashing (see [`Series::generate_id`]): two
+	// series that differ only in their trading window are distinct contracts,
+	// so a scheduled series can never silently collide with an already-live one
+	// and inherit a start date its creator did not ask for. To keep that
+	// guarantee meaningful `None` is the only encoding of "already live" —
+	// `add_series` rejects a `start_ns` at or before the current time, so the
+	// same market cannot exist under two ids.
+	start_ns : opt nat64;
 	// Unique identifier computed from series parameters.
 	series_id : text;
 	// Upper settlement bound for `Linear` series (forwards/NDF/futures): the

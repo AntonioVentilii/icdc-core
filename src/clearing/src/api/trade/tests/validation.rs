@@ -24,6 +24,7 @@ fn categorical_arbitrage_validation() {
         series_id: series_id.clone(),
         underlying: "ARB_TEST".to_owned(),
         expiry_ns: 2_000_000_000,
+        start_ns: None,
         payoff_type: PayoffType::Categorical,
         strike: None,
         settlement_cap: None,
@@ -127,6 +128,7 @@ fn binary_arbitrage_validation() {
         series_id: series_id.clone(),
         underlying: "BTC".to_owned(),
         expiry_ns: 2_000_000_000,
+        start_ns: None,
         payoff_type: PayoffType::Binary,
         strike: Some(Price::new(50_000, 0)),
         settlement_cap: None,
@@ -168,6 +170,7 @@ fn linear_order_price_cap_validation() {
         series_id: series_id.clone(),
         underlying: "USDBRL".to_owned(),
         expiry_ns: 2_000_000_000,
+        start_ns: None,
         payoff_type: PayoffType::Linear,
         strike: None,
         settlement_cap: Some(Price::new(20_000_000, 6)), // $20.00 cap

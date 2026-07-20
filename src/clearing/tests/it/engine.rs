@@ -25,6 +25,7 @@ fn add_series_as(
         underlying: "ETH".to_owned(),
         balance_domain: BalanceDomain::Settlement,
         expiry_ns: 3_000_000_000_000_000_000,
+        start_ns: None,
         payoff_type: PayoffType::Binary,
         strike: None,
         settlement_cap: None,

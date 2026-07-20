@@ -25,6 +25,11 @@ type AddSeriesParams = record {
 	expiry_ns : nat64;
 	// An optional banner URL for the market.
 	banner_url : opt text;
+	// Optional timestamp at which trading opens. See [`Series::start_ns`].
+	//
+	// Omit (`None`) for a series that is tradeable immediately. When set, it
+	// must be strictly in the future and strictly before `expiry_ns`.
+	start_ns : opt nat64;
 	// Upper settlement bound for `Linear` series (forwards/NDF/futures).
 	// Compulsory for `Linear`, `None` otherwise. See `Series::settlement_cap`.
 	settlement_cap : opt Price;
@@ -329,6 +334,19 @@ type ListSeriesParams = record {
 	payoff_type : opt PayoffType;
 	// Filter by the payout unit.
 	payout_unit : opt PayoutUnit;
+	// When `Some(true)`, return only series that are inside their trading
+	// window right now — at or past `start_ns` (when set) *and* strictly before
+	// `expiry_ns`. `Some(false)` and `None` apply no filtering.
+	//
+	// This is strictly narrower than [`Self::only_unexpired`], which admits
+	// scheduled series whose start has not arrived yet. `only_unexpired` is
+	// deliberately left alone rather than redefined: callers that already rely
+	// on it keep their exact current results, and a frontend that wants to show
+	// an "upcoming" tab needs both answers, not one merged into the other.
+	//
+	// Like the expiry cutoff, the clock is the canister's own server-side
+	// `time()`.
+	tradeable_now : opt bool;
 	// Optional pagination parameters.
 	pagination : opt PaginationParams;
 	// Filter by the underlying asset ticker (case-insensitive).
@@ -513,6 +531,23 @@ type Series = record {
 	expiry_ns : nat64;
 	// An optional banner URL for the market.
 	banner_url : opt text;
+	// Optional timestamp in nanoseconds since UNIX epoch at which trading opens.
+	//
+	// `None` means the series is tradeable from the moment it is registered —
+	// the historical behavior, and the canonical way to express "live now".
+	// `Some(t)` schedules the series: it is listed and discoverable immediately
+	// but trading is rejected until `t`. The window is inclusive at the open
+	// (`now >= start_ns` is live) and exclusive at the close (`now < expiry_ns`
+	// is unexpired), so a series is tradeable over `[start_ns, expiry_ns)`.
+	//
+	// Participates in `series_id` hashing (see [`Series::generate_id`]): two
+	// series that differ only in their trading window are distinct contracts,
+	// so a scheduled series can never silently collide with an already-live one
+	// and inherit a start date its creator did not ask for. To keep that
+	// guarantee meaningful `None` is the only encoding of "already live" —
+	// `add_series` rejects a `start_ns` at or before the current time, so the
+	// same market cannot exist under two ids.
+	start_ns : opt nat64;
 	// Unique identifier computed from series parameters.
 	series_id : text;
 	// Upper settlement bound for `Linear` series (forwards/NDF/futures): the
@@ -581,6 +616,9 @@ type SeriesError = variant {
 	SocialMaxPerUserReached;
 	// Returned when the provided description exceeds the maximum allowed length.
 	DescriptionTooLong;
+	// The provided `start_ns` is at or after `expiry_ns`, leaving no window in
+	// which the series could ever be traded.
+	StartNotBeforeExpiry;
 	// A `Linear` series requires a `settlement_cap`.
 	LinearRequiresSettlementCap;
 	// Returned when the provided title exceeds the maximum allowed length.
@@ -615,6 +653,12 @@ type SeriesError = variant {
 	SeriesAlreadyExists;
 	// The source series specified in a fork does not exist.
 	SourceSeriesNotFound;
+	// The provided `start_ns` is at or before the registry's current time.
+	//
+	// A series that is already live must be registered with `start_ns: None`,
+	// which is the single canonical encoding of "tradeable immediately".
+	// Allowing a past start would let the same market exist under two ids.
+	StartNotInFuture;
 	// Social reward title exceeds limit.
 	RewardTitleTooLong;
 	// Returned when the targeted series does not exist.
@@ -633,6 +677,20 @@ type SeriesPage = record {
 	next_cursor : opt text;
 	// The list of series in this page.
 	items : vec Series
+};
+// Where a series sits in its trading window at a given instant.
+//
+// Derived from `start_ns`/`expiry_ns` rather than stored, so it can never drift
+// out of sync with the timestamps it describes. Settlement state is deliberately
+// absent: it is owned by the clearing canister, and folding it in here would
+// make the registry's answer depend on state it does not hold.
+type SeriesStatus = variant {
+	// Inside the trading window: at or past `start_ns`, strictly before `expiry_ns`.
+	Live;
+	// At or past `expiry_ns`.
+	Expired;
+	// `start_ns` is set and still in the future — listed, but not yet tradeable.
+	Upcoming
 };
 // Configurable rate limits for social (non-monetary) market creation.
 type SocialLimits = record {
@@ -903,6 +961,17 @@ service : {
 	get_oracle : (text) -> (opt Oracle) query;
 	// Retrieves a specific [`Series`] by its [`SeriesId`].
 	get_series : (text) -> (opt Series) query;
+	// Returns where a series currently sits in its trading window, or `None` if the
+	// series is not registered.
+	//
+	// Clients could derive this from `start_ns`/`expiry_ns` themselves, but only
+	// against their own clock. This evaluates the window with the canister's
+	// `time()`, which is the same clock the trading gate uses — so a countdown built
+	// on it cannot disagree with whether an order will actually be accepted.
+	//
+	// Settlement state is not folded in: it lives in the clearing canister. A series
+	// reported [`SeriesStatus::Expired`] here may or may not be settled yet.
+	get_series_status : (text) -> (opt SeriesStatus) query;
 	// Returns the current rate limits for social market creation.
 	get_social_limits : () -> (SocialLimits) query;
 	// Grants a role to a principal within an Engine.

@@ -83,6 +83,10 @@ pub fn upgrade_series(old: LegacySeries) -> Series {
         series_id: old.series_id,
         underlying: old.underlying,
         expiry_ns: old.expiry_ns,
+        // Legacy blobs predate scheduled series: everything written before
+        // `start_ns` existed was tradeable from registration, which is exactly
+        // what `None` encodes.
+        start_ns: None,
         payoff_type: old.payoff_type,
         strike: old.strike,
         settlement_cap: None,

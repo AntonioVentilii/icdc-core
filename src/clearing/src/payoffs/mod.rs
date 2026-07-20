@@ -404,6 +404,7 @@ mod tests {
             series_id: SeriesId::from("test".to_owned()),
             underlying: "ICP".to_owned(),
             expiry_ns: 0,
+            start_ns: None,
             payoff_type,
             strike,
             settlement_cap: None,
