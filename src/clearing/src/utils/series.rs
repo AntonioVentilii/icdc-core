@@ -6,6 +6,7 @@ use crate::{
     api::trade::errors::TradeError,
     memory::{REGISTRY_CANISTER, SERIES, SETTLEMENT_PLANS},
     types::errors::CommonError,
+    utils::system::now_ns,
 };
 
 /// Ensures that a derivative series is registered and cached locally.
@@ -21,49 +22,88 @@ use crate::{
 /// # Arguments
 /// * `series_id` - The identifier of the series to validate and cache.
 ///
+/// A scheduled series whose `start_ns` has not been reached is likewise treated
+/// as closed for trading, returning [`TradeError::SeriesNotStarted`]. Together
+/// with the settlement rail above this bounds economic exposure on both ends of
+/// the trading window.
+///
 /// # Returns
-/// * [`Series`] if successfully registered or already present and not settled.
+/// * [`Series`] if successfully registered, not settled, and open for trading.
 /// * [`TradeError::SeriesAlreadySettled`] if a settlement plan exists.
+/// * [`TradeError::SeriesNotStarted`] if the trading window has not opened yet.
 /// * [`TradeError`] if the registry is not set, the series is not found, or the payout unit is
 ///   unsupported.
 pub async fn ensure_series_registered(series_id: &SeriesId) -> Result<Series, TradeError> {
     assert_series_not_settled(series_id)?;
 
-    if let Some(series) = SERIES.with(|s| s.borrow().get(series_id).cloned()) {
-        return Ok(series);
-    }
+    let series = if let Some(series) = SERIES.with(|s| s.borrow().get(series_id).cloned()) {
+        series
+    } else {
+        let registry = REGISTRY_CANISTER.with(|r| *r.borrow());
 
-    let registry = REGISTRY_CANISTER.with(|r| *r.borrow());
+        if registry == Principal::anonymous() {
+            return Err(TradeError::Common(CommonError::RegistryNotSet));
+        }
 
-    if registry == Principal::anonymous() {
-        return Err(TradeError::Common(CommonError::RegistryNotSet));
-    }
+        let response = Call::bounded_wait(registry, "get_series")
+            .with_args(&(series_id.clone(),))
+            .await
+            .map_err(|e| TradeError::RegistryError(format!("Registry call failed: {e}")))?;
 
-    let response = Call::bounded_wait(registry, "get_series")
-        .with_args(&(series_id.clone(),))
-        .await
-        .map_err(|e| TradeError::RegistryError(format!("Registry call failed: {e}")))?;
+        let (series_opt,) = response.candid_tuple::<(Option<Series>,)>().map_err(|e| {
+            TradeError::RegistryError(format!("Registry response decode failed: {e}"))
+        })?;
 
-    let (series_opt,) = response
-        .candid_tuple::<(Option<Series>,)>()
-        .map_err(|e| TradeError::RegistryError(format!("Registry response decode failed: {e}")))?;
+        let series = series_opt.ok_or_else(|| TradeError::SeriesNotFound(series_id.clone()))?;
 
-    let series = series_opt.ok_or_else(|| TradeError::SeriesNotFound(series_id.clone()))?;
+        // Only USD-payout contracts are supported by this clearing canister version.
+        if series.payout_unit != PayoutUnit::usd() {
+            return Err(TradeError::Common(CommonError::Internal(format!(
+                "Unsupported payout unit in series: {:?}. Only USD is supported.",
+                series.payout_unit
+            ))));
+        }
 
-    // Only USD-payout contracts are supported by this clearing canister version.
-    if series.payout_unit != PayoutUnit::usd() {
-        return Err(TradeError::Common(CommonError::Internal(format!(
-            "Unsupported payout unit in series: {:?}. Only USD is supported.",
-            series.payout_unit
-        ))));
-    }
+        // Cached even when the window has not opened yet: the series is a valid,
+        // registered contract either way, and caching it here means a scheduled
+        // market does not re-hit the registry on every early attempt.
+        SERIES.with(|s| {
+            s.borrow_mut()
+                .insert(series.series_id.clone(), series.clone());
+        });
 
-    SERIES.with(|s| {
-        s.borrow_mut()
-            .insert(series.series_id.clone(), series.clone());
-    });
+        series
+    };
+
+    // Checked on the single exit rather than in each branch, so a future path
+    // through this function cannot acquire a series without passing the gate.
+    assert_series_started(&series, now_ns())?;
 
     Ok(series)
+}
+
+/// Rejects trading paths on a scheduled series whose trading window has not
+/// opened yet.
+///
+/// The comparison is inclusive at the open — a series is tradeable at exactly
+/// `start_ns` — matching [`Series::status`] in the registry, so a client
+/// counting down to the announced instant is never told "not yet" at zero.
+///
+/// Reading the cached copy is safe despite clearing never refreshing its
+/// `SERIES` cache: `start_ns` is hashed into the `series_id`, so it is immutable
+/// for the life of a series. A cached series carries the same window it was
+/// registered with, forever.
+pub fn assert_series_started(series: &Series, now: u64) -> Result<(), TradeError> {
+    if let Some(start_ns) = series.start_ns {
+        if now < start_ns {
+            return Err(TradeError::SeriesNotStarted {
+                series_id: series.series_id.clone(),
+                start_ns,
+            });
+        }
+    }
+
+    Ok(())
 }
 
 /// Rejects trading paths on a series with an active or finalised settlement
@@ -83,7 +123,9 @@ pub fn assert_series_not_settled(series_id: &SeriesId) -> Result<(), TradeError>
 
 #[cfg(test)]
 mod tests {
-    use shared::types::{BalanceDomain, Price, SettlementInput};
+    use shared::types::{
+        BalanceDomain, Description, PayoffType, Price, Resolution, SettlementInput, TradingAccess,
+    };
 
     use super::*;
     use crate::types::plans::{SettlementPlan, SettlementPlanParams};
@@ -119,5 +161,64 @@ mod tests {
 
         // Cleanup
         SETTLEMENT_PLANS.with(|m| m.borrow_mut().remove(&series_id));
+    }
+
+    fn series_with_start(start_ns: Option<u64>) -> Series {
+        Series {
+            series_id: SeriesId::from("scheduled_series".to_owned()),
+            underlying: "ICP".to_owned(),
+            expiry_ns: 2_000_000_000,
+            start_ns,
+            payoff_type: PayoffType::Binary,
+            strike: None,
+            price_precision: 8,
+            payout_unit: PayoutUnit::usd(),
+            outcomes: None,
+            oracle_source: "oracle".to_owned(),
+            creator: Principal::anonymous(),
+            created_at_ns: 0,
+            title: "Scheduled".to_owned(),
+            description: Description::plain("Scheduled market"),
+            resolution: Resolution::new("Resolved per oracle at expiry"),
+            icon_url: None,
+            banner_url: None,
+            balance_domain: BalanceDomain::Settlement,
+            trading_access: vec![TradingAccess::Open],
+            engine_id: None,
+            forked_from: None,
+            locale: None,
+        }
+    }
+
+    #[test]
+    fn unscheduled_series_is_always_open() {
+        let series = series_with_start(None);
+
+        assert!(assert_series_started(&series, 0).is_ok());
+        assert!(assert_series_started(&series, 1_000).is_ok());
+    }
+
+    /// Inclusive at the open: a series is tradeable at exactly `start_ns`, so a
+    /// client counting down to the announced instant is not told "not yet" at
+    /// zero.
+    #[test]
+    fn scheduled_series_opens_inclusively_at_start() {
+        let series = series_with_start(Some(1_000));
+
+        let early = assert_series_started(&series, 999);
+        assert!(
+            matches!(
+                &early,
+                Err(TradeError::SeriesNotStarted { series_id, start_ns })
+                    if series_id == &series.series_id && *start_ns == 1_000
+            ),
+            "expected SeriesNotStarted carrying the open, got {early:?}"
+        );
+
+        assert!(
+            assert_series_started(&series, 1_000).is_ok(),
+            "must be tradeable at exactly the open"
+        );
+        assert!(assert_series_started(&series, 1_001).is_ok());
     }
 }
