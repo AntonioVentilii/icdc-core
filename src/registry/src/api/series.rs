@@ -595,9 +595,10 @@ pub fn list_series(pagination: PaginationParams) -> SeriesPage {
 /// Implementation of `list_series_with` with an injectable caller and clock for
 /// unit tests.
 ///
-/// `now` is the cutoff used by the `only_unexpired` filter (see
-/// [`ListSeriesParams::matches_expiry`]). The public query passes the canister's
-/// `time()`; tests pass an explicit value.
+/// `now` is the cutoff for every clock-dependent filter — `only_unexpired` and
+/// `tradeable_now` — applied together via [`ListSeriesParams::matches_time`].
+/// The public query passes the canister's `time()`; tests pass an explicit
+/// value.
 #[must_use]
 fn list_series_with_impl(params: ListSeriesParams, caller: Principal, now: u64) -> SeriesPage {
     SERIES_STORE.with(move |store| {
