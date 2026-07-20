@@ -32,6 +32,10 @@ use super::{
 };
 use crate::utils::constants::{CKUSDC_LEDGER, ICP_LEDGER};
 
+/// Default expiry for test series: far beyond any clock a test will reach, so
+/// series created through the plain helpers are never accidentally expired.
+const DEFAULT_TEST_EXPIRY_NS: u64 = 2_000_000_000_000_000_000;
+
 /// Arguments for [`TradeHelperTrait::setup_icrc_asset`] (keeps call sites readable for clippy).
 pub struct SetupIcrcAsset<'a> {
     pub asset_id: &'a str,
@@ -72,13 +76,26 @@ pub trait TradeHelperTrait {
         balance_domain: BalanceDomain,
         opens_in_ns: u64,
     ) -> SeriesId;
-    /// Shared body of the two constructors above; not called directly by tests.
+    /// Registers a binary series whose trading window closed `expired_since_ns`
+    /// before the current `PocketIC` time.
+    ///
+    /// `add_series` does not require `expiry_ns` to be in the future, so a
+    /// past-expiry series can be registered directly.
+    fn add_expired_binary_series(
+        &self,
+        underlying: &str,
+        strike_value: u128,
+        balance_domain: BalanceDomain,
+        expired_since_ns: u64,
+    ) -> SeriesId;
+    /// Shared body of the constructors above; not called directly by tests.
     fn add_scheduled_binary_series_inner(
         &self,
         underlying: &str,
         strike_value: u128,
         balance_domain: BalanceDomain,
         start_ns: Option<u64>,
+        expiry_ns: u64,
     ) -> SeriesId;
     fn setup_icrc_asset(&self, args: SetupIcrcAsset<'_>);
     fn setup_evm_asset(
@@ -228,7 +245,13 @@ impl TradeHelperTrait for TestSetup {
         strike_value: u128,
         balance_domain: BalanceDomain,
     ) -> SeriesId {
-        self.add_scheduled_binary_series_inner(underlying, strike_value, balance_domain, None)
+        self.add_scheduled_binary_series_inner(
+            underlying,
+            strike_value,
+            balance_domain,
+            None,
+            DEFAULT_TEST_EXPIRY_NS,
+        )
     }
 
     fn add_scheduled_binary_series(
@@ -247,6 +270,27 @@ impl TradeHelperTrait for TestSetup {
             strike_value,
             balance_domain,
             Some(start_ns),
+            DEFAULT_TEST_EXPIRY_NS,
+        )
+    }
+
+    fn add_expired_binary_series(
+        &self,
+        underlying: &str,
+        strike_value: u128,
+        balance_domain: BalanceDomain,
+        expired_since_ns: u64,
+    ) -> SeriesId {
+        let now_ns = self.pic.get_time().as_nanos_since_unix_epoch();
+        let expiry_ns = now_ns.checked_sub(expired_since_ns).unwrap_or_else(|| {
+            panic!("expiry_ns underflowed: now={now_ns} - expired_since_ns={expired_since_ns}")
+        });
+        self.add_scheduled_binary_series_inner(
+            underlying,
+            strike_value,
+            balance_domain,
+            None,
+            expiry_ns,
         )
     }
 
@@ -256,12 +300,13 @@ impl TradeHelperTrait for TestSetup {
         strike_value: u128,
         balance_domain: BalanceDomain,
         start_ns: Option<u64>,
+        expiry_ns: u64,
     ) -> SeriesId {
         let series_params = AddSeriesParams {
             resolution: Resolution::new("Resolved per oracle at expiry"),
             underlying: underlying.to_owned(),
             balance_domain,
-            expiry_ns: 2_000_000_000_000_000_000,
+            expiry_ns,
             start_ns,
             payoff_type: PayoffType::Binary,
             strike: Some(Price::new(strike_value, 6)),

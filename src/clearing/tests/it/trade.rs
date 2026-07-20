@@ -12,6 +12,7 @@ use clearing::{
         },
     },
     types::{
+        errors::CommonError,
         margin::Position,
         trade::{LimitOrder, OrderId, Side, TradeId},
         user::User,
@@ -800,4 +801,79 @@ fn scheduled_series_rejects_orders_before_its_start() {
         }
         other => panic!("Expected SeriesNotStarted before the window opens, got: {other:?}"),
     }
+}
+
+/// An expired series is closed to new exposure. `add_series` does not require a
+/// future expiry, so the series can be registered already past its close.
+#[test]
+fn expired_series_rejects_new_orders() {
+    let env = TestSetup::with_icp();
+    let user = test_user(78);
+
+    // Closed one hour before the current PocketIC time.
+    let series_id = env.add_expired_binary_series(
+        "EXPIRED",
+        1_000_000,
+        BalanceDomain::Settlement,
+        3_600_000_000_000,
+    );
+
+    let res = env.submit_limit_order(
+        user,
+        "after_close",
+        series_id.clone(),
+        Side::Buy,
+        1,
+        500_000,
+    );
+
+    match res {
+        SubmitMatchedTradeResult::Err(TradeError::SeriesExpired {
+            series_id: rejected,
+            expiry_ns,
+        }) => {
+            assert_eq!(rejected, series_id);
+            assert!(
+                expiry_ns < env.pic.get_time().as_nanos_since_unix_epoch(),
+                "the reported close must be in the past"
+            );
+        }
+        other => panic!("Expected SeriesExpired after the window closes, got: {other:?}"),
+    }
+}
+
+/// Redeeming a complete set stays available after expiry.
+///
+/// This is the load-bearing half of the `SeriesAccess` split: redemption is the
+/// only way to release reserved margin before settlement runs, and withdrawals
+/// are refused while equity sits below reserved margin. Settlement is
+/// oracle-triggered, so the post-expiry gap is unbounded — gating redemption
+/// would strand collateral for as long as it lasted.
+///
+/// The call still fails — the fixture is a binary series and redemption is
+/// categorical-only — but it fails *inside* `redeem_complete_set_logic` rather
+/// than at the window gate. Asserting the specific `InvalidInput` rather than
+/// merely "not `SeriesExpired`" is deliberate: it proves the request reached the
+/// redemption body, so the test would catch the path being closed earlier.
+#[test]
+fn expired_series_still_allows_complete_set_redemption() {
+    let env = TestSetup::with_icp();
+    let user = test_user(79);
+
+    let series_id = env.add_expired_binary_series(
+        "EXPIRED-REDEEM",
+        1_000_000,
+        BalanceDomain::Settlement,
+        3_600_000_000_000,
+    );
+
+    let res: Result<bool, TradeError> = env
+        .clearing
+        .update(user, "redeem_complete_set", (series_id, 1_i128))
+        .unwrap();
+
+    assert!(
+        matches!(res, Err(TradeError::Common(CommonError::InvalidInput(_)))),
+        "redemption must reach the redemption logic rather than the expiry gate, got: {res:?}"
+    );
 }

@@ -9,34 +9,64 @@ use crate::{
     utils::system::now_ns,
 };
 
+/// What a caller intends to do with the series, which decides how much of the
+/// trading window is enforced.
+///
+/// Making this explicit at every call site is the point: an operation that only
+/// gives exposure back must not be locked out by the same rails that stop new
+/// exposure being created, and an omission here should read as a deliberate
+/// choice rather than a forgotten check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SeriesAccess {
+    /// The caller creates or increases exposure — orders, trades, minting a
+    /// complete set. Requires the series to be inside its full trading window.
+    OpenExposure,
+    /// The caller only releases or relocates exposure that already exists —
+    /// redeeming a complete set, accepting a transferred position. Still barred
+    /// from settled and not-yet-open series, but allowed after expiry.
+    ReduceExposure,
+}
+
 /// Ensures that a derivative series is registered and cached locally.
 ///
 /// If the series is not found in local state, it attempts to fetch it from the registry canister.
 ///
-/// Two rails treat a series as closed for trading:
+/// Three rails treat a series as closed, the last depending on `access`:
 ///
 /// - A series with an existing [`SettlementPlan`] (regardless of `PlanStatus`) returns
 ///   [`TradeError::SeriesAlreadySettled`] without re-caching the series. This keeps trade,
 ///   limit-order, and position-transfer paths from reopening economic exposure on a series whose
 ///   book and positions have already been cleared.
 /// - A scheduled series whose `start_ns` has not been reached returns
-///   [`TradeError::SeriesNotStarted`].
+///   [`TradeError::SeriesNotStarted`]. Applied regardless of `access`: no position can exist before
+///   the window opens, so there is nothing for a reducing caller to give back.
+/// - An expired series returns [`TradeError::SeriesExpired`], but **only** for
+///   [`SeriesAccess::OpenExposure`].
 ///
-/// `expiry_ns` is deliberately **not** checked here: an expired series with no settlement plan is
-/// still admitted, which is the pre-existing behavior. Closing that end of the window is a
-/// separate change from scheduling, so these two rails do not between them bound the full trading
-/// window.
+/// The expiry exemption is not a convenience. Settlement is oracle-triggered and chunked, so the
+/// gap between `expiry_ns` and a settlement plan existing is unbounded operational latency. During
+/// it, `redeem_complete_set` is the only way a user can release reserved margin, and withdrawals
+/// are refused while equity sits below reserved margin — gating it would strand collateral until
+/// an operator got around to settling. `accept_position_transfer` is exempt for a different
+/// reason: its counterpart `freeze_position_for_transfer` is ungated and destroys the source
+/// position first, so rejecting the accept would strand the position mid-migration with no
+/// un-freeze path.
 ///
 /// # Arguments
 /// * `series_id` - The identifier of the series to validate and cache.
+/// * `access` - Whether the caller opens or only reduces exposure.
 ///
 /// # Returns
-/// * [`Series`] if successfully registered, not settled, and open for trading.
+/// * [`Series`] if successfully registered, not settled, and open for the requested `access`.
 /// * [`TradeError::SeriesAlreadySettled`] if a settlement plan exists.
 /// * [`TradeError::SeriesNotStarted`] if the trading window has not opened yet.
+/// * [`TradeError::SeriesExpired`] if the window has closed and `access` is `OpenExposure`.
 /// * [`TradeError`] if the registry is not set, the series is not found, or the payout unit is
 ///   unsupported.
-pub async fn ensure_series_registered(series_id: &SeriesId) -> Result<Series, TradeError> {
+pub async fn ensure_series_registered(
+    series_id: &SeriesId,
+    access: SeriesAccess,
+) -> Result<Series, TradeError> {
     assert_series_not_settled(series_id)?;
 
     let series = if let Some(series) = SERIES.with(|s| s.borrow().get(series_id).cloned()) {
@@ -79,8 +109,12 @@ pub async fn ensure_series_registered(series_id: &SeriesId) -> Result<Series, Tr
     };
 
     // Checked on the single exit rather than in each branch, so a future path
-    // through this function cannot acquire a series without passing the gate.
-    assert_series_started(&series, now_ns())?;
+    // through this function cannot acquire a series without passing the gates.
+    let now = now_ns();
+    assert_series_started(&series, now)?;
+    if access == SeriesAccess::OpenExposure {
+        assert_series_not_expired(&series, now)?;
+    }
 
     Ok(series)
 }
@@ -104,6 +138,27 @@ pub fn assert_series_started(series: &Series, now: u64) -> Result<(), TradeError
                 start_ns,
             });
         }
+    }
+
+    Ok(())
+}
+
+/// Rejects exposure-opening paths on a series whose trading window has closed.
+///
+/// A series expires **at** `expiry_ns`: the comparison is `now >= expiry_ns`,
+/// exclusive at the close, matching the registry's `Series::status` and the
+/// `[start_ns, expiry_ns)` window the Candid interface already documents.
+///
+/// Reading the cached copy is safe for the same reason the start gate is:
+/// `expiry_ns` is hashed into the `series_id`, so it is immutable for the life
+/// of a series and clearing's never-refreshed `SERIES` cache cannot go stale on
+/// it.
+pub fn assert_series_not_expired(series: &Series, now: u64) -> Result<(), TradeError> {
+    if now >= series.expiry_ns {
+        return Err(TradeError::SeriesExpired {
+            series_id: series.series_id.clone(),
+            expiry_ns: series.expiry_ns,
+        });
     }
 
     Ok(())
@@ -223,5 +278,28 @@ mod tests {
             "must be tradeable at exactly the open"
         );
         assert!(assert_series_started(&series, 1_001).is_ok());
+    }
+
+    /// Exclusive at the close: a series expires *at* `expiry_ns`, matching the
+    /// registry's `only_unexpired` filter and the `[start_ns, expiry_ns)` window
+    /// the Candid interface documents.
+    #[test]
+    fn series_expires_exclusively_at_expiry() {
+        let series = series_with_start(None);
+        let expiry = series.expiry_ns;
+
+        assert!(assert_series_not_expired(&series, expiry - 1).is_ok());
+
+        let at_expiry = assert_series_not_expired(&series, expiry);
+        assert!(
+            matches!(
+                &at_expiry,
+                Err(TradeError::SeriesExpired { series_id, expiry_ns })
+                    if series_id == &series.series_id && *expiry_ns == expiry
+            ),
+            "expected SeriesExpired carrying the close, got {at_expiry:?}"
+        );
+
+        assert!(assert_series_not_expired(&series, expiry + 1).is_err());
     }
 }

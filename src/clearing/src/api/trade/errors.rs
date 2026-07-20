@@ -62,4 +62,18 @@ pub enum TradeError {
         /// The timestamp (nanoseconds since the UNIX epoch) at which it opens.
         start_ns: u64,
     },
+    /// The series' trading window has closed, so no new exposure can be opened
+    /// on it.
+    ///
+    /// Returned to exposure-opening paths only. Redeeming a complete set and
+    /// accepting a transferred position stay available after expiry — see
+    /// [`SeriesAccess`](crate::utils::series::SeriesAccess) — because they only
+    /// release exposure that already exists, and settlement may not run for some
+    /// time after the window closes.
+    SeriesExpired {
+        /// The series whose window has closed.
+        series_id: SeriesId,
+        /// The timestamp (nanoseconds since the UNIX epoch) at which it closed.
+        expiry_ns: u64,
+    },
 }

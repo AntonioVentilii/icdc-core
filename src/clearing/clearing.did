@@ -1187,6 +1187,20 @@ type TradeError = variant {
 	};
 	// Failed to communicate with the registry canister.
 	RegistryError : text;
+	// The series' trading window has closed, so no new exposure can be opened
+	// on it.
+	//
+	// Returned to exposure-opening paths only. Redeeming a complete set and
+	// accepting a transferred position stay available after expiry — see
+	// [`SeriesAccess`](crate::utils::series::SeriesAccess) — because they only
+	// release exposure that already exists, and settlement may not run for some
+	// time after the window closes.
+	SeriesExpired : record {
+		// The timestamp (nanoseconds since the UNIX epoch) at which it closed.
+		expiry_ns : nat64;
+		// The series whose window has closed.
+		series_id : text
+	};
 	// The user has insufficient margin to open or maintain the position.
 	InsufficientMargin : record {
 		// Current margin balance.
