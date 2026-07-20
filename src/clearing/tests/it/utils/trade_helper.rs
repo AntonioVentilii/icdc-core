@@ -238,7 +238,10 @@ impl TradeHelperTrait for TestSetup {
         balance_domain: BalanceDomain,
         opens_in_ns: u64,
     ) -> SeriesId {
-        let start_ns = self.pic.get_time().as_nanos_since_unix_epoch() + opens_in_ns;
+        let now_ns = self.pic.get_time().as_nanos_since_unix_epoch();
+        let start_ns = now_ns.checked_add(opens_in_ns).unwrap_or_else(|| {
+            panic!("start_ns overflowed u64: now={now_ns} + opens_in_ns={opens_in_ns}")
+        });
         self.add_scheduled_binary_series_inner(
             underlying,
             strike_value,

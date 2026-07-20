@@ -13,19 +13,22 @@ use crate::{
 ///
 /// If the series is not found in local state, it attempts to fetch it from the registry canister.
 ///
-/// A series with an existing [`SettlementPlan`] (regardless of `PlanStatus`) is
-/// treated as closed for trading: the call returns [`TradeError::SeriesAlreadySettled`]
-/// without re-caching the series. This is the single safety rail that keeps
-/// trade, limit-order, and position-transfer paths from reopening economic
-/// exposure on a series whose book and positions have already been cleared.
+/// Two rails treat a series as closed for trading:
+///
+/// - A series with an existing [`SettlementPlan`] (regardless of `PlanStatus`) returns
+///   [`TradeError::SeriesAlreadySettled`] without re-caching the series. This keeps trade,
+///   limit-order, and position-transfer paths from reopening economic exposure on a series whose
+///   book and positions have already been cleared.
+/// - A scheduled series whose `start_ns` has not been reached returns
+///   [`TradeError::SeriesNotStarted`].
+///
+/// `expiry_ns` is deliberately **not** checked here: an expired series with no settlement plan is
+/// still admitted, which is the pre-existing behavior. Closing that end of the window is a
+/// separate change from scheduling, so these two rails do not between them bound the full trading
+/// window.
 ///
 /// # Arguments
 /// * `series_id` - The identifier of the series to validate and cache.
-///
-/// A scheduled series whose `start_ns` has not been reached is likewise treated
-/// as closed for trading, returning [`TradeError::SeriesNotStarted`]. Together
-/// with the settlement rail above this bounds economic exposure on both ends of
-/// the trading window.
 ///
 /// # Returns
 /// * [`Series`] if successfully registered, not settled, and open for trading.
