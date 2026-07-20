@@ -23,6 +23,7 @@ fn social_trade_scenario() {
         series_id: series_id.clone(),
         underlying: "PIZZA_CHALLENGE".to_owned(),
         expiry_ns: 2_000_000_000,
+        start_ns: None,
         payoff_type: PayoffType::Binary,
         strike: None,
         price_precision: 0,

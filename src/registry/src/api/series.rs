@@ -11,8 +11,8 @@ use shared::{
     types::{
         series::{
             is_valid_locale, AddSeriesParams, AddSeriesResult, ForkSeriesParams, ListSeriesParams,
-            PaginationParams, Series, SeriesError, SeriesPage, UpdateSeriesMetadataParams,
-            UpdateSeriesResult,
+            PaginationParams, Series, SeriesError, SeriesPage, SeriesStatus,
+            UpdateSeriesMetadataParams, UpdateSeriesResult,
         },
         BalanceDomain, EngineRole, NonMonetaryUnit, PayoutUnit, SeriesId, SeriesIdParams,
         TradingAccess,
@@ -89,6 +89,7 @@ fn add_series_impl(
         underlying,
         balance_domain,
         expiry_ns,
+        start_ns,
         payoff_type,
         strike,
         price_precision,
@@ -164,6 +165,19 @@ fn add_series_impl(
         }
     }
 
+    // A scheduled series must have a window it can actually be traded in, and
+    // "already live" must have exactly one encoding (`None`) — otherwise the same
+    // market could be registered twice under two different ids, since `start_ns`
+    // is hashed into the id.
+    if let Some(start_ns) = start_ns {
+        if start_ns <= now {
+            return Err(SeriesError::StartNotInFuture).into();
+        }
+        if start_ns >= expiry_ns {
+            return Err(SeriesError::StartNotBeforeExpiry).into();
+        }
+    }
+
     let trading_access = if trading_access.is_empty() {
         vec![TradingAccess::Open]
     } else {
@@ -177,6 +191,7 @@ fn add_series_impl(
         underlying: &underlying,
         balance_domain,
         expiry_ns,
+        start_ns,
         payoff_type: &payoff_type,
         strike: strike.as_ref(),
         price_precision,
@@ -193,6 +208,7 @@ fn add_series_impl(
         balance_domain,
         underlying,
         expiry_ns,
+        start_ns,
         payoff_type,
         strike,
         price_precision,
@@ -347,6 +363,13 @@ fn fork_series_impl(
             underlying: &source.underlying,
             balance_domain: source.balance_domain,
             expiry_ns: source.expiry_ns,
+            // A fork is the source contract re-titled, so it inherits the whole
+            // trading window verbatim — including a start that has already passed,
+            // which simply means the fork is open immediately. Forks cannot
+            // collide regardless (`fork_caller` + `fork_index` make the id
+            // unique), so the "future start only" rule that `add_series` enforces
+            // to keep ids canonical has nothing to protect here.
+            start_ns: source.start_ns,
             payoff_type: &source.payoff_type,
             strike: source.strike.as_ref(),
             price_precision: source.price_precision,
@@ -367,6 +390,7 @@ fn fork_series_impl(
             underlying: source.underlying,
             balance_domain: source.balance_domain,
             expiry_ns: source.expiry_ns,
+            start_ns: source.start_ns,
             payoff_type: source.payoff_type,
             strike: source.strike,
             price_precision: source.price_precision,
@@ -525,6 +549,23 @@ pub fn get_series(series_id: SeriesId) -> Option<Series> {
     SERIES_STORE.with(move |store| store.borrow().get(&series_id).cloned())
 }
 
+/// Returns where a series currently sits in its trading window, or `None` if the
+/// series is not registered.
+///
+/// Clients could derive this from `start_ns`/`expiry_ns` themselves, but only
+/// against their own clock. This evaluates the window with the canister's
+/// `time()`, which is the same clock the trading gate uses — so a countdown built
+/// on it cannot disagree with whether an order will actually be accepted.
+///
+/// Settlement state is not folded in: it lives in the clearing canister. A series
+/// reported [`SeriesStatus::Expired`] here may or may not be settled yet.
+#[query]
+#[must_use]
+pub fn get_series_status(series_id: SeriesId) -> Option<SeriesStatus> {
+    let now = time();
+    SERIES_STORE.with(move |store| store.borrow().get(&series_id).map(|s| s.status(now)))
+}
+
 /// Returns a paginated page of registered derivative series, optionally filtered.
 ///
 /// # Visibility
@@ -571,7 +612,7 @@ fn list_series_with_impl(params: ListSeriesParams, caller: Principal, now: u64) 
 
         let iter = range
             .filter(|(_, s)| params.matches(s))
-            .filter(|(_, s)| params.matches_expiry(s, now))
+            .filter(|(_, s)| params.matches_time(s, now))
             .filter(|(_, s)| can_principal_see_series(s, &caller));
 
         let (items, next_cursor) = PaginationParams::apply(params.pagination.as_ref(), iter);
@@ -630,6 +671,7 @@ mod tests {
             underlying: "ICP".to_owned(),
             balance_domain: BalanceDomain::Settlement,
             expiry_ns: 1000,
+            start_ns: None,
             payoff_type: PayoffType::Binary,
             strike: None,
             price_precision: 8,
@@ -653,6 +695,7 @@ mod tests {
             underlying: "PIZZA_CHALLENGE".to_owned(),
             balance_domain: BalanceDomain::Social,
             expiry_ns,
+            start_ns: None,
             payoff_type: PayoffType::Binary,
             strike: None,
             price_precision: 0,
@@ -1631,5 +1674,192 @@ mod tests {
 
         assert_eq!(updated.banner_url, None);
         assert_eq!(updated.locale.as_deref(), Some("es"));
+    }
+
+    // --- start_ns (scheduled series) --------------------------------------
+
+    /// Lists series for `caller` with `tradeable_now = Some(true)` evaluated at
+    /// `now`, returning the matching ids.
+    fn list_tradeable_at(caller: Principal, now: u64) -> Vec<SeriesId> {
+        list_series_with_impl(
+            ListSeriesParams {
+                tradeable_now: Some(true),
+                pagination: Some(PaginationParams {
+                    limit: None,
+                    cursor: None,
+                }),
+                ..Default::default()
+            },
+            caller,
+            now,
+        )
+        .items
+        .into_iter()
+        .map(|s| s.series_id)
+        .collect()
+    }
+
+    fn scheduled_params(start_ns: u64, expiry_ns: u64) -> AddSeriesParams {
+        let mut params = base_params();
+        params.expiry_ns = expiry_ns;
+        params.start_ns = Some(start_ns);
+        params
+    }
+
+    /// `None` is the only way to say "already live", so a start in the past — or
+    /// at exactly `now` — is rejected rather than silently normalized. Otherwise
+    /// the same market could be registered under two different ids.
+    #[test]
+    fn add_series_rejects_start_at_or_before_now() {
+        cleanup();
+        let caller = test_principal(1);
+
+        let at_now = add_as_creator(scheduled_params(1_000, 5_000), caller, 1_000);
+        assert!(
+            matches!(at_now, AddSeriesResult::Err(SeriesError::StartNotInFuture)),
+            "start exactly at now must be rejected, got {at_now:?}"
+        );
+
+        let in_past = add_as_creator(scheduled_params(1_000, 5_000), caller, 1_001);
+        assert!(
+            matches!(in_past, AddSeriesResult::Err(SeriesError::StartNotInFuture)),
+            "start before now must be rejected, got {in_past:?}"
+        );
+    }
+
+    #[test]
+    fn add_series_rejects_start_at_or_after_expiry() {
+        cleanup();
+        let caller = test_principal(1);
+
+        let at_expiry = add_as_creator(scheduled_params(5_000, 5_000), caller, 0);
+        assert!(
+            matches!(
+                at_expiry,
+                AddSeriesResult::Err(SeriesError::StartNotBeforeExpiry)
+            ),
+            "a zero-width window must be rejected, got {at_expiry:?}"
+        );
+
+        let after_expiry = add_as_creator(scheduled_params(6_000, 5_000), caller, 0);
+        assert!(
+            matches!(
+                after_expiry,
+                AddSeriesResult::Err(SeriesError::StartNotBeforeExpiry)
+            ),
+            "start after expiry must be rejected, got {after_expiry:?}"
+        );
+    }
+
+    #[test]
+    fn scheduled_series_stores_start_ns() {
+        cleanup();
+        let caller = test_principal(1);
+
+        let AddSeriesResult::Ok(id) = add_as_creator(scheduled_params(1_000, 5_000), caller, 0)
+        else {
+            panic!("create failed");
+        };
+
+        let stored = SERIES_STORE
+            .with(|s| s.borrow().get(&id).cloned())
+            .expect("series stored");
+        assert_eq!(stored.start_ns, Some(1_000));
+    }
+
+    /// `start_ns` is hashed into the id, so a scheduled series can never collide
+    /// with an otherwise-identical immediate one and inherit a start its creator
+    /// did not ask for.
+    #[test]
+    fn scheduled_and_immediate_series_get_distinct_ids() {
+        cleanup();
+        let caller = test_principal(1);
+
+        let mut immediate = base_params();
+        immediate.expiry_ns = 5_000;
+        let AddSeriesResult::Ok(immediate_id) = add_as_creator(immediate, caller, 0) else {
+            panic!("immediate create failed");
+        };
+
+        let AddSeriesResult::Ok(scheduled_id) =
+            add_as_creator(scheduled_params(1_000, 5_000), caller, 0)
+        else {
+            panic!("scheduled create failed");
+        };
+
+        assert_ne!(immediate_id, scheduled_id);
+    }
+
+    #[test]
+    fn tradeable_now_excludes_series_before_its_start() {
+        cleanup();
+        let caller = test_principal(1);
+
+        let AddSeriesResult::Ok(id) = add_as_creator(scheduled_params(1_000, 5_000), caller, 0)
+        else {
+            panic!("create failed");
+        };
+
+        assert!(
+            !list_tradeable_at(caller, 999).contains(&id),
+            "must be hidden one nanosecond before the open"
+        );
+        assert!(
+            list_tradeable_at(caller, 1_000).contains(&id),
+            "must be tradeable at exactly the open"
+        );
+        assert!(
+            !list_tradeable_at(caller, 5_000).contains(&id),
+            "must be hidden at expiry"
+        );
+    }
+
+    /// A not-yet-open series is still unexpired: `only_unexpired` keeps its
+    /// original, wider meaning so existing callers see no change.
+    #[test]
+    fn only_unexpired_still_shows_upcoming_series() {
+        cleanup();
+        let caller = test_principal(1);
+
+        let AddSeriesResult::Ok(id) = add_as_creator(scheduled_params(1_000, 5_000), caller, 0)
+        else {
+            panic!("create failed");
+        };
+
+        assert!(list_unexpired_at(caller, 999).contains(&id));
+    }
+
+    #[test]
+    fn fork_inherits_start_ns() {
+        cleanup();
+        let caller = test_principal(1);
+        let group = GroupId::from("grp_1".to_owned());
+
+        let AddSeriesResult::Ok(source_id) =
+            add_as_creator(scheduled_params(1_000, 5_000), caller, 0)
+        else {
+            panic!("source create failed");
+        };
+
+        let fork_params = ForkSeriesParams {
+            source_series_id: source_id,
+            title: Some("Forked".to_owned()),
+            description: None,
+            resolution: None,
+            trading_access: vec![TradingAccess::Restricted {
+                groups: vec![group],
+            }],
+            engine_id: None,
+            locale: None,
+        };
+
+        let AddSeriesResult::Ok(fork_id) = fork_as_creator(fork_params, caller, 500) else {
+            panic!("fork failed");
+        };
+
+        let forked = SERIES_STORE
+            .with(|s| s.borrow().get(&fork_id).cloned())
+            .expect("fork stored");
+        assert_eq!(forked.start_ns, Some(1_000));
     }
 }
