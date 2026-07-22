@@ -1186,6 +1186,18 @@ type TradeError = variant {
 		// The submitted order price, scaled to USD base units.
 		price_usd : nat
 	};
+	// The series is scheduled and its trading window has not opened yet, so no
+	// trades, orders, or transfers can be initiated on it.
+	//
+	// Returned whenever a trade-initiating path sees a series whose `start_ns`
+	// is still in the future. Carries the open so the caller can render a
+	// countdown or retry at the right moment instead of polling blindly.
+	SeriesNotStarted : record {
+		// The timestamp (nanoseconds since the UNIX epoch) at which it opens.
+		start_ns : nat64;
+		// The series that is not yet open.
+		series_id : text
+	};
 	// The trade would violate the no-arbitrage principle (e.g., sum of outcome prices > 1.0).
 	ArbitrageLimitExceeded : record {
 		// The hard limit (usually 1.0 USD).

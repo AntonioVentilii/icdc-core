@@ -68,6 +68,26 @@ pub trait TradeHelperTrait {
         settlement_cap_value: u128,
         balance_domain: BalanceDomain,
     ) -> SeriesId;
+    /// Registers a binary series whose trading window opens `opens_in_ns` after
+    /// the current `PocketIC` time.
+    ///
+    /// The offset is relative because `add_series` rejects a start at or before
+    /// the registry's `now`, and `PocketIC`'s clock is not a fixed constant.
+    fn add_scheduled_binary_series(
+        &self,
+        underlying: &str,
+        strike_value: u128,
+        balance_domain: BalanceDomain,
+        opens_in_ns: u64,
+    ) -> SeriesId;
+    /// Shared body of the two constructors above; not called directly by tests.
+    fn add_scheduled_binary_series_inner(
+        &self,
+        underlying: &str,
+        strike_value: u128,
+        balance_domain: BalanceDomain,
+        start_ns: Option<u64>,
+    ) -> SeriesId;
     fn setup_icrc_asset(&self, args: SetupIcrcAsset<'_>);
     fn setup_evm_asset(
         &self,
@@ -216,12 +236,41 @@ impl TradeHelperTrait for TestSetup {
         strike_value: u128,
         balance_domain: BalanceDomain,
     ) -> SeriesId {
+        self.add_scheduled_binary_series_inner(underlying, strike_value, balance_domain, None)
+    }
+
+    fn add_scheduled_binary_series(
+        &self,
+        underlying: &str,
+        strike_value: u128,
+        balance_domain: BalanceDomain,
+        opens_in_ns: u64,
+    ) -> SeriesId {
+        let now_ns = self.pic.get_time().as_nanos_since_unix_epoch();
+        let start_ns = now_ns.checked_add(opens_in_ns).unwrap_or_else(|| {
+            panic!("start_ns overflowed u64: now={now_ns} + opens_in_ns={opens_in_ns}")
+        });
+        self.add_scheduled_binary_series_inner(
+            underlying,
+            strike_value,
+            balance_domain,
+            Some(start_ns),
+        )
+    }
+
+    fn add_scheduled_binary_series_inner(
+        &self,
+        underlying: &str,
+        strike_value: u128,
+        balance_domain: BalanceDomain,
+        start_ns: Option<u64>,
+    ) -> SeriesId {
         let series_params = AddSeriesParams {
             resolution: Resolution::new("Resolved per oracle at expiry"),
             underlying: underlying.to_owned(),
             balance_domain,
             expiry_ns: 2_000_000_000_000_000_000,
-            start_ns: None,
+            start_ns,
             payoff_type: PayoffType::Binary,
             strike: Some(Price::new(strike_value, 6)),
             settlement_cap: None,
