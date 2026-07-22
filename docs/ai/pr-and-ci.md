@@ -257,12 +257,15 @@ control-panel for the pattern), update this section in the same PR.
 
 ## 10. Release flow (informational)
 
-Releases are triggered by pushing a `v*` tag. `release.yml` builds
-WASMs + Candid for `clearing`, `registry`, `minter`, plus the
-downloaded `ledger` / `index` artifacts, and attaches them to a
-GitHub Release via `softprops/action-gh-release`. There is no
-`release-please` automation — version bumps are manual `chore: vX.Y.Z`
-commits.
+`release-please` maintains a `chore(release): vX.Y.Z` PR from the
+Conventional Commit history on `main`. Merging it creates the tag,
+the GitHub Release + notes, and the `CHANGELOG.md` update; that
+published Release triggers `release.yml`, which builds WASMs + Candid
+for `clearing`, `registry`, `minter` (plus the downloaded `ledger` /
+`index` artifacts) and attaches them via `softprops/action-gh-release`.
+Deployment is separate: `main` → staging, `v*` tag → production. The
+full flow, versioning rationale, and one-time setup live in
+[`docs/ci-cd/release-deploy.md`](../ci-cd/release-deploy.md).
 
 Do not edit release artifacts in tree (`*.wasm.gz`, `*.did`) — they
 come from the build, not from source.
