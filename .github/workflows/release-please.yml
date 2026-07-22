@@ -32,9 +32,11 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # release-please (simple type) bumps Cargo.toml's [workspace.package].version
-      # via the generic updater but cannot touch Cargo.lock. Re-lock the workspace
-      # crates on the release PR so `cargo build --locked` passes.
+      # The `simple` strategy doesn't update Cargo files itself. Our TOML
+      # extra-file updater bumps [workspace.package].version, but it does not
+      # apply release-please's dedicated Cargo.lock logic. Re-lock the workspace
+      # crates on the release PR and commit Cargo.lock so `cargo build --locked`
+      # succeeds.
       - name: Checkout release PR branch
         if: ${{ steps.release.outputs.pr }}
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
