@@ -32,11 +32,10 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # The `simple` strategy doesn't update Cargo files itself. Our TOML
-      # extra-file updater bumps [workspace.package].version, but it does not
-      # apply release-please's dedicated Cargo.lock logic. Re-lock the workspace
-      # crates on the release PR and commit Cargo.lock so `cargo build --locked`
-      # succeeds.
+      # The `simple` strategy bumps the versions in Cargo.toml/package.json via
+      # extra-file updaters but does not refresh the lockfiles. Re-lock both on
+      # the release PR and commit them so `cargo build --locked` succeeds and
+      # package-lock.json stays in sync with package.json.
       - name: Checkout release PR branch
         if: ${{ steps.release.outputs.pr }}
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -49,14 +48,18 @@ jobs:
         if: ${{ steps.release.outputs.pr }}
         uses: ./.github/actions/prepare
 
-      - name: Re-lock workspace crates
+      - name: Re-lock
         if: ${{ steps.release.outputs.pr }}
-        run: cargo update --workspace
+        run: |
+          cargo update --workspace
+          npm install
 
-      - name: Commit Cargo.lock
+      - name: Commit lockfiles
         if: ${{ steps.release.outputs.pr }}
         uses: ./.github/actions/add-and-commit
         with:
-          add: Cargo.lock
-          message: 'chore: sync Cargo.lock with release version'
+          add: |
+            Cargo.lock
+            package-lock.json
+          message: 'chore: sync lockfiles with release version'
           token: ${{ steps.app-token.outputs.token }}
