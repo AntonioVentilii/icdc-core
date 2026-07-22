@@ -26,9 +26,14 @@ Examples that match recent history (`git log --oneline`):
 - `feat(clearing)!: change settlement signature` ← `!` marks a breaking change
 
 The title regex is enforced by
-[`pr-checks.yml`](../../.github/workflows/pr-checks.yml) on every PR
-(`^(feat|fix|perf|deps|revert|refactor|docs|build|ci|test|style|chore)(\(scope\))?!?: …`,
-scope optional). It is also what `release-please` relies on to build the
+[`pr-checks.yml`](../../.github/workflows/pr-checks.yml) on every PR — the
+exact pattern is:
+
+```
+^(feat|fix|perf|deps|revert|refactor|docs|build|ci|test|style|chore)(\([-a-zA-Z0-9_,/ ]+\))?!?: .+
+```
+
+(scope optional). It is also what `release-please` relies on to build the
 changelog and pick the next version, so treat it as binding. See
 [`docs/ci-cd/release-deploy.md`](../ci-cd/release-deploy.md) for the full
 release + deploy flow.
