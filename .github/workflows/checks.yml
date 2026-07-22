@@ -22,15 +22,27 @@ jobs:
     permissions: {}
 
     steps:
-      - name: Check PR title
+      - name: Skip outside pull requests
+        if: github.event_name != 'pull_request'
+        run: echo "PR title check only runs for pull_request events."
+
+      - name: Validate Conventional Commit PR title (scope required)
+        if: github.event_name == 'pull_request'
         env:
-          EVENT_NAME: ${{ github.event_name }}
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          [[ "$EVENT_NAME" == "pull_request" ]] || exit 0
+          # Scope is REQUIRED: type(scope): description — or type(scope)!: … for a breaking change.
           pattern='^(feat|fix|perf|deps|revert|docs|style|chore|refactor|test|build|ci)\([-a-zA-Z0-9,._/]+\)!?: .+$'
-          [[ "$PR_TITLE" =~ $pattern ]] && exit 0
-          echo "::error::PR title must be a Conventional Commit with a scope, e.g. 'feat(clearing): add settlement guard' (use 'type(scope)!:' for a breaking change). Got: $PR_TITLE"
+
+          if [[ "$PR_TITLE" =~ $pattern ]]; then
+            echo "PR title OK."
+            exit 0
+          fi
+
+          # Keep the title off the start of a line so it can't inject a ::workflow:: command.
+          echo "::error::PR title must be a Conventional Commit WITH A SCOPE: 'type(scope): description' (or 'type(scope)!: …' for a breaking change)."
+          echo "::error::Scope = the affected area/crate, or a short area such as 'deps' for tooling. E.g. 'feat(clearing): add settlement guard'."
+          echo "Got title: $PR_TITLE"
           exit 1
 
   format:
