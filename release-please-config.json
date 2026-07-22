@@ -23,6 +23,7 @@
 			"component": "icdc-core",
 			"include-component-in-tag": false,
 			"extra-files": [
+				{ "type": "generic", "path": "Cargo.toml" },
 				{
 					"type": "json",
 					"path": "package.json",
