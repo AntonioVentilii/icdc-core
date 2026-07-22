@@ -19,7 +19,6 @@ jobs:
     concurrency:
       group: checks-pr-title-${{ github.ref }}
       cancel-in-progress: false
-    # No API access needed — the title comes from the event payload, not the API.
     permissions: {}
 
     steps:
