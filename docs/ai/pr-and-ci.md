@@ -197,15 +197,16 @@ scripts/pic-install
 
 Defined under [`.github/workflows/`](../../.github/workflows/):
 
-| Workflow      | Job(s)                      | What it runs                                                                                                                                                  |
-| ------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `checks.yml`  | `format`                    | `npm run format`. Fails the job whenever it produces a diff — run `npm run format` locally and push.                                                          |
-| `checks.yml`  | `lint`                      | `npm run lint` — `prettier --check` + `scripts/lint.sh` (rust, did, shell).                                                                                   |
-| `checks.yml`  | `checks-pass`               | Aggregator gate via `.github/actions/needs_success`.                                                                                                          |
-| `tests.yml`   | `unit`                      | `npm run build` then `npm run test:unit` (`cargo test --lib --bins`).                                                                                         |
-| `tests.yml`   | `integration`               | `npm run build` then `npm run test:integration`.                                                                                                              |
-| `tests.yml`   | `tests-pass`                | Aggregator gate via `.github/actions/needs_success`.                                                                                                          |
-| `release.yml` | `wasm`, `candid`, `release` | Triggered by `push: tags: v*`, GitHub `release` events, or `workflow_dispatch`. Builds + uploads WASM/`*.did` artifacts and (for tags) cuts a GitHub Release. |
+| Workflow      | Job(s)                      | What it runs                                                                                                                                                                       |
+| ------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `checks.yml`  | `format`                    | `npm run format`. Fails the job whenever it produces a diff — run `npm run format` locally and push.                                                                               |
+| `checks.yml`  | `lint`                      | `npm run lint` — `prettier --check` + `scripts/lint.sh` (rust, did, shell).                                                                                                        |
+| `checks.yml`  | `breaking-interface`        | On PRs only: if any `src/**/*.did` changed, `scripts/check.did.compat.sh` verifies it is still a Candid subtype of the base branch — unless the PR is marked breaking (see below). |
+| `checks.yml`  | `checks-pass`               | Aggregator gate via `.github/actions/needs_success`.                                                                                                                               |
+| `tests.yml`   | `unit`                      | `npm run build` then `npm run test:unit` (`cargo test --lib --bins`).                                                                                                              |
+| `tests.yml`   | `integration`               | `npm run build` then `npm run test:integration`.                                                                                                                                   |
+| `tests.yml`   | `tests-pass`                | Aggregator gate via `.github/actions/needs_success`.                                                                                                                               |
+| `release.yml` | `wasm`, `candid`, `release` | Triggered by `push: tags: v*`, GitHub `release` events, or `workflow_dispatch`. Builds + uploads WASM/`*.did` artifacts and (for tags) cuts a GitHub Release.                      |
 
 The `Prepare` composite action (`.github/actions/prepare`) installs
 the rust toolchain (`rust-toolchain.toml`), npm deps, `cargo-binstall`,
@@ -231,6 +232,28 @@ upgrade one of these.
   not a nuisance. See
   [`.policies/testing-policy.md`](../../.policies/testing-policy.md)
   for the broader testing rules.
+- **`breaking-interface` failed** → a canister's candid interface is no
+  longer backward-compatible with the base branch (a method or type was
+  removed or changed, not just added). Reproduce locally against the
+  branch you are targeting:
+
+  ```bash
+  scripts/setup didc            # once, installs the pinned didc
+  scripts/check.did.compat.sh origin/main
+  ```
+
+  If the break is **unintentional**, restore compatibility (keep the old
+  method/variant, add rather than change). If it is **intentional**,
+  declare it with the Conventional Commits breaking-change convention —
+  the gate then stops requiring compatibility for the PR. You need
+  **both**:
+  - a `!` before the colon in the **PR title**, e.g.
+    `feat(clearing)!: change the settlement API`, and
+  - a `BREAKING CHANGE:` footer in the **PR body**, e.g.
+    `BREAKING CHANGE: the settlement API is now incompatible`.
+
+  After editing the title/body, push another commit (or re-run the job)
+  so CI re-reads them.
 
 ## 8. Updating an existing PR
 

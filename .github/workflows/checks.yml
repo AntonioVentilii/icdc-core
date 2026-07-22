@@ -183,10 +183,84 @@ jobs:
             target
           key: ${{ steps.cache-did.outputs.cache-primary-key }}
 
+  breaking-interface:
+    name: Breaking Interface
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: checks-breaking-interface-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    env:
+      # Both are set from the pull_request payload and only read when the event
+      # is a pull_request; on other events the guarded steps below never run.
+      TITLE: ${{ github.event.pull_request.title }}
+      DESCRIPTION: ${{ github.event.pull_request.body }}
+      # Base commit of the PR. It is a parent of the checkout merge commit, so a
+      # full-history checkout (fetch-depth: 0) always has it available locally.
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+
+    steps:
+      - name: Skip outside pull requests
+        if: github.event_name != 'pull_request'
+        run: echo "Breaking-interface check only runs for pull_request events."
+
+      - name: Checkout
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          # Need the base commit in local history to diff the candid interface.
+          fetch-depth: 0
+
+      - name: Detect candid interface changes
+        if: github.event_name == 'pull_request'
+        id: did-changes
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        with:
+          filters: |
+            did:
+              - 'src/**/*.did'
+
+      - name: Check whether the PR declares a breaking change
+        if: github.event_name == 'pull_request'
+        id: declaration
+        run: |
+          # See https://www.conventionalcommits.org/en/v1.0.0/#commit-message-with-both--and-breaking-change-footer
+          # Title needs a '!' before the colon, e.g.  feat(clearing)!: change the settlement API
+          if [[ "$TITLE" =~ ^([a-z]+)(\([^\)]+\))?\!: ]]; then
+            echo "BREAKING_TITLE=true" | tee -a "$GITHUB_OUTPUT" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          # Body needs a footer line, e.g.  BREAKING CHANGE: the settlement API is now incompatible
+          if grep -qE '^BREAKING[ -]CHANGE: ' <<<"$DESCRIPTION"; then
+            echo "BREAKING_DESCRIPTION=true" | tee -a "$GITHUB_OUTPUT" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Decide whether to enforce compatibility
+        # Enforce when the interface changed but the PR is NOT fully marked as a
+        # breaking change (requires BOTH the title '!' and a body footer). A PR
+        # that declares both is exempt: it has acknowledged the breakage. The
+        # condition lives in `if:` (GitHub expression context, not shell) so no
+        # untrusted value is expanded into a run block.
+        if: >-
+          github.event_name == 'pull_request'
+          && steps.did-changes.outputs.did == 'true'
+          && !(steps.declaration.outputs.BREAKING_TITLE == 'true' && steps.declaration.outputs.BREAKING_DESCRIPTION == 'true')
+        id: gate
+        run: echo "ENFORCE=true" | tee -a "$GITHUB_OUTPUT" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Install didc
+        if: steps.gate.outputs.ENFORCE == 'true'
+        run: scripts/setup didc
+
+      - name: Check candid backward-compatibility against the base branch
+        if: steps.gate.outputs.ENFORCE == 'true'
+        run: scripts/check.did.compat.sh "$BASE_SHA"
+
   checks-pass:
     name: Checks Pass
     if: always()
-    needs: ['pr-title', 'format', 'lint', 'did']
+    needs: ['pr-title', 'format', 'lint', 'did', 'breaking-interface']
     runs-on: ubuntu-24.04
     concurrency:
       group: checks-pass-${{ github.ref }}
