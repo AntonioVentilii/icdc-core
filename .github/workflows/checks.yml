@@ -70,10 +70,88 @@ jobs:
       - name: Lint
         run: npm run lint
 
+  did:
+    name: Candid
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: checks-did-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Check Rust changes
+        id: changes
+        uses: ./.github/actions/check-rust-changes
+
+      - name: Prepare
+        if: steps.changes.outputs.rust == 'true'
+        uses: ./.github/actions/prepare
+
+      # candid-extractor is required by scripts/did.sh but is not installed
+      # by the prepare action (it is not needed by the format/lint jobs).
+      - name: Install candid-extractor
+        if: steps.changes.outputs.rust == 'true'
+        run: scripts/setup candid-extractor
+
+      # Regenerating the .did files builds the same release wasms as the
+      # integration tests. Cache the cargo registry and target dir to avoid a
+      # cold rebuild each run; the primary key includes the commit SHA so a
+      # fresh cache is saved every run, with restore-keys falling back to the
+      # most recent matching prefix for warm starts.
+      - name: Restore cargo cache
+        if: steps.changes.outputs.rust == 'true'
+        id: cache-did
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-did-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-did-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
+            ${{ runner.os }}-cargo-did-
+
+      # Mirror `npm run did` (generate + format) but skip lint, which the
+      # dedicated lint job already covers. Formatting matters: the committed
+      # .did files are prettier-formatted (prettier-plugin-motoko claims
+      # *.did), so the raw candid-extractor output must be formatted before
+      # diffing, otherwise formatting-only differences would fail the check.
+      - name: Generate Candid
+        if: steps.changes.outputs.rust == 'true'
+        run: |
+          ./scripts/did.sh
+          npm run format
+
+      - name: Check for drift
+        if: steps.changes.outputs.rust == 'true'
+        run: |
+          if [[ -n "$(git status --porcelain -- '*.did')" ]]; then
+            echo "::error::Candid (.did) files are out of date. Run 'npm run did' locally and commit the result."
+            git diff -- '*.did'
+            exit 1
+          fi
+
+      - name: Save cargo cache
+        if: always() && steps.changes.outputs.rust == 'true' && steps.cache-did.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.cache-did.outputs.cache-primary-key }}
+
   checks-pass:
     name: Checks Pass
     if: always()
-    needs: ['format', 'lint']
+    needs: ['format', 'lint', 'did']
     runs-on: ubuntu-24.04
     concurrency:
       group: checks-pass-${{ github.ref }}
