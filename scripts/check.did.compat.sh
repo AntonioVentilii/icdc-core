@@ -41,6 +41,15 @@ command -v didc >/dev/null 2>&1 || {
   exit 1
 }
 
+# Fail loudly if the baseline does not resolve to a commit. Without this an
+# unfetched ref or a typoed SHA would make every `git cat-file` below miss, be
+# read as "interface absent at baseline", and skip every check — a false green.
+BASELINE_COMMIT="$(git rev-parse --verify --quiet "${BASELINE}^{commit}")" || {
+  echo "error: baseline '${BASELINE}' does not resolve to a commit." >&2
+  echo "  Pass a valid ref/SHA, or fetch it first (e.g. git fetch origin main)." >&2
+  exit 1
+}
+
 # Candid interfaces we ship, taken from dfx.json and restricted to source-tree
 # files (excludes downloaded/generated interfaces such as the ledgers under
 # target/).
@@ -64,9 +73,9 @@ for candid in "${CANDID_FILES[@]}"; do
     continue
   fi
 
-  # A canister that does not exist at the baseline is brand new: there is no
-  # prior interface to break, so nothing to check.
-  if ! git cat-file -e "$BASELINE:$candid" 2>/dev/null; then
+  # A canister that does not exist at the (validated) baseline commit is brand
+  # new: there is no prior interface to break, so nothing to check.
+  if ! git cat-file -e "$BASELINE_COMMIT:$candid" 2>/dev/null; then
     echo "  - $candid: skipped (new interface, absent at baseline)"
     continue
   fi
@@ -74,7 +83,7 @@ for candid in "${CANDID_FILES[@]}"; do
   old_did="$(mktemp)"
   # shellcheck disable=SC2064
   trap "rm -f '$old_did'" EXIT
-  git show "$BASELINE:$candid" >"$old_did"
+  git show "$BASELINE_COMMIT:$candid" >"$old_did"
 
   checked=$((checked + 1))
   if didc check "$candid" "$old_did"; then
