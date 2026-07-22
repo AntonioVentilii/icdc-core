@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7](https://github.com/AntonioVentilii/icdc-core/compare/v0.1.6...v0.1.7) (2026-07-22)
+
+
+### Bug Fixes
+
+* **scripts:** use lowercase echo in ledger/index arg builders ([#107](https://github.com/AntonioVentilii/icdc-core/issues/107)) ([3c4d11d](https://github.com/AntonioVentilii/icdc-core/commit/3c4d11d7fa25bc39109aa6fef672247b2a6cdcd2))
+
 ## [0.1.6](https://github.com/AntonioVentilii/icdc-core/compare/v0.1.5...v0.1.6) (2026-07-22)
 
 
