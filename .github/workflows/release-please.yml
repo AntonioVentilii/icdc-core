@@ -25,8 +25,38 @@ jobs:
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
 
       - name: Run release-please
+        id: release
         uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
         with:
           token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # The `simple` strategy doesn't update Cargo files itself. Our TOML
+      # extra-file updater bumps [workspace.package].version, but it does not
+      # apply release-please's dedicated Cargo.lock logic. Re-lock the workspace
+      # crates on the release PR and commit Cargo.lock so `cargo build --locked`
+      # succeeds.
+      - name: Checkout release PR branch
+        if: ${{ steps.release.outputs.pr }}
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
+
+      - name: Prepare
+        if: ${{ steps.release.outputs.pr }}
+        uses: ./.github/actions/prepare
+
+      - name: Re-lock workspace crates
+        if: ${{ steps.release.outputs.pr }}
+        run: cargo update --workspace
+
+      - name: Commit Cargo.lock
+        if: ${{ steps.release.outputs.pr }}
+        uses: ./.github/actions/add-and-commit
+        with:
+          add: Cargo.lock
+          message: 'chore: sync Cargo.lock with release version'
+          token: ${{ steps.app-token.outputs.token }}

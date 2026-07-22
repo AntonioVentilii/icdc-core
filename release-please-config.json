@@ -24,6 +24,11 @@
 			"include-component-in-tag": false,
 			"extra-files": [
 				{
+					"type": "toml",
+					"path": "Cargo.toml",
+					"jsonpath": "$.workspace.package.version"
+				},
+				{
 					"type": "json",
 					"path": "package.json",
 					"jsonpath": "$.version"
