@@ -1,10 +1,5 @@
 name: Deploy
 
-# push to main -> staging; v* tag -> production (ic). Deploys always pass
-# --upgrade-unchanged (post_upgrade always runs, nothing silently skipped) but
-# NOT --yes; the manual "force" input adds --yes to push through a confirmation.
-# Secrets: DFX_DEPLOY_KEY_{STAGING,PROD}. Full flow: docs/ci-cd/release-deploy.md
-
 on:
   push:
     branches:
@@ -75,8 +70,6 @@ jobs:
           dfx-version: '0.32.0'
 
       - name: Install Rust toolchain
-        # Installs the channel pinned in rust-toolchain.toml (which also declares
-        # the wasm32 target); the explicit target add is belt-and-suspenders.
         run: |
           rustup toolchain install
           rustup target add wasm32-unknown-unknown

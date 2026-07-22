@@ -1,9 +1,5 @@
 name: Release Please
 
-# Uses a GitHub App token (NOT GITHUB_TOKEN) so the release PR is bot-authored —
-# a human can approve it, and CI runs on it (GITHUB_TOKEN-authored PRs don't
-# trigger workflows). Setup + secrets: docs/ci-cd/release-deploy.md
-
 on:
   push:
     branches:
@@ -21,8 +17,8 @@ jobs:
     name: Release Please
     runs-on: ubuntu-24.04
     permissions:
-      contents: write # release-please falls back to this; the App token is used in practice.
-      pull-requests: write # Required to open/update the release pull request.
+      contents: write # Create the release commit, tag, and GitHub Release.
+      pull-requests: write # Open and update the release PR.
     steps:
       - name: Generate bot token
         id: app-token

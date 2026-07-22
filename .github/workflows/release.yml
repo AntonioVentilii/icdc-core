@@ -1,7 +1,5 @@
 name: Release
 
-# Uploads the built WASMs + candid as assets to a published GitHub Release.
-# release-please publishes the Release (as the bot), which triggers this once.
 on:
   release:
     types: [released]
