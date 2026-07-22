@@ -43,19 +43,14 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           persist-credentials: false
 
-      - name: Sync Cargo.lock
+      - name: Re-lock workspace crates
         if: ${{ steps.release.outputs.pr }}
-        env:
-          RELEASE_BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          cargo update --workspace
-          if git diff --quiet -- Cargo.lock; then
-            echo "Cargo.lock already in sync; nothing to commit."
-            exit 0
-          fi
-          git config user.name "av-automation[bot]"
-          git config user.email "av-automation[bot]@users.noreply.github.com"
-          git add Cargo.lock
-          git commit -m "chore: sync Cargo.lock with release version"
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${RELEASE_BRANCH}"
+        run: cargo update --workspace
+
+      - name: Commit Cargo.lock
+        if: ${{ steps.release.outputs.pr }}
+        uses: ./.github/actions/add-and-commit
+        with:
+          add: Cargo.lock
+          message: 'chore: sync Cargo.lock with release version'
+          token: ${{ steps.app-token.outputs.token }}
