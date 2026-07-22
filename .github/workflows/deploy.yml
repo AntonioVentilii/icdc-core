@@ -1,0 +1,125 @@
+name: Deploy
+
+# Deploys the application canisters (clearing, registry, minter) to the IC.
+#
+#   - push to `main`  -> STAGING  (dfx network: staging)   [continuous]
+#   - push of a `v*` tag -> PRODUCTION (dfx network: ic)   [on release]
+#   - workflow_dispatch  -> chosen environment, with an optional force tick
+#
+# Automatic runs deploy WITHOUT `--yes`: dfx upgrades only canisters whose module
+# hash changed and skips the rest, so re-running on an unchanged canister is a
+# no-op. To force an upgrade of an otherwise-unchanged canister (e.g. after an
+# issue), run this workflow manually with the `force` box ticked — that adds
+# `--yes --upgrade-unchanged`.
+#
+# Required repo config (see docs/ci-cd/release-deploy.md):
+#   - secrets.DFX_DEPLOY_KEY_STAGING  (base64 PEM of a controller identity)
+#   - secrets.DFX_DEPLOY_KEY_PROD     (base64 PEM; only needed for production)
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        type: choice
+        options:
+          - staging
+          - production
+        default: staging
+      force:
+        description: 'Force upgrade even if a canister is unchanged (adds --yes --upgrade-unchanged)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || (github.ref_type == 'tag' && 'production' || 'staging') }}
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  DFX_WARNING: '-mainnet_plaintext_identity'
+
+jobs:
+  deploy:
+    name: Deploy Canisters
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Determine environment
+        id: env
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          INPUT_ENVIRONMENT: ${{ github.event.inputs.environment }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            ENVIRONMENT="$INPUT_ENVIRONMENT"
+          elif [ "$REF_TYPE" = "tag" ]; then
+            ENVIRONMENT="production"
+          else
+            ENVIRONMENT="staging"
+          fi
+          case "$ENVIRONMENT" in
+            staging) NETWORK="staging" ;;
+            production) NETWORK="ic" ;;
+            *) echo "::error::Unknown environment '$ENVIRONMENT'"; exit 1 ;;
+          esac
+          echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
+          echo "network=$NETWORK" >> "$GITHUB_OUTPUT"
+          echo "Deploying to $ENVIRONMENT (dfx network: $NETWORK)"
+
+      - name: Setup dfx
+        uses: dfinity/setup-dfx@e50c04f104ee4285ec010f10609483cf41e4d365 # main
+        with:
+          dfx-version: '0.32.0'
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Import deploy identity
+        env:
+          ENVIRONMENT: ${{ steps.env.outputs.environment }}
+          DFX_DEPLOY_KEY_STAGING: ${{ secrets.DFX_DEPLOY_KEY_STAGING }}
+          DFX_DEPLOY_KEY_PROD: ${{ secrets.DFX_DEPLOY_KEY_PROD }}
+        run: |
+          if [ "$ENVIRONMENT" = "production" ]; then
+            DEPLOY_KEY_B64="$DFX_DEPLOY_KEY_PROD"
+          else
+            DEPLOY_KEY_B64="$DFX_DEPLOY_KEY_STAGING"
+          fi
+          if [ -z "${DEPLOY_KEY_B64:-}" ]; then
+            echo "::error::No deploy key configured for '$ENVIRONMENT'. Set the corresponding DFX_DEPLOY_KEY_* secret."
+            exit 1
+          fi
+          pem="$(mktemp)"
+          printf '%s' "$DEPLOY_KEY_B64" | base64 -d > "$pem"
+          dfx identity import --storage-mode=plaintext --force ci-deploy "$pem"
+          rm -f "$pem"
+          dfx identity use ci-deploy
+          echo "Deploying as principal: $(dfx identity get-principal)"
+
+      - name: Deploy canisters
+        env:
+          ENVIRONMENT: ${{ steps.env.outputs.environment }}
+          NETWORK: ${{ steps.env.outputs.network }}
+          FORCE: ${{ github.event.inputs.force }}
+        run: |
+          FLAGS=()
+          if [ "$FORCE" = "true" ]; then
+            echo "Force enabled: adding --yes --upgrade-unchanged"
+            FLAGS+=(--yes --upgrade-unchanged)
+          fi
+          echo "Deploying [clearing registry minter] to $ENVIRONMENT (network=$NETWORK)"
+          dfx deploy clearing registry minter --network "$NETWORK" "${FLAGS[@]}"

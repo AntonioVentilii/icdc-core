@@ -1,0 +1,50 @@
+name: Release Please
+
+# Maintains a `chore(release): vX.Y.Z` pull request from Conventional Commits on
+# `main`. When that PR is merged, release-please creates the git tag, the GitHub
+# Release + notes, and updates CHANGELOG.md and the version in package.json.
+#
+# The PR is opened by a GitHub App bot (not the default GITHUB_TOKEN) for two
+# reasons:
+#   1. The bot is the PR author, so a human maintainer can approve it (you cannot
+#      approve your own PR).
+#   2. PRs/commits made with GITHUB_TOKEN do NOT trigger downstream workflows;
+#      an App token does, so Checks/Tests run on the release PR.
+#
+# Required repo config (see docs/ci-cd/release-deploy.md):
+#   - vars.RELEASE_BOT_APP_ID       (GitHub App id)
+#   - secrets.RELEASE_BOT_PRIVATE_KEY (GitHub App private key .pem)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # release-please falls back to this; the App token is used in practice.
+      pull-requests: write # Required to open/update the release pull request.
+    steps:
+      - name: Generate bot token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
+      - name: Run release-please
+        uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

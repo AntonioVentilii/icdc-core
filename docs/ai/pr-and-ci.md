@@ -25,12 +25,13 @@ Examples that match recent history (`git log --oneline`):
 - `chore(github-actions): bump actions/download-artifact from 7.0.0 to 8.0.1`
 - `feat(clearing)!: change settlement signature` ← `!` marks a breaking change
 
-There is currently **no CI gate enforcing the title regex**, but the
-convention is what `release.yml` and the changelog tooling rely on, so
-treat it as binding. If you add `pr-checks.yml` later, mirror the
-control-panel regex
-`^(feat|fix|chore|build|ci|docs|style|refactor|perf|test)(\([-a-zA-Z0-9,]+\))?!?:`
-(scope optional, since this repo's history uses both forms).
+The title regex is enforced by
+[`pr-checks.yml`](../../.github/workflows/pr-checks.yml) on every PR
+(`^(feat|fix|perf|deps|revert|refactor|docs|build|ci|test|style|chore)(\(scope\))?!?: …`,
+scope optional). It is also what `release-please` relies on to build the
+changelog and pick the next version, so treat it as binding. See
+[`docs/ci-cd/release-deploy.md`](../ci-cd/release-deploy.md) for the full
+release + deploy flow.
 
 ### Verbs
 
