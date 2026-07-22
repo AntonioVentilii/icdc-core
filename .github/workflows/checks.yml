@@ -67,8 +67,31 @@ jobs:
       - name: Prepare
         uses: ./.github/actions/prepare
 
+      - name: Restore cargo cache
+        id: cache-lint
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-lint-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
+            ${{ runner.os }}-cargo-lint-
+
       - name: Lint
         run: npm run lint
+
+      - name: Save cargo cache
+        if: always() && steps.cache-lint.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.cache-lint.outputs.cache-primary-key }}
 
   checks-pass:
     name: Checks Pass
