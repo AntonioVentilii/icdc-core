@@ -69,28 +69,19 @@ jobs:
         with:
           dfx-version: '0.32.0'
 
-      - name: Install Rust toolchain
-        run: |
-          rustup toolchain install
-          rustup target add wasm32-unknown-unknown
+      - name: Prepare
+        uses: ./.github/actions/prepare
 
       - name: Import deploy identity
         env:
-          ENVIRONMENT: ${{ steps.env.outputs.environment }}
-          DFX_DEPLOY_KEY_STAGING: ${{ secrets.DFX_DEPLOY_KEY_STAGING }}
-          DFX_DEPLOY_KEY_PROD: ${{ secrets.DFX_DEPLOY_KEY_PROD }}
+          DFX_DEPLOY_KEY: ${{ secrets.DFX_DEPLOY_KEY }}
         run: |
-          if [ "$ENVIRONMENT" = "production" ]; then
-            DEPLOY_KEY_B64="$DFX_DEPLOY_KEY_PROD"
-          else
-            DEPLOY_KEY_B64="$DFX_DEPLOY_KEY_STAGING"
-          fi
-          if [ -z "${DEPLOY_KEY_B64:-}" ]; then
-            echo "::error::No deploy key configured for '$ENVIRONMENT'. Set the corresponding DFX_DEPLOY_KEY_* secret."
+          if [ -z "${DFX_DEPLOY_KEY:-}" ]; then
+            echo "::error::DFX_DEPLOY_KEY secret is not set."
             exit 1
           fi
           pem="$(mktemp)"
-          printf '%s' "$DEPLOY_KEY_B64" | base64 -d > "$pem"
+          printf '%s' "$DFX_DEPLOY_KEY" | base64 -d > "$pem"
           dfx identity import --storage-mode=plaintext --force ci-deploy "$pem"
           rm -f "$pem"
           dfx identity use ci-deploy

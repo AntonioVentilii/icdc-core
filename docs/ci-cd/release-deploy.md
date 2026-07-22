@@ -79,24 +79,24 @@ release PR (`GITHUB_TOKEN`-authored PRs don't trigger workflows).
 
 ### 2. Deploy identity (controller PEM)
 
-Use a dedicated, revocable CI identity added as an additional controller — do
-not put your personal identity in CI.
+A single, dedicated, revocable CI identity serves both environments. Add it as
+an additional controller on both the `staging` and `ic` canisters — do not put
+your personal identity in CI.
 
 ```bash
 dfx identity new icdc-ci-deploy --storage-mode plaintext
 CI_PRINCIPAL=$(dfx --identity icdc-ci-deploy identity get-principal)
 
-# Run as the current controller identity:
-for c in clearing registry minter; do
-  dfx canister --network staging update-settings "$c" --add-controller "$CI_PRINCIPAL"
+# Run as the current controller identity, on both networks:
+for net in staging ic; do
+  for c in clearing registry minter; do
+    dfx canister --network "$net" update-settings "$c" --add-controller "$CI_PRINCIPAL"
+  done
 done
 
 # base64 keeps the multiline PEM intact inside a GitHub secret:
-dfx identity export icdc-ci-deploy | base64 | gh secret set DFX_DEPLOY_KEY_STAGING
+dfx identity export icdc-ci-deploy | base64 | gh secret set DFX_DEPLOY_KEY
 ```
-
-Repeat with a **separate** identity added as controller on the `ic` canisters
-and store it as **`DFX_DEPLOY_KEY_PROD`** before the first production deploy.
 
 ### 3. Branch protection (recommended)
 
@@ -106,9 +106,8 @@ your approval is valid.
 
 ## Secrets & variables
 
-| Name                      | Kind     | Used by              | Purpose                                          |
-| ------------------------- | -------- | -------------------- | ------------------------------------------------ |
-| `RELEASE_BOT_APP_ID`      | variable | `release-please.yml` | GitHub App id for the release bot                |
-| `RELEASE_BOT_PRIVATE_KEY` | secret   | `release-please.yml` | GitHub App private key                           |
-| `DFX_DEPLOY_KEY_STAGING`  | secret   | `deploy.yml`         | base64 PEM of the staging controller identity    |
-| `DFX_DEPLOY_KEY_PROD`     | secret   | `deploy.yml`         | base64 PEM of the production controller identity |
+| Name                      | Kind     | Used by              | Purpose                                                      |
+| ------------------------- | -------- | -------------------- | ------------------------------------------------------------ |
+| `RELEASE_BOT_APP_ID`      | variable | `release-please.yml` | GitHub App id for the release bot                            |
+| `RELEASE_BOT_PRIVATE_KEY` | secret   | `release-please.yml` | GitHub App private key                                       |
+| `DFX_DEPLOY_KEY`          | secret   | `deploy.yml`         | base64 PEM of the CI controller identity (both environments) |
