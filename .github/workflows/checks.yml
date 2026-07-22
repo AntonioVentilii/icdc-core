@@ -120,8 +120,10 @@ jobs:
         run: |
           if [[ -n "$(git status --porcelain)" ]]; then
             echo "::error::Working tree changed after 'npm run did'. Run it locally and commit the result."
-            git status --porcelain
-            git diff HEAD
+            # Stage everything (incl. new/deleted/untracked) so the printed
+            # diff shows content for all changes, not just tracked ones.
+            git add -A
+            git --no-pager diff --cached
             exit 1
           fi
 
