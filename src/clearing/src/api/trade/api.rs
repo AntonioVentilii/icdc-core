@@ -42,7 +42,10 @@ use crate::{
         trade::{LimitOrder, OrderId, Side, TradeId, TransferId},
         user::User,
     },
-    utils::{registry::is_trading_authorized, series::ensure_series_registered},
+    utils::{
+        registry::is_trading_authorized,
+        series::{ensure_series_registered, SeriesAccess},
+    },
 };
 
 /// Submits a limit order for the caller.
@@ -69,7 +72,8 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
             return Ok(true);
         }
 
-        let series = ensure_series_registered(&params.series_id).await?;
+        let series =
+            ensure_series_registered(&params.series_id, SeriesAccess::OpenExposure).await?;
 
         check_trading_access(&series, caller.0).await?;
 
@@ -166,7 +170,7 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
                 .ok_or(TradeError::OrderNotFound(matching_order_id.clone()))
         })?;
 
-        let series = ensure_series_registered(&order.series_id).await?;
+        let series = ensure_series_registered(&order.series_id, SeriesAccess::OpenExposure).await?;
 
         check_trading_access(&series, taker.0).await?;
 
@@ -448,7 +452,8 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
             return Ok(true);
         }
 
-        let series = ensure_series_registered(&proof.series_id).await?;
+        let series =
+            ensure_series_registered(&proof.series_id, SeriesAccess::ReduceExposure).await?;
 
         let valuation_price = proof
             .valuation_price
@@ -946,7 +951,7 @@ pub fn list_orders(params: ListOrdersParams) -> Vec<LimitOrder> {
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn mint_complete_set(series_id: SeriesId, qty: i128) -> Result<bool, TradeError> {
     let caller: User = msg_caller().into();
-    let series = ensure_series_registered(&series_id).await?;
+    let series = ensure_series_registered(&series_id, SeriesAccess::OpenExposure).await?;
     check_trading_access(&series, caller.0).await?;
     mint_complete_set_logic(caller, &series_id, &series, qty)
 }
@@ -1049,7 +1054,7 @@ pub(crate) fn mint_complete_set_logic(
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn redeem_complete_set(series_id: SeriesId, qty: i128) -> Result<bool, TradeError> {
     let caller: User = msg_caller().into();
-    let series = ensure_series_registered(&series_id).await?;
+    let series = ensure_series_registered(&series_id, SeriesAccess::ReduceExposure).await?;
     check_trading_access(&series, caller.0).await?;
     redeem_complete_set_logic(caller, &series_id, &series, qty)
 }
