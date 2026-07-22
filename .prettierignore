@@ -13,3 +13,9 @@ yarn.lock
 /target
 
 .dfx
+
+# Owned by release-please — let it control the formatting. The manifest is
+# also ignored because release-please writes 2-space JSON while this repo's
+# prettier uses tabs (useTabs), so it would otherwise fail the Format check.
+/CHANGELOG.md
+/.release-please-manifest.json

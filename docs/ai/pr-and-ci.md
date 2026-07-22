@@ -11,26 +11,25 @@ and adapts it to icdc-core's Rust-workspace + npm-script stack.
 Use a [Conventional Commits](https://www.conventionalcommits.org/) title:
 
 ```
-verb(scope): description
-verb(scope)!: description   # breaking change
-verb: description           # scope optional, see below
+type(scope): description
+type(scope)!: description   # breaking change
 ```
 
-Examples that match recent history (`git log --oneline`):
+The scope is **required** — a scopeless title is rejected. Use the affected
+area/crate as the scope, or a short tooling area such as `deps`.
 
-- `fix: settlement safety rails (orders, trades, error shape)`
-- `refactor: Principal to Grantee`
-- `chore: v0.0.7`
+Examples:
+
+- `fix(settlement): safety rails (orders, trades, error shape)`
+- `refactor(registry): Principal to Grantee`
+- `chore(release): v0.0.7`
 - `chore(npm-deps-dev): bump prettier-plugin-motoko from 0.12.5 to 0.13.0`
 - `chore(github-actions): bump actions/download-artifact from 7.0.0 to 8.0.1`
 - `feat(clearing)!: change settlement signature` ← `!` marks a breaking change
 
-There is currently **no CI gate enforcing the title regex**, but the
-convention is what `release.yml` and the changelog tooling rely on, so
-treat it as binding. If you add `pr-checks.yml` later, mirror the
-control-panel regex
-`^(feat|fix|chore|build|ci|docs|style|refactor|perf|test)(\([-a-zA-Z0-9,]+\))?!?:`
-(scope optional, since this repo's history uses both forms).
+The `pr-title` job in `checks.yml` enforces this with the regex
+`^(feat|fix|perf|deps|revert|docs|style|chore|refactor|test|build|ci)\([-a-zA-Z0-9,._/]+\)!?: .+$`
+and feeds the aggregate `checks-pass` gate, so a malformed title blocks merge.
 
 ### Verbs
 
@@ -258,12 +257,15 @@ control-panel for the pattern), update this section in the same PR.
 
 ## 10. Release flow (informational)
 
-Releases are triggered by pushing a `v*` tag. `release.yml` builds
-WASMs + Candid for `clearing`, `registry`, `minter`, plus the
-downloaded `ledger` / `index` artifacts, and attaches them to a
-GitHub Release via `softprops/action-gh-release`. There is no
-`release-please` automation — version bumps are manual `chore: vX.Y.Z`
-commits.
+`release-please` maintains a `chore(release): vX.Y.Z` PR from the
+Conventional Commit history on `main`. Merging it creates the tag,
+the GitHub Release + notes, and the `CHANGELOG.md` update; that
+published Release triggers `release.yml`, which builds WASMs + Candid
+for `clearing`, `registry`, `minter` (plus the downloaded `ledger` /
+`index` artifacts) and attaches them via `softprops/action-gh-release`.
+Deployment is separate: `main` → staging, `v*` tag → production. The
+full flow, versioning rationale, and one-time setup live in
+[`docs/ci-cd/release-deploy.md`](../ci-cd/release-deploy.md).
 
 Do not edit release artifacts in tree (`*.wasm.gz`, `*.did`) — they
 come from the build, not from source.
