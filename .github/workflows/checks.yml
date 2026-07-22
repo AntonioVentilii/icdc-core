@@ -111,14 +111,14 @@ jobs:
             ${{ runner.os }}-cargo-did-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
             ${{ runner.os }}-cargo-did-
 
-      # did.sh + format, not `npm run did`, whose trailing `npm run lint` is
-      # redundant with the lint job. Format is required: the committed .did
-      # files are prettier-formatted.
+      # did.sh + prettier on the generated .did files. Not `npm run did`: its
+      # format is full-repo and its lint is redundant with the lint job. The
+      # committed .did files are prettier-formatted, so format before diffing.
       - name: Generate Candid
         if: steps.changes.outputs.rust == 'true'
         run: |
           ./scripts/did.sh
-          npm run format
+          npx prettier --write '**/*.did'
 
       - name: Check for drift
         if: steps.changes.outputs.rust == 'true'
