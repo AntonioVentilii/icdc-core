@@ -16,9 +16,6 @@ jobs:
   release-please:
     name: Release Please
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write # Create the release commit, tag, and GitHub Release.
-      pull-requests: write # Open and update the release PR.
     steps:
       - name: Generate bot token
         id: app-token
