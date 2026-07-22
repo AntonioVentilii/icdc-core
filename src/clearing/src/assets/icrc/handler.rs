@@ -1,4 +1,4 @@
-use candid::Nat;
+use candid::{Nat, Principal};
 use ic_cdk::{
     api::canister_self,
     call::{Call, CallFailed},
@@ -18,6 +18,7 @@ use crate::{
         asset::params::{AssetBalanceOfParams, AssetTransferFromParams, AssetTransferParams},
         types::AssetAmount,
     },
+    memory::{cached_transfer_fee, update_cached_transfer_fee},
     traits::ClearingAccountExt as _,
     types::account::{AssetAccount, ExternalAssetAccount},
 };
@@ -41,6 +42,60 @@ fn map_ledger_call_failed(method: &str, err: CallFailed) -> AssetError {
             code: LEDGER_CALL_CODE_NON_REJECT,
             message: e.to_string(),
         },
+    }
+}
+
+/// Outcome of a single `icrc1_transfer` call once the ledger response has been
+/// decoded, distinguishing a settled block from a recoverable [`BadFee`] drift.
+///
+/// [`BadFee`]: TransferError::BadFee
+enum SettledTransfer {
+    /// The transfer settled (or was a `Duplicate`); carries the block index.
+    Block(u128),
+    /// The ledger rejected the sent fee and reported the one it expects.
+    BadFee { expected_fee: u128 },
+}
+
+/// Sends one `icrc1_transfer` call and decodes the ledger response, surfacing IC
+/// call and Candid decode failures as [`AssetError`].
+async fn send_icrc1_transfer(
+    ledger_id: Principal,
+    args: TransferArg,
+) -> Result<Result<Nat, TransferError>, AssetError> {
+    let response = Call::bounded_wait(ledger_id, "icrc1_transfer")
+        .with_args(&(args,))
+        .await
+        .map_err(|e| map_ledger_call_failed("icrc1_transfer", e))?;
+
+    let (res,) = response
+        .candid_tuple::<(Result<Nat, TransferError>,)>()
+        .map_err(|e| AssetError::CallError {
+            method: "icrc1_transfer".to_owned(),
+            code: LEDGER_CALL_CODE_CANDID_DECODE,
+            message: e.to_string(),
+        })?;
+
+    Ok(res)
+}
+
+/// Classifies a decoded `icrc1_transfer` result for the cached-fee protocol.
+///
+/// A `Duplicate` maps to its `duplicate_of` block (the idempotent retry
+/// succeeded), a `BadFee` is surfaced with the ledger's expected fee so the
+/// caller can refresh the cache and retry, and every other [`TransferError`] is
+/// a definitive failure.
+fn settle_transfer(res: Result<Nat, TransferError>) -> Result<SettledTransfer, AssetError> {
+    match res {
+        Ok(block) => Ok(SettledTransfer::Block(
+            block.0.to_u128().ok_or(AssetError::MathOverflow)?,
+        )),
+        Err(TransferError::Duplicate { duplicate_of }) => Ok(SettledTransfer::Block(
+            duplicate_of.0.to_u128().ok_or(AssetError::MathOverflow)?,
+        )),
+        Err(TransferError::BadFee { expected_fee }) => Ok(SettledTransfer::BadFee {
+            expected_fee: expected_fee.0.to_u128().ok_or(AssetError::MathOverflow)?,
+        }),
+        Err(e) => Err(AssetError::TransferError(format!("{e:?}"))),
     }
 }
 
@@ -129,9 +184,23 @@ impl IcrcHandler {
         Ok(decimals)
     }
 
-    /// Executes an ICRC-1 transfer.
+    /// Executes an ICRC-1 transfer using the cached-fee protocol.
+    ///
+    /// Internal accounting deducts balances against a cached expectation of the
+    /// ledger fee (`AssetMetrics::latest_transfer_fee`). Sending `fee: None`
+    /// lets the ledger silently apply a drifted fee, desynchronising internal
+    /// balances from real ledger movements without ever raising an error. To
+    /// close that gap we send the cached fee explicitly and self-heal on drift:
+    ///
+    /// 1. The first attempt sends the cached fee (when known) in [`TransferArg::fee`], so any drift
+    ///    surfaces as an explicit `BadFee` instead of a silent mismatch.
+    /// 2. On [`TransferError::BadFee`] the cache is refreshed with the ledger's `expected_fee` and
+    ///    the transfer is retried **once** with that value, reusing the same `created_at_time` so
+    ///    the retry stays idempotent.
+    /// 3. A second `BadFee` fails the attempt (definitive rejection), leaving the refreshed cache
+    ///    in place for the next call to reuse.
     pub async fn transfer(&self, params: AssetTransferParams<'_>) -> Result<u128, AssetError> {
-        let ledger_id = params.asset.as_icrc()?;
+        let ledger_id = *params.asset.as_icrc()?;
 
         let from_account = resolve_account(&params.from)?;
 
@@ -139,34 +208,36 @@ impl IcrcHandler {
 
         let AssetAmount::Fixed(amount_u128) = params.amount;
 
-        let icrc_args = TransferArg {
+        let build_args = |fee: Option<u128>| TransferArg {
             from_subaccount: from_account.subaccount,
             to: to_account,
             amount: Nat::from(amount_u128),
-            fee: None,
+            fee: fee.map(Nat::from),
             memo: None,
             created_at_time: params.created_at_time_ns,
         };
 
-        let response = Call::bounded_wait(*ledger_id, "icrc1_transfer")
-            .with_args(&(icrc_args,))
-            .await
-            .map_err(|e| map_ledger_call_failed("icrc1_transfer", e))?;
+        // Attempt 1: send the cached fee explicitly.
+        let cached_fee = cached_transfer_fee(params.asset_id);
+        let expected_fee =
+            match settle_transfer(send_icrc1_transfer(ledger_id, build_args(cached_fee)).await?)? {
+                SettledTransfer::Block(block) => return Ok(block),
+                SettledTransfer::BadFee { expected_fee } => expected_fee,
+            };
 
-        let (res,) = response
-            .candid_tuple::<(Result<Nat, TransferError>,)>()
-            .map_err(|e| AssetError::CallError {
-                method: "icrc1_transfer".to_owned(),
-                code: LEDGER_CALL_CODE_CANDID_DECODE,
-                message: e.to_string(),
-            })?;
-
-        match res {
-            Ok(block) => block.0.to_u128().ok_or(AssetError::MathOverflow),
-            Err(TransferError::Duplicate { duplicate_of }) => {
-                duplicate_of.0.to_u128().ok_or(AssetError::MathOverflow)
+        // Refresh the cache and retry once with the ledger's expected fee.
+        update_cached_transfer_fee(params.asset_id, expected_fee);
+        match settle_transfer(
+            send_icrc1_transfer(ledger_id, build_args(Some(expected_fee))).await?,
+        )? {
+            SettledTransfer::Block(block) => Ok(block),
+            SettledTransfer::BadFee { expected_fee } => {
+                // Definitive rejection: keep the refreshed cache for the next try.
+                update_cached_transfer_fee(params.asset_id, expected_fee);
+                Err(AssetError::TransferError(format!(
+                    "BadFee: ledger expected fee {expected_fee}"
+                )))
             }
-            Err(e) => Err(AssetError::TransferError(format!("{e:?}"))),
         }
     }
 
@@ -256,5 +327,49 @@ fn resolve_account(account: &AssetAccount) -> Result<Account, AssetError> {
         AssetAccount::External(ExternalAssetAccount::Evm(_)) => {
             Err(AssetError::InvalidAssetForHandler)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use candid::Nat;
+    use icrc_ledger_types::icrc1::transfer::TransferError;
+    use shared::types::asset::errors::AssetError;
+
+    use super::{settle_transfer, SettledTransfer};
+
+    #[test]
+    fn settle_ok_returns_block() {
+        let settled = settle_transfer(Ok(Nat::from(7_u64))).unwrap();
+        assert!(matches!(settled, SettledTransfer::Block(7)));
+    }
+
+    #[test]
+    fn settle_duplicate_returns_original_block() {
+        let settled = settle_transfer(Err(TransferError::Duplicate {
+            duplicate_of: Nat::from(42_u64),
+        }))
+        .unwrap();
+        assert!(matches!(settled, SettledTransfer::Block(42)));
+    }
+
+    #[test]
+    fn settle_bad_fee_surfaces_expected_fee() {
+        let settled = settle_transfer(Err(TransferError::BadFee {
+            expected_fee: Nat::from(10_u64),
+        }))
+        .unwrap();
+        assert!(matches!(
+            settled,
+            SettledTransfer::BadFee { expected_fee: 10 }
+        ));
+    }
+
+    #[test]
+    fn settle_other_error_is_definitive_failure() {
+        assert!(matches!(
+            settle_transfer(Err(TransferError::TooOld)),
+            Err(AssetError::TransferError(_))
+        ));
     }
 }
