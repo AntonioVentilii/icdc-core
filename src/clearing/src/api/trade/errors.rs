@@ -50,4 +50,16 @@ pub enum TradeError {
     /// economically closed: positions are gone, winners' cash is booked,
     /// and opening a new position could only create unbacked exposure.
     SeriesAlreadySettled(SeriesId),
+    /// The series is scheduled and its trading window has not opened yet, so no
+    /// trades, orders, or transfers can be initiated on it.
+    ///
+    /// Returned whenever a trade-initiating path sees a series whose `start_ns`
+    /// is still in the future. Carries the open so the caller can render a
+    /// countdown or retry at the right moment instead of polling blindly.
+    SeriesNotStarted {
+        /// The series that is not yet open.
+        series_id: SeriesId,
+        /// The timestamp (nanoseconds since the UNIX epoch) at which it opens.
+        start_ns: u64,
+    },
 }

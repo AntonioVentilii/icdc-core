@@ -757,3 +757,47 @@ fn multi_user_journey() {
     );
     assert_eq!(pos_b[0].net_qty, 10); // B bought 10
 }
+
+/// A scheduled series is registered and discoverable, but every trade-initiating
+/// path is closed until its window opens. The gate lives in
+/// `ensure_series_registered`, so this covers limit orders, market orders,
+/// matched trades, transfers, and complete-set mint/redeem alike.
+#[test]
+fn scheduled_series_rejects_orders_before_its_start() {
+    let env = TestSetup::with_icp();
+    let user = test_user(71);
+
+    // Opens one hour from the current PocketIC time.
+    let series_id = env.add_scheduled_binary_series(
+        "SCHEDULED",
+        1_000_000,
+        BalanceDomain::Settlement,
+        3_600_000_000_000,
+    );
+
+    // No collateral needed: the window gate runs inside `ensure_series_registered`,
+    // which precedes the margin check, so a funded account would not change the
+    // outcome.
+    let res = env.submit_limit_order(
+        user,
+        "before_open",
+        series_id.clone(),
+        Side::Buy,
+        1,
+        500_000,
+    );
+
+    match res {
+        SubmitMatchedTradeResult::Err(TradeError::SeriesNotStarted {
+            series_id: rejected,
+            start_ns,
+        }) => {
+            assert_eq!(rejected, series_id);
+            assert!(
+                start_ns > env.pic.get_time().as_nanos_since_unix_epoch(),
+                "the reported open must still be in the future"
+            );
+        }
+        other => panic!("Expected SeriesNotStarted before the window opens, got: {other:?}"),
+    }
+}
