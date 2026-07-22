@@ -31,7 +31,7 @@
 	},
 	"devDependencies": {
 		"@icp-sdk/bindgen": "^0.4.0",
-		"prettier": "^3.8.3",
+		"prettier": "^3.8.4",
 		"prettier-plugin-motoko": "^0.13.0",
 		"prettier-plugin-organize-imports": "^4.3.0"
 	}
