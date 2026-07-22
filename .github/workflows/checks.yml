@@ -85,20 +85,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Check Rust changes
-        id: changes
-        uses: ./.github/actions/check-rust-changes
-
       - name: Prepare
-        if: steps.changes.outputs.rust == 'true'
         uses: ./.github/actions/prepare
 
       - name: Install candid-extractor
-        if: steps.changes.outputs.rust == 'true'
         run: scripts/setup candid-extractor
 
       - name: Restore cargo cache
-        if: steps.changes.outputs.rust == 'true'
         id: cache-did
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -112,11 +105,9 @@ jobs:
             ${{ runner.os }}-cargo-did-
 
       - name: Generate Candid
-        if: steps.changes.outputs.rust == 'true'
         run: npm run did
 
       - name: Check for drift
-        if: steps.changes.outputs.rust == 'true'
         run: |
           if [[ -n "$(git status --porcelain)" ]]; then
             echo "::error::Working tree changed after 'npm run did'. Run it locally and commit the result."
@@ -128,7 +119,7 @@ jobs:
           fi
 
       - name: Save cargo cache
-        if: always() && steps.changes.outputs.rust == 'true' && steps.cache-did.outputs.cache-hit != 'true'
+        if: always() && steps.cache-did.outputs.cache-hit != 'true'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
