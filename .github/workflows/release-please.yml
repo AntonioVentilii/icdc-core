@@ -1,19 +1,8 @@
 name: Release Please
 
-# Maintains a `chore(release): vX.Y.Z` pull request from Conventional Commits on
-# `main`. When that PR is merged, release-please creates the git tag, the GitHub
-# Release + notes, and updates CHANGELOG.md and the version in package.json.
-#
-# The PR is opened by a GitHub App bot (not the default GITHUB_TOKEN) for two
-# reasons:
-#   1. The bot is the PR author, so a human maintainer can approve it (you cannot
-#      approve your own PR).
-#   2. PRs/commits made with GITHUB_TOKEN do NOT trigger downstream workflows;
-#      an App token does, so Checks/Tests run on the release PR.
-#
-# Required repo config (see docs/ci-cd/release-deploy.md):
-#   - vars.RELEASE_BOT_APP_ID       (GitHub App id)
-#   - secrets.RELEASE_BOT_PRIVATE_KEY (GitHub App private key .pem)
+# Uses a GitHub App token (NOT GITHUB_TOKEN) so the release PR is bot-authored —
+# a human can approve it, and CI runs on it (GITHUB_TOKEN-authored PRs don't
+# trigger workflows). Setup + secrets: docs/ci-cd/release-deploy.md
 
 on:
   push:

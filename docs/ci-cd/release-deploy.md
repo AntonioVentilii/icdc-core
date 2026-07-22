@@ -27,7 +27,9 @@ approve + merge the release PR ──▶ main
 | `release-please.yml` | push to `main`, manual                                | Maintain the release PR; on merge, create tag + Release + notes, bump `package.json`. |
 | `release.yml`        | GitHub Release `released`, manual                     | Build `clearing/registry/minter` WASMs + candid and attach as release assets.         |
 | `deploy.yml`         | push to `main` (→ staging), `v*` tag (→ prod), manual | `dfx deploy clearing registry minter` to the target network.                          |
-| `pr-checks.yml`      | pull_request                                          | Enforce a Conventional Commit PR title (feeds the changelog).                         |
+
+Conventional Commit PR titles (which feed the changelog) are enforced by the
+`pr-title` job in `checks.yml`.
 
 ### Versioning
 
@@ -47,12 +49,12 @@ Pre-1.0 bumping (`bump-minor-pre-major` + `bump-patch-for-minor-pre-major`):
 
 ### Deploy semantics
 
-- **Automatic** (push to `main`, `v*` tag) deploys **without `--yes`**. `dfx`
-  upgrades only canisters whose module hash changed and skips the rest, so an
-  unchanged commit is a no-op.
+- Deploys always pass **`--upgrade-unchanged`** so `post_upgrade` always runs
+  and no canister is silently skipped by a hash check.
+- **Automatic** runs (push to `main`, `v*` tag) omit **`--yes`**.
 - **Force tick**: run `deploy.yml` manually (Actions → Deploy → Run workflow),
-  choose the environment, and tick **force** to add `--yes --upgrade-unchanged`
-  and push an upgrade even when the canister is unchanged.
+  choose the environment, and tick **force** to add `--yes` and auto-confirm a
+  deploy that would otherwise stop at a confirmation prompt (e.g. after an issue).
 - Only the application canisters (`clearing`, `registry`, `minter`) are deployed.
   `ledger`, `index`, and `icp_ledger` are managed out of band.
 

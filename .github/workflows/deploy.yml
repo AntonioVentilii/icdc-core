@@ -1,20 +1,9 @@
 name: Deploy
 
-# Deploys the application canisters (clearing, registry, minter) to the IC.
-#
-#   - push to `main`  -> STAGING  (dfx network: staging)   [continuous]
-#   - push of a `v*` tag -> PRODUCTION (dfx network: ic)   [on release]
-#   - workflow_dispatch  -> chosen environment, with an optional force tick
-#
-# Automatic runs deploy WITHOUT `--yes`: dfx upgrades only canisters whose module
-# hash changed and skips the rest, so re-running on an unchanged canister is a
-# no-op. To force an upgrade of an otherwise-unchanged canister (e.g. after an
-# issue), run this workflow manually with the `force` box ticked — that adds
-# `--yes --upgrade-unchanged`.
-#
-# Required repo config (see docs/ci-cd/release-deploy.md):
-#   - secrets.DFX_DEPLOY_KEY_STAGING  (base64 PEM of a controller identity)
-#   - secrets.DFX_DEPLOY_KEY_PROD     (base64 PEM; only needed for production)
+# push to main -> staging; v* tag -> production (ic). Deploys always pass
+# --upgrade-unchanged (post_upgrade always runs, nothing silently skipped) but
+# NOT --yes; the manual "force" input adds --yes to push through a confirmation.
+# Secrets: DFX_DEPLOY_KEY_{STAGING,PROD}. Full flow: docs/ci-cd/release-deploy.md
 
 on:
   push:
@@ -32,7 +21,7 @@ on:
           - production
         default: staging
       force:
-        description: 'Force upgrade even if a canister is unchanged (adds --yes --upgrade-unchanged)'
+        description: 'Auto-confirm the deploy (adds --yes to push through a confirmation prompt)'
         type: boolean
         default: false
 
@@ -120,10 +109,10 @@ jobs:
           NETWORK: ${{ steps.env.outputs.network }}
           FORCE: ${{ github.event.inputs.force }}
         run: |
-          FLAGS=()
+          FLAGS=(--upgrade-unchanged)
           if [ "$FORCE" = "true" ]; then
-            echo "Force enabled: adding --yes --upgrade-unchanged"
-            FLAGS+=(--yes --upgrade-unchanged)
+            echo "Force enabled: adding --yes"
+            FLAGS+=(--yes)
           fi
           echo "Deploying [clearing registry minter] to $ENVIRONMENT (network=$NETWORK)"
           dfx deploy clearing registry minter --network "$NETWORK" "${FLAGS[@]}"
