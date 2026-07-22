@@ -93,17 +93,10 @@ jobs:
         if: steps.changes.outputs.rust == 'true'
         uses: ./.github/actions/prepare
 
-      # candid-extractor is required by scripts/did.sh but is not installed
-      # by the prepare action (it is not needed by the format/lint jobs).
       - name: Install candid-extractor
         if: steps.changes.outputs.rust == 'true'
         run: scripts/setup candid-extractor
 
-      # Regenerating the .did files builds the same release wasms as the
-      # integration tests. Cache the cargo registry and target dir to avoid a
-      # cold rebuild each run; the primary key includes the commit SHA so a
-      # fresh cache is saved every run, with restore-keys falling back to the
-      # most recent matching prefix for warm starts.
       - name: Restore cargo cache
         if: steps.changes.outputs.rust == 'true'
         id: cache-did
@@ -118,11 +111,9 @@ jobs:
             ${{ runner.os }}-cargo-did-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
             ${{ runner.os }}-cargo-did-
 
-      # Mirror `npm run did` (generate + format) but skip lint, which the
-      # dedicated lint job already covers. Formatting matters: the committed
-      # .did files are prettier-formatted (prettier-plugin-motoko claims
-      # *.did), so the raw candid-extractor output must be formatted before
-      # diffing, otherwise formatting-only differences would fail the check.
+      # did.sh + format, not `npm run did`, whose trailing `npm run lint` is
+      # redundant with the lint job. Format is required: the committed .did
+      # files are prettier-formatted.
       - name: Generate Candid
         if: steps.changes.outputs.rust == 'true'
         run: |
