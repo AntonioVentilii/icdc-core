@@ -62,6 +62,40 @@ type AggregateLeanParams = record {
 	// chosen is entirely a consumer concern.
 	principals : vec principal
 };
+// Input parameters for
+// [`aggregate_settlement_accuracy`](super::aggregate_settlement_accuracy).
+//
+// Aggregates each supplied principal's settled-position win/total counts over
+// an arbitrary half-open time window `[from_ts, to_ts)`. Unlike
+// [`ListLeaderboardParams`] — which ranks over fixed calendar windows backed
+// by the maintained `SETTLEMENT_LEADERBOARD` index — this scans the raw event
+// log so a consumer can score a cohort over a bespoke window (e.g. a league
+// "battle" running an arbitrary 7-day span that does not align to a calendar
+// week). The clearing layer ascribes no meaning to the set or the window; how
+// they are chosen is entirely a consumer concern.
+type AggregateSettlementAccuracyParams = record {
+	// Exclusive upper bound on a settlement's `timestamp` (ns). `None` runs
+	// through the latest settlement. The window is half-open `[from_ts,
+	// to_ts)` so two adjacent windows that share an endpoint never both count
+	// the same settlement.
+	to_ts : opt nat64;
+	// The principals to aggregate over (e.g. a league's member set). The set
+	// is caller-controlled and scanned in full, so it is capped at 10,000 —
+	// any realistic cohort is well under this; a longer list is truncated to
+	// the first 10,000. Duplicate principals are de-duplicated and never
+	// double-count.
+	members : vec principal;
+	// Inclusive lower bound on a settlement's `timestamp` (ns since the Unix
+	// epoch). `None` starts from the earliest settlement.
+	from_ts : opt nat64;
+	// Optional series allow-list. `None` counts settlements on every series;
+	// `Some(set)` counts only settlements whose `series_id` is in the set, so
+	// a consumer can scope a cohort's accuracy to a market category (e.g. a
+	// battle scoped to one tag passes that tag's series). An empty `Some(vec)`
+	// therefore matches nothing. The clearing layer ascribes no meaning to the
+	// set; how it is chosen is entirely a consumer concern.
+	series_ids : opt vec text
+};
 // Represents a supported asset in the ICDC ecosystem.
 type Asset = variant {
 	// An ERC-20 token on an EVM-compatible chain.
@@ -773,6 +807,23 @@ type Series = record {
 	expiry_ns : nat64;
 	// An optional banner URL for the market.
 	banner_url : opt text;
+	// Optional timestamp in nanoseconds since UNIX epoch at which trading opens.
+	//
+	// `None` means the series is tradeable from the moment it is registered —
+	// the historical behavior, and the canonical way to express "live now".
+	// `Some(t)` schedules the series: it is listed and discoverable immediately
+	// but trading is rejected until `t`. The window is inclusive at the open
+	// (`now >= start_ns` is live) and exclusive at the close (`now < expiry_ns`
+	// is unexpired), so a series is tradeable over `[start_ns, expiry_ns)`.
+	//
+	// Participates in `series_id` hashing (see [`Series::generate_id`]): two
+	// series that differ only in their trading window are distinct contracts,
+	// so a scheduled series can never silently collide with an already-live one
+	// and inherit a start date its creator did not ask for. To keep that
+	// guarantee meaningful `None` is the only encoding of "already live" —
+	// `add_series` rejects a `start_ns` at or before the current time, so the
+	// same market cannot exist under two ids.
+	start_ns : opt nat64;
 	// Unique identifier computed from series parameters.
 	series_id : text;
 	// The underlying asset ticker or identifier (e.g., "ICP/USD").
@@ -930,6 +981,25 @@ type SettledSeriesPage = record {
 	next_cursor : opt text;
 	// Settled series ids in this page, ascending.
 	items : vec text
+};
+// One principal's settled-position accuracy over a requested window.
+//
+// Mirrors the aggregate-only contract of [`LeaderboardEntry`]: window totals
+// (settled / win counts plus net realized `PnL`) and never a per-settlement
+// breakdown. `win_count / settled_count` is the window accuracy. Only
+// principals with at least one settlement in the window are returned — a
+// member with no settlement contributes nothing to a cohort's accuracy, and
+// the caller already knows the full set it asked for.
+type SettlementAccuracyEntry = record {
+	// The aggregated principal.
+	"principal" : principal;
+	// Net realized `PnL` over the window, in internal USD (`vUSD`) base units —
+	// the signed sum of the principal's settlement cashflows.
+	realized_pnl : int;
+	// Number of those settlements that were net positive (`cashflow_usd > 0`).
+	win_count : nat64;
+	// Number of settled positions in the window.
+	settled_count : nat64
 };
 // Errors occurring during derivative series settlement.
 type SettlementError = variant {
@@ -1096,6 +1166,18 @@ type TradeError = variant {
 	SelfTradingNotAllowed;
 	// The specified order was not found.
 	OrderNotFound : text;
+	// The series is scheduled and its trading window has not opened yet, so no
+	// trades, orders, or transfers can be initiated on it.
+	//
+	// Returned whenever a trade-initiating path sees a series whose `start_ns`
+	// is still in the future. Carries the open so the caller can render a
+	// countdown or retry at the right moment instead of polling blindly.
+	SeriesNotStarted : record {
+		// The timestamp (nanoseconds since the UNIX epoch) at which it opens.
+		start_ns : nat64;
+		// The series that is not yet open.
+		series_id : text
+	};
 	// The trade would violate the no-arbitrage principle (e.g., sum of outcome prices > 1.0).
 	ArbitrageLimitExceeded : record {
 		// The hard limit (usually 1.0 USD).
@@ -1271,6 +1353,29 @@ service : (Config) -> {
 	// The supplied set is de-duplicated and capped at `MAX_AGGREGATE_PRINCIPALS`.
 	// Guarded by `caller_is_not_anonymous`, matching the other position reads.
 	aggregate_lean : (AggregateLeanParams) -> (AggregateLean) query;
+	// Aggregates each supplied principal's settled-position win/total counts (and
+	// net realized `PnL`) over an arbitrary half-open window `[from_ts, to_ts)`.
+	//
+	// `win_count / settled_count` per entry is that principal's window accuracy —
+	// the same metric [`list_leaderboard`] exposes, but over a caller-chosen span
+	// rather than a fixed calendar bucket. A consumer scoring a cohort (e.g. one
+	// league side of a "battle") sums the entries it gets back for that side's
+	// members.
+	//
+	// Unlike [`list_leaderboard`], the arbitrary window cannot use the
+	// `(window, period)` index, so this scans the raw `EVENTS` log once —
+	// `O(events)`, the same cost class as [`get_trade_history`] and the
+	// post-upgrade leaderboard rebuild. Only `Settled` events count; a `Settled`
+	// event's `qty` is the position's signed `cashflow_usd`, so a win is
+	// `qty > 0`, matching the leaderboard's rule exactly. Pass `series_ids` to
+	// scope the count to a set of series (e.g. one market category); `None`
+	// counts every series. Guarded by `caller_is_not_anonymous`, matching the
+	// other settlement-derived reads.
+	//
+	// [`get_trade_history`]: crate::api::trade::get_trade_history
+	aggregate_settlement_accuracy : (AggregateSettlementAccuracyParams) -> (
+		vec SettlementAccuracyEntry
+	) query;
 	// One-shot, idempotent backfill of `Settled` events for plans finalized
 	// before per-user event emission was added to `apply_settlement_accounting_logic`.
 	//

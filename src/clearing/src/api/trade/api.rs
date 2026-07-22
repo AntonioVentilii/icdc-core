@@ -1164,6 +1164,7 @@ mod tests {
             series_id: series_id.clone(),
             underlying: "BTC".to_owned(),
             expiry_ns: 2_000_000_000,
+            start_ns: None,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(50_000_000, 6)),
             price_precision: 6,

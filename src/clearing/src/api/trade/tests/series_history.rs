@@ -224,6 +224,7 @@ fn live_execution_populates_index() {
         series_id: series_id.clone(),
         underlying: "BTC".to_owned(),
         expiry_ns: 2_000_000_000,
+        start_ns: None,
         payoff_type: PayoffType::Binary,
         strike: Some(Price::new(50_000, 0)),
         price_precision: 8,

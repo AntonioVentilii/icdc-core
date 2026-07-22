@@ -103,6 +103,23 @@ pub struct Series {
     pub underlying: String,
     /// Expiry timestamp in nanoseconds since UNIX epoch.
     pub expiry_ns: u64,
+    /// Optional timestamp in nanoseconds since UNIX epoch at which trading opens.
+    ///
+    /// `None` means the series is tradeable from the moment it is registered —
+    /// the historical behavior, and the canonical way to express "live now".
+    /// `Some(t)` schedules the series: it is listed and discoverable immediately
+    /// but trading is rejected until `t`. The window is inclusive at the open
+    /// (`now >= start_ns` is live) and exclusive at the close (`now < expiry_ns`
+    /// is unexpired), so a series is tradeable over `[start_ns, expiry_ns)`.
+    ///
+    /// Participates in `series_id` hashing (see [`Series::generate_id`]): two
+    /// series that differ only in their trading window are distinct contracts,
+    /// so a scheduled series can never silently collide with an already-live one
+    /// and inherit a start date its creator did not ask for. To keep that
+    /// guarantee meaningful `None` is the only encoding of "already live" —
+    /// `add_series` rejects a `start_ns` at or before the current time, so the
+    /// same market cannot exist under two ids.
+    pub start_ns: Option<u64>,
     /// The mathematical payoff model used for this series.
     pub payoff_type: PayoffType,
     /// Target price for options, if applicable.
@@ -201,6 +218,14 @@ impl Series {
         hasher.update(b"|EXPIRY|");
         hasher.update(params.expiry_ns.to_be_bytes());
 
+        // Emitted only when a start is set, so unscheduled series (`None`) hash
+        // byte-identically to how they did before `start_ns` existed. That keeps
+        // every already-registered id stable without a domain-separator bump.
+        if let Some(start_ns) = params.start_ns {
+            hasher.update(b"|START|");
+            hasher.update(start_ns.to_be_bytes());
+        }
+
         hasher.update(b"|PAYOFF|");
         hasher.update(params.payoff_type.as_id_bytes());
 
@@ -252,6 +277,53 @@ impl Series {
 
         series_id.into()
     }
+
+    /// Returns where `now` falls in this series' trading window.
+    ///
+    /// The window is `[start_ns, expiry_ns)` — inclusive at the open so the
+    /// series is live at exactly the announced instant, exclusive at the close
+    /// to match the pre-existing expiry semantics (a series expires *at*
+    /// `expiry_ns`, see [`ListSeriesParams::matches_expiry`]).
+    ///
+    /// Expiry takes precedence over the start: because `start_ns < expiry_ns` is
+    /// enforced at registration, any `now` at or past expiry is also past the
+    /// start, so [`SeriesStatus::Expired`] is never ambiguous.
+    #[must_use]
+    pub fn status(&self, now: u64) -> SeriesStatus {
+        if now >= self.expiry_ns {
+            SeriesStatus::Expired
+        } else if self.start_ns.is_some_and(|start| now < start) {
+            SeriesStatus::Upcoming
+        } else {
+            SeriesStatus::Live
+        }
+    }
+
+    /// Returns true when `now` falls inside this series' trading window.
+    ///
+    /// This is the registry's half of the "currently tradeable" predicate. It is
+    /// purely a function of the clock and the series' own window — settlement
+    /// state and trading access are owned elsewhere and checked separately.
+    #[must_use]
+    pub fn is_tradeable_at(&self, now: u64) -> bool {
+        matches!(self.status(now), SeriesStatus::Live)
+    }
+}
+
+/// Where a series sits in its trading window at a given instant.
+///
+/// Derived from `start_ns`/`expiry_ns` rather than stored, so it can never drift
+/// out of sync with the timestamps it describes. Settlement state is deliberately
+/// absent: it is owned by the clearing canister, and folding it in here would
+/// make the registry's answer depend on state it does not hold.
+#[derive(CandidType, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SeriesStatus {
+    /// `start_ns` is set and still in the future — listed, but not yet tradeable.
+    Upcoming,
+    /// Inside the trading window: at or past `start_ns`, strictly before `expiry_ns`.
+    Live,
+    /// At or past `expiry_ns`.
+    Expired,
 }
 
 /// Validates a [BCP 47](https://www.rfc-editor.org/info/bcp47)-shaped locale tag.
@@ -301,6 +373,8 @@ pub fn is_valid_locale(locale: &str) -> bool {
 pub struct SeriesIdParams<'a> {
     pub underlying: &'a str,
     pub expiry_ns: u64,
+    /// The trading-window open, if the series is scheduled. See [`Series::start_ns`].
+    pub start_ns: Option<u64>,
     pub payoff_type: &'a PayoffType,
     pub strike: Option<&'a Price>,
     pub price_precision: u8,
@@ -361,6 +435,15 @@ pub enum SeriesError {
     InvalidLocale,
     /// Returned when the targeted series does not exist.
     SeriesNotFound,
+    /// The provided `start_ns` is at or before the registry's current time.
+    ///
+    /// A series that is already live must be registered with `start_ns: None`,
+    /// which is the single canonical encoding of "tradeable immediately".
+    /// Allowing a past start would let the same market exist under two ids.
+    StartNotInFuture,
+    /// The provided `start_ns` is at or after `expiry_ns`, leaving no window in
+    /// which the series could ever be traded.
+    StartNotBeforeExpiry,
 }
 
 /// Input parameters for registering a new derivative series.
@@ -372,6 +455,11 @@ pub struct AddSeriesParams {
     pub balance_domain: BalanceDomain,
     /// Expiry timestamp in nanoseconds since UNIX epoch.
     pub expiry_ns: u64,
+    /// Optional timestamp at which trading opens. See [`Series::start_ns`].
+    ///
+    /// Omit (`None`) for a series that is tradeable immediately. When set, it
+    /// must be strictly in the future and strictly before `expiry_ns`.
+    pub start_ns: Option<u64>,
     /// The payoff model for the series.
     pub payoff_type: PayoffType,
     /// The option strike price, if applicable.
@@ -544,6 +632,19 @@ pub struct ListSeriesParams {
     /// state is owned by the clearing canister and is filtered separately by the
     /// caller (see `clearing.list_settled_series`).
     pub only_unexpired: Option<bool>,
+    /// When `Some(true)`, return only series that are inside their trading
+    /// window right now — at or past `start_ns` (when set) *and* strictly before
+    /// `expiry_ns`. `Some(false)` and `None` apply no filtering.
+    ///
+    /// This is strictly narrower than [`Self::only_unexpired`], which admits
+    /// scheduled series whose start has not arrived yet. `only_unexpired` is
+    /// deliberately left alone rather than redefined: callers that already rely
+    /// on it keep their exact current results, and a frontend that wants to show
+    /// an "upcoming" tab needs both answers, not one merged into the other.
+    ///
+    /// Like the expiry cutoff, the clock is the canister's own server-side
+    /// `time()`.
+    pub tradeable_now: Option<bool>,
     /// Optional pagination parameters.
     pub pagination: Option<PaginationParams>,
 }
@@ -637,6 +738,33 @@ impl ListSeriesParams {
         } else {
             true
         }
+    }
+
+    /// Returns true if `series` satisfies the `tradeable_now` filter relative to
+    /// `now` (nanoseconds since the UNIX epoch).
+    ///
+    /// Separate from [`Self::matches_expiry`] for the same reason that one is
+    /// separate from [`Self::matches`]: the cutoff depends on the caller's notion
+    /// of "now", and the registry supplies its own `time()` so it stays
+    /// server-authoritative.
+    ///
+    /// When the filter is unset or `Some(false)`, every series passes.
+    #[must_use]
+    pub fn matches_tradeable_now(&self, series: &Series, now: u64) -> bool {
+        if self.tradeable_now == Some(true) {
+            series.is_tradeable_at(now)
+        } else {
+            true
+        }
+    }
+
+    /// Applies every clock-dependent filter at once.
+    ///
+    /// Convenience for call sites that must not forget one of the two: adding a
+    /// third time-based filter later extends this and every caller picks it up.
+    #[must_use]
+    pub fn matches_time(&self, series: &Series, now: u64) -> bool {
+        self.matches_expiry(series, now) && self.matches_tradeable_now(series, now)
     }
 }
 
@@ -743,7 +871,7 @@ mod tests {
     use candid::Principal;
 
     use crate::types::{
-        series::{is_valid_locale, PaginationParams},
+        series::{is_valid_locale, ListSeriesParams, PaginationParams, SeriesStatus},
         BalanceDomain, Description, PayoffType, PayoutUnit, Price, Resolution, Series, SeriesId,
         SeriesIdParams, TradingAccess,
     };
@@ -755,6 +883,7 @@ mod tests {
             series_id: SeriesId::from(id.to_owned()),
             underlying: "ICP".to_owned(),
             expiry_ns: 1_000,
+            start_ns: None,
             payoff_type: PayoffType::Binary,
             strike: None,
             price_precision: 8,
@@ -956,6 +1085,7 @@ mod tests {
         let id1 = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: expiry,
+            start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
             price_precision: precision,
@@ -971,6 +1101,7 @@ mod tests {
         let id2 = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: expiry,
+            start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
             price_precision: precision,
@@ -998,6 +1129,7 @@ mod tests {
         let id1 = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: 100,
+            start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
             price_precision: precision,
@@ -1013,6 +1145,7 @@ mod tests {
         let id2 = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: 200,
+            start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
             price_precision: precision,
@@ -1040,6 +1173,7 @@ mod tests {
         let id1 = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: expiry,
+            start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
             price_precision: 8,
@@ -1055,6 +1189,7 @@ mod tests {
         let id2 = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: expiry,
+            start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
             price_precision: 10,
@@ -1084,6 +1219,7 @@ mod tests {
         let original = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: expiry,
+            start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
             price_precision: precision,
@@ -1099,6 +1235,7 @@ mod tests {
         let forked = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: expiry,
+            start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
             price_precision: precision,
@@ -1128,6 +1265,7 @@ mod tests {
         let original = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: expiry,
+            start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
             price_precision: precision,
@@ -1143,6 +1281,7 @@ mod tests {
         let fork_0 = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: expiry,
+            start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
             price_precision: precision,
@@ -1158,6 +1297,7 @@ mod tests {
         let fork_1 = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: expiry,
+            start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
             price_precision: precision,
@@ -1191,6 +1331,7 @@ mod tests {
         let original = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: expiry,
+            start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
             price_precision: precision,
@@ -1206,6 +1347,7 @@ mod tests {
         let fork_alice = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: expiry,
+            start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
             price_precision: precision,
@@ -1221,6 +1363,7 @@ mod tests {
         let fork_bob = Series::generate_id(&SeriesIdParams {
             underlying,
             expiry_ns: expiry,
+            start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
             price_precision: precision,
@@ -1245,6 +1388,7 @@ mod tests {
             series_id: SeriesId::from("test".to_owned()),
             underlying: "ICP".to_owned(),
             expiry_ns: 1_735_689_600,
+            start_ns: None,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(100, 8)),
             price_precision: 8,
@@ -1284,6 +1428,7 @@ mod tests {
             Series::generate_id(&SeriesIdParams {
                 underlying: &series.underlying,
                 expiry_ns: series.expiry_ns,
+                start_ns: None,
                 payoff_type: &series.payoff_type,
                 strike: series.strike.as_ref(),
                 price_precision: series.price_precision,
@@ -1301,6 +1446,7 @@ mod tests {
             series_id: SeriesId::from(String::new()),
             underlying: "ICP".to_owned(),
             expiry_ns: 1_735_689_600,
+            start_ns: None,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(100, 8)),
             price_precision: 8,
@@ -1368,5 +1514,213 @@ mod tests {
         ] {
             assert!(!is_valid_locale(tag), "expected `{tag}` to be rejected");
         }
+    }
+
+    // --- start_ns / trading window ---------------------------------------
+
+    fn windowed_series(start_ns: Option<u64>, expiry_ns: u64) -> Series {
+        let mut s = series_with_id("s");
+        s.start_ns = start_ns;
+        s.expiry_ns = expiry_ns;
+        s
+    }
+
+    /// Pins the id of an unscheduled series to a literal.
+    ///
+    /// `start_ns: None` must hash byte-identically to how it did before the field
+    /// existed, otherwise every already-registered series would change id on
+    /// upgrade. This golden value predates `start_ns` — if a change to
+    /// `generate_id` breaks it, that change is not backward compatible.
+    #[test]
+    fn unscheduled_series_id_is_unchanged_by_start_ns() {
+        let payoff_type = PayoffType::Call;
+        let strike = Some(Price::new(100, 8));
+        let payout_unit = PayoutUnit::usd();
+
+        let id = Series::generate_id(&SeriesIdParams {
+            underlying: "ICP",
+            expiry_ns: 1_735_689_600,
+            start_ns: None,
+            payoff_type: &payoff_type,
+            strike: strike.as_ref(),
+            price_precision: 8,
+            payout_unit: &payout_unit,
+            outcomes: None,
+            oracle_source: "coingecko",
+            balance_domain: BalanceDomain::Settlement,
+            forked_from: None,
+            fork_caller: None,
+            fork_index: None,
+        });
+
+        assert_eq!(
+            id.as_str(),
+            "908081d593ebc096c1392345c40997ac22d0f5f958854bd37c9c9eaeb198d7ec"
+        );
+    }
+
+    #[test]
+    fn start_ns_changes_the_series_id() {
+        let payoff_type = PayoffType::Binary;
+        let payout_unit = PayoutUnit::usd();
+        let params = |start_ns| SeriesIdParams {
+            underlying: "ICP",
+            expiry_ns: 5_000,
+            start_ns,
+            payoff_type: &payoff_type,
+            strike: None,
+            price_precision: 8,
+            payout_unit: &payout_unit,
+            outcomes: None,
+            oracle_source: "coingecko",
+            balance_domain: BalanceDomain::Settlement,
+            forked_from: None,
+            fork_caller: None,
+            fork_index: None,
+        };
+
+        let unscheduled = Series::generate_id(&params(None));
+        let early = Series::generate_id(&params(Some(1_000)));
+        let late = Series::generate_id(&params(Some(2_000)));
+
+        assert_ne!(unscheduled, early, "None must not collide with a start");
+        assert_ne!(early, late, "different starts must be different contracts");
+    }
+
+    #[test]
+    fn status_is_live_when_no_start_is_set() {
+        let series = windowed_series(None, 1_000);
+
+        assert_eq!(series.status(0), SeriesStatus::Live);
+        assert_eq!(series.status(999), SeriesStatus::Live);
+    }
+
+    /// The window is inclusive at the open and exclusive at the close: a series
+    /// is live at exactly `start_ns` and expired at exactly `expiry_ns`.
+    #[test]
+    fn status_boundaries_are_inclusive_open_exclusive_close() {
+        let series = windowed_series(Some(100), 200);
+
+        assert_eq!(series.status(99), SeriesStatus::Upcoming);
+        assert_eq!(series.status(100), SeriesStatus::Live, "live at the open");
+        assert_eq!(series.status(199), SeriesStatus::Live);
+        assert_eq!(
+            series.status(200),
+            SeriesStatus::Expired,
+            "expired at the close"
+        );
+        assert_eq!(series.status(201), SeriesStatus::Expired);
+    }
+
+    #[test]
+    fn tradeable_now_filter_excludes_upcoming_series() {
+        let upcoming = windowed_series(Some(100), 200);
+        let live = windowed_series(None, 200);
+
+        let params = ListSeriesParams {
+            tradeable_now: Some(true),
+            ..Default::default()
+        };
+
+        assert!(!params.matches_tradeable_now(&upcoming, 50));
+        assert!(params.matches_tradeable_now(&upcoming, 100));
+        assert!(params.matches_tradeable_now(&live, 50));
+    }
+
+    /// `only_unexpired` deliberately keeps its old, wider meaning: a scheduled
+    /// series that has not opened yet is still unexpired.
+    #[test]
+    fn only_unexpired_still_admits_upcoming_series() {
+        let upcoming = windowed_series(Some(100), 200);
+
+        let params = ListSeriesParams {
+            only_unexpired: Some(true),
+            ..Default::default()
+        };
+
+        assert!(params.matches_expiry(&upcoming, 50));
+        assert!(
+            params.matches_time(&upcoming, 50),
+            "no tradeable_now filter set"
+        );
+    }
+
+    #[test]
+    fn matches_time_applies_both_filters() {
+        let upcoming = windowed_series(Some(100), 200);
+
+        let params = ListSeriesParams {
+            only_unexpired: Some(true),
+            tradeable_now: Some(true),
+            ..Default::default()
+        };
+
+        assert!(!params.matches_time(&upcoming, 50), "not open yet");
+        assert!(params.matches_time(&upcoming, 150), "inside the window");
+        assert!(!params.matches_time(&upcoming, 250), "expired");
+    }
+
+    /// Stable state written before `start_ns` existed must still decode, with the
+    /// field defaulting to `None`. Candid treats an absent `opt` record field as
+    /// null, which is why this needs no migration — but the guarantee is load
+    /// bearing enough to pin with a test.
+    #[test]
+    fn legacy_blob_without_start_ns_decodes_as_none() {
+        /// The current [`Series`] shape minus `start_ns`, mirroring what older
+        /// canister versions wrote to stable memory.
+        #[derive(candid::CandidType)]
+        struct PreStartNsSeries {
+            series_id: SeriesId,
+            underlying: String,
+            expiry_ns: u64,
+            payoff_type: PayoffType,
+            strike: Option<Price>,
+            price_precision: u8,
+            payout_unit: PayoutUnit,
+            outcomes: Option<Vec<crate::types::series::Outcome>>,
+            oracle_source: String,
+            creator: Principal,
+            created_at_ns: u64,
+            title: String,
+            description: Description,
+            resolution: Resolution,
+            icon_url: Option<String>,
+            banner_url: Option<String>,
+            balance_domain: BalanceDomain,
+            trading_access: Vec<TradingAccess>,
+            engine_id: Option<crate::types::EngineId>,
+            forked_from: Option<SeriesId>,
+            locale: Option<String>,
+        }
+
+        let legacy = PreStartNsSeries {
+            series_id: SeriesId::from("s".to_owned()),
+            underlying: "ICP".to_owned(),
+            expiry_ns: 1_000,
+            payoff_type: PayoffType::Binary,
+            strike: None,
+            price_precision: 8,
+            payout_unit: PayoutUnit::usd(),
+            outcomes: None,
+            oracle_source: "oracle".to_owned(),
+            creator: Principal::anonymous(),
+            created_at_ns: 0,
+            title: "t".to_owned(),
+            description: Description::plain("d"),
+            resolution: Resolution::new("r"),
+            icon_url: None,
+            banner_url: None,
+            balance_domain: BalanceDomain::Settlement,
+            trading_access: vec![TradingAccess::Open],
+            engine_id: None,
+            forked_from: None,
+            locale: None,
+        };
+
+        let bytes = candid::encode_one(&legacy).expect("encode legacy series");
+        let decoded: Series = candid::decode_one(&bytes).expect("decode into current Series");
+
+        assert_eq!(decoded.start_ns, None);
+        assert_eq!(decoded.expiry_ns, 1_000);
     }
 }

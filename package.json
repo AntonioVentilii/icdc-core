@@ -1,6 +1,6 @@
 {
 	"name": "icdc-core",
-	"version": "0.1.3",
+	"version": "0.1.5",
 	"scripts": {
 		"build": "./scripts/build.sh",
 		"test:unit": "scripts/test.unit.sh",
@@ -31,7 +31,7 @@
 	},
 	"devDependencies": {
 		"@icp-sdk/bindgen": "^0.4.0",
-		"prettier": "^3.8.3",
+		"prettier": "^3.8.4",
 		"prettier-plugin-motoko": "^0.13.0",
 		"prettier-plugin-organize-imports": "^4.3.0"
 	}

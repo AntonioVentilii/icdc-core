@@ -24,8 +24,8 @@ pub use shared::types::{
     },
     series::{
         AddSeriesParams, AddSeriesResult, ForkSeriesParams, ListSeriesParams, PaginationParams,
-        Series, SeriesError, SeriesId, SeriesPage, SocialLimits, UpdateSeriesMetadataParams,
-        UpdateSeriesResult,
+        Series, SeriesError, SeriesId, SeriesPage, SeriesStatus, SocialLimits,
+        UpdateSeriesMetadataParams, UpdateSeriesResult,
     },
     TradingAccess,
 };
