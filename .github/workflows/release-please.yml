@@ -51,8 +51,6 @@ jobs:
 
       - name: Re-lock workspace crates
         if: ${{ steps.release.outputs.pr }}
-        # `--workspace` relocks only the workspace crates (the version just
-        # bumped); third-party deps are left untouched.
         run: cargo update --workspace
 
       - name: Commit Cargo.lock
