@@ -32,9 +32,14 @@ use super::{
 };
 use crate::utils::constants::{CKUSDC_LEDGER, ICP_LEDGER};
 
-/// Default expiry for test series: far beyond any clock a test will reach, so
-/// series created through the plain helpers are never accidentally expired.
-const DEFAULT_TEST_EXPIRY_NS: u64 = 2_000_000_000_000_000_000;
+/// Default expiry for test series, so series created through the plain helpers
+/// are never accidentally expired.
+///
+/// `PocketIC`'s clock tracks wall time, so this must stay ahead of it. `9e18` ns
+/// is ~year 2255 — chosen to outlast the project rather than the ~2033 that the
+/// old `2e18` literal would have hit, which was close enough to eventually turn
+/// into a spurious suite-wide failure.
+const DEFAULT_TEST_EXPIRY_NS: u64 = 9_000_000_000_000_000_000;
 
 /// Arguments for [`TradeHelperTrait::setup_icrc_asset`] (keeps call sites readable for clippy).
 pub struct SetupIcrcAsset<'a> {

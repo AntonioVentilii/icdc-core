@@ -1191,10 +1191,9 @@ type TradeError = variant {
 	// on it.
 	//
 	// Returned to exposure-opening paths only. Redeeming a complete set and
-	// accepting a transferred position stay available after expiry — see
-	// [`SeriesAccess`](crate::utils::series::SeriesAccess) — because they only
-	// release exposure that already exists, and settlement may not run for some
-	// time after the window closes.
+	// accepting a transferred position stay available after expiry, because they
+	// only release exposure that already exists and settlement may not run for
+	// some time after the window closes.
 	SeriesExpired : record {
 		// The timestamp (nanoseconds since the UNIX epoch) at which it closed.
 		expiry_ns : nat64;
