@@ -22,6 +22,22 @@ pub struct BackfillSettlementEventsParams {
     pub start_after: Option<SeriesId>,
 }
 
+/// Input parameters for
+/// [`list_series_settlement_statuses`](super::list_series_settlement_statuses).
+///
+/// Batches the per-series settlement check a resolution solver would otherwise
+/// make one call at a time. Callers pass the (bounded) set of series they care
+/// about — typically the "due" candidates from the registry — and receive one
+/// status per id in request order. Unknown or still-open series come back with a
+/// `None` status. The read looks each id up in `SETTLEMENT_PLANS`, so the work is
+/// `O(#series_ids)` regardless of how many plans exist. Mirrors
+/// [`ListSeriesTradedVolumesParams`](crate::api::trade::params::ListSeriesTradedVolumesParams).
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct ListSeriesSettlementStatusesParams {
+    /// The series to check. Results are returned one per id, in this order.
+    pub series_ids: Vec<SeriesId>,
+}
+
 /// Input parameters for [`list_settled_series`](super::list_settled_series).
 ///
 /// A series is considered settled the moment a settlement plan is opened for it
