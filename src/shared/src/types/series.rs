@@ -309,22 +309,21 @@ impl Series {
         matches!(self.status(now), SeriesStatus::Live)
     }
 
-    /// Returns true when this series carries the structural data its payoff model
-    /// needs to be settled.
+    /// Returns true when this series carries the minimal structural data its
+    /// payoff model needs to be resolved.
     ///
-    /// A market can be past expiry yet impossible to resolve because a field the
-    /// payoff formula requires is absent — a `Call`/`Put` with no `strike`, or a
-    /// `Categorical` with no `outcomes`. Such a series would only ever produce a
-    /// payoff error at settlement, so a resolution solver should skip it rather
-    /// than treat it as due work.
+    /// A market can be past expiry yet not meaningfully resolvable: a `Call`/`Put`
+    /// with no `strike` has no reference to settle against — the clearing
+    /// canister's `get_unit_payoff` returns `MissingStrike` for it — and a
+    /// `Categorical` with no declared `outcomes` has nothing to resolve to. A
+    /// resolution solver should skip such a market rather than treat it as due
+    /// work. `Binary` needs only the settlement price the oracle supplies at
+    /// resolution, so it is always structurally resolvable.
     ///
-    /// This mirrors exactly the data the clearing canister's `get_unit_payoff`
-    /// dereferences: `Binary` needs only a settlement price (always supplied at
-    /// resolution), `Call`/`Put` additionally need a `strike`, and `Categorical`
-    /// needs at least one declared outcome. It is a pure function of the series —
-    /// the settlement price itself is provided by the oracle at resolution time,
-    /// not stored here — so it says only whether the *contract* is resolvable, not
-    /// whether an oracle value is available yet.
+    /// This is a pure function of the series — the settlement price itself is
+    /// provided by the oracle at resolution time, not stored here — so it reports
+    /// only whether the *contract* is resolvable, not whether an oracle value is
+    /// available yet.
     #[must_use]
     pub fn has_resolvable_payoff(&self) -> bool {
         match self.payoff_type {

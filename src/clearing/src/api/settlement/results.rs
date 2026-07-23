@@ -59,10 +59,10 @@ pub struct BackfillSettlementEventsResult {
 ///
 /// `status` is `Some` when a settlement plan exists for the series (in any
 /// [`PlanStatus`](crate::types::plans::PlanStatus) — a plan is opened the moment
-/// settlement begins) and `None` when the series is still open (no plan). The
-/// `series_id` is echoed on the outside so callers can tell an unsettled series
-/// apart from an unknown one and align results with their requested ids, since a
-/// `None` status carries no id of its own.
+/// settlement begins) and `None` otherwise. A `None` covers both a still-open
+/// series and an unknown id; the two are not distinguished here. The `series_id`
+/// is echoed on each entry so callers can align results with their requested ids
+/// and attribute a `None`, which carries no id of its own.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct SeriesSettlementStatus {
     /// The series this status is for (echoes the requested id).

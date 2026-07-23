@@ -931,10 +931,10 @@ type SeriesPriceHistory = record {
 //
 // `status` is `Some` when a settlement plan exists for the series (in any
 // [`PlanStatus`](crate::types::plans::PlanStatus) — a plan is opened the moment
-// settlement begins) and `None` when the series is still open (no plan). The
-// `series_id` is echoed on the outside so callers can tell an unsettled series
-// apart from an unknown one and align results with their requested ids, since a
-// `None` status carries no id of its own.
+// settlement begins) and `None` otherwise. A `None` covers both a still-open
+// series and an unknown id; the two are not distinguished here. The `series_id`
+// is echoed on each entry so callers can align results with their requested ids
+// and attribute a `None`, which carries no id of its own.
 type SeriesSettlementStatus = record {
 	// The settlement progress, or `None` if the series has no settlement plan
 	// yet (still open / not being settled).
