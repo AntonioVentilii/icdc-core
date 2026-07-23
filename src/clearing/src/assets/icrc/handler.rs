@@ -378,6 +378,9 @@ mod tests {
     use super::{run_cached_fee_transfer, settle_transfer, SettledTransfer};
     use crate::memory::ASSET_METRICS;
 
+    /// The `(fee, created_at_time)` recorded for each ledger attempt.
+    type AttemptLog = Vec<(Option<Nat>, Option<u64>)>;
+
     /// Minimal executor for the always-ready futures these tests use; avoids
     /// pulling in an async runtime as a dev-dependency.
     fn block_on<F: Future>(future: F) -> F::Output {
@@ -440,9 +443,9 @@ mod tests {
     fn run_with(
         asset_id: &str,
         outcomes: Vec<SettledTransfer>,
-    ) -> (Result<u128, AssetError>, Vec<(Option<Nat>, Option<u64>)>) {
+    ) -> (Result<u128, AssetError>, AttemptLog) {
         let scripted = RefCell::new(outcomes.into_iter());
-        let calls: RefCell<Vec<(Option<Nat>, Option<u64>)>> = RefCell::new(Vec::new());
+        let calls: RefCell<AttemptLog> = RefCell::new(Vec::new());
 
         let result = block_on(run_cached_fee_transfer(
             &asset_id.to_owned(),
