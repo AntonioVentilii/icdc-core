@@ -1,3 +1,5 @@
+use core::future::Future;
+
 use candid::{Nat, Principal};
 use ic_cdk::{
     api::canister_self,
@@ -11,7 +13,7 @@ use icrc_ledger_types::{
     icrc2::transfer_from::{TransferFromArgs, TransferFromError},
 };
 use num_traits::ToPrimitive as _;
-use shared::types::{asset::errors::AssetError, Asset};
+use shared::types::{asset::errors::AssetError, Asset, AssetId};
 
 use crate::{
     assets::{
@@ -96,6 +98,47 @@ fn settle_transfer(res: Result<Nat, TransferError>) -> Result<SettledTransfer, A
             expected_fee: expected_fee.0.to_u128().ok_or(AssetError::MathOverflow)?,
         }),
         Err(e) => Err(AssetError::TransferError(format!("{e:?}"))),
+    }
+}
+
+/// Drives the cached-fee protocol over an injected `send` function.
+///
+/// `build_args` stamps the fee (and the shared `created_at_time`) onto a
+/// [`TransferArg`], and `send` performs one settled `icrc1_transfer`. The
+/// protocol is: send with `cached_fee`; on [`SettledTransfer::BadFee`] refresh
+/// the cache and retry **once** with the ledger's expected fee; a second
+/// `BadFee` fails, leaving the refreshed cache for the next call.
+///
+/// The ledger call is injected so the retry, cache-refresh, and
+/// `created_at_time`-reuse behaviour can be unit-tested without a live ledger.
+async fn run_cached_fee_transfer<B, S, Fut>(
+    asset_id: &AssetId,
+    cached_fee: Option<u128>,
+    build_args: B,
+    mut send: S,
+) -> Result<u128, AssetError>
+where
+    B: Fn(Option<u128>) -> TransferArg,
+    S: FnMut(TransferArg) -> Fut,
+    Fut: Future<Output = Result<SettledTransfer, AssetError>>,
+{
+    // Attempt 1: send the cached fee explicitly.
+    let expected_fee = match send(build_args(cached_fee)).await? {
+        SettledTransfer::Block(block) => return Ok(block),
+        SettledTransfer::BadFee { expected_fee } => expected_fee,
+    };
+
+    // Refresh the cache and retry once with the ledger's expected fee.
+    update_cached_transfer_fee(asset_id, expected_fee);
+    match send(build_args(Some(expected_fee))).await? {
+        SettledTransfer::Block(block) => Ok(block),
+        SettledTransfer::BadFee { expected_fee } => {
+            // Definitive rejection: keep the refreshed cache for the next try.
+            update_cached_transfer_fee(asset_id, expected_fee);
+            Err(AssetError::TransferError(format!(
+                "BadFee: ledger expected fee {expected_fee}"
+            )))
+        }
     }
 }
 
@@ -208,6 +251,8 @@ impl IcrcHandler {
 
         let AssetAmount::Fixed(amount_u128) = params.amount;
 
+        // Both attempts reuse the same `created_at_time`, so the retry is an
+        // idempotent duplicate of the first attempt at the ledger.
         let build_args = |fee: Option<u128>| TransferArg {
             from_subaccount: from_account.subaccount,
             to: to_account,
@@ -217,28 +262,12 @@ impl IcrcHandler {
             created_at_time: params.created_at_time_ns,
         };
 
-        // Attempt 1: send the cached fee explicitly.
         let cached_fee = cached_transfer_fee(params.asset_id);
-        let expected_fee =
-            match settle_transfer(send_icrc1_transfer(ledger_id, build_args(cached_fee)).await?)? {
-                SettledTransfer::Block(block) => return Ok(block),
-                SettledTransfer::BadFee { expected_fee } => expected_fee,
-            };
 
-        // Refresh the cache and retry once with the ledger's expected fee.
-        update_cached_transfer_fee(params.asset_id, expected_fee);
-        match settle_transfer(
-            send_icrc1_transfer(ledger_id, build_args(Some(expected_fee))).await?,
-        )? {
-            SettledTransfer::Block(block) => Ok(block),
-            SettledTransfer::BadFee { expected_fee } => {
-                // Definitive rejection: keep the refreshed cache for the next try.
-                update_cached_transfer_fee(params.asset_id, expected_fee);
-                Err(AssetError::TransferError(format!(
-                    "BadFee: ledger expected fee {expected_fee}"
-                )))
-            }
-        }
+        run_cached_fee_transfer(params.asset_id, cached_fee, build_args, |args| async move {
+            settle_transfer(send_icrc1_transfer(ledger_id, args).await?)
+        })
+        .await
     }
 
     /// Executes an ICRC-2 `transfer_from` call.
@@ -332,11 +361,168 @@ fn resolve_account(account: &AssetAccount) -> Result<Account, AssetError> {
 
 #[cfg(test)]
 mod tests {
-    use candid::Nat;
-    use icrc_ledger_types::icrc1::transfer::TransferError;
-    use shared::types::asset::errors::AssetError;
+    use core::{
+        cell::RefCell,
+        future::{ready, Future},
+        pin::pin,
+        task::{Context, Poll, Waker},
+    };
 
-    use super::{settle_transfer, SettledTransfer};
+    use candid::{Nat, Principal};
+    use icrc_ledger_types::icrc1::{
+        account::Account,
+        transfer::{TransferArg, TransferError},
+    };
+    use shared::types::{asset::errors::AssetError, AssetMetrics, DecimalValue};
+
+    use super::{run_cached_fee_transfer, settle_transfer, SettledTransfer};
+    use crate::memory::ASSET_METRICS;
+
+    /// Minimal executor for the always-ready futures these tests use; avoids
+    /// pulling in an async runtime as a dev-dependency.
+    fn block_on<F: Future>(future: F) -> F::Output {
+        let mut future = pin!(future);
+        let mut cx = Context::from_waker(Waker::noop());
+        loop {
+            if let Poll::Ready(value) = future.as_mut().poll(&mut cx) {
+                return value;
+            }
+        }
+    }
+
+    /// Seeds an [`ASSET_METRICS`] entry so the fee-cache helpers have something
+    /// to read and self-heal.
+    fn seed_metrics(asset_id: &str, fee: Option<u128>) {
+        ASSET_METRICS.with(|m| {
+            m.borrow_mut().insert(
+                asset_id.to_owned(),
+                AssetMetrics {
+                    price_usd: DecimalValue {
+                        value: 1_000_000,
+                        decimals: 6,
+                    },
+                    haircut_bps: 0,
+                    latest_transfer_fee: fee,
+                    insurance_fee_ratio: None,
+                    protocol_fee_ratio: None,
+                    last_updated_ns: None,
+                },
+            );
+        });
+    }
+
+    fn cached_fee(asset_id: &str) -> Option<u128> {
+        ASSET_METRICS.with(|m| {
+            m.borrow()
+                .get(asset_id)
+                .and_then(|metrics| metrics.latest_transfer_fee)
+        })
+    }
+
+    /// `build_args` for the orchestration tests: stamps the fee and a fixed
+    /// `created_at_time` so retries can be checked for idempotency.
+    fn build_args(fee: Option<u128>) -> TransferArg {
+        TransferArg {
+            from_subaccount: None,
+            to: Account {
+                owner: Principal::anonymous(),
+                subaccount: None,
+            },
+            amount: Nat::from(1_000_u64),
+            fee: fee.map(Nat::from),
+            memo: None,
+            created_at_time: Some(42),
+        }
+    }
+
+    /// Runs the orchestrator against a scripted sequence of ledger outcomes,
+    /// recording the `(fee, created_at_time)` of every attempt.
+    fn run_with(
+        asset_id: &str,
+        outcomes: Vec<SettledTransfer>,
+    ) -> (Result<u128, AssetError>, Vec<(Option<Nat>, Option<u64>)>) {
+        let scripted = RefCell::new(outcomes.into_iter());
+        let calls: RefCell<Vec<(Option<Nat>, Option<u64>)>> = RefCell::new(Vec::new());
+
+        let result = block_on(run_cached_fee_transfer(
+            &asset_id.to_owned(),
+            cached_fee(asset_id),
+            build_args,
+            |args: TransferArg| {
+                calls
+                    .borrow_mut()
+                    .push((args.fee.clone(), args.created_at_time));
+                let next = scripted
+                    .borrow_mut()
+                    .next()
+                    .expect("sent more transfers than scripted outcomes");
+                ready(Ok(next))
+            },
+        ));
+
+        (result, calls.into_inner())
+    }
+
+    #[test]
+    fn transfer_happy_path_sends_cached_fee_once() {
+        seed_metrics("fee-happy", Some(10));
+
+        let (result, calls) = run_with("fee-happy", vec![SettledTransfer::Block(7)]);
+
+        assert!(matches!(result, Ok(7)));
+        assert_eq!(calls.len(), 1, "no retry on success");
+        assert_eq!(calls[0].0, Some(Nat::from(10_u64)), "sends the cached fee");
+        assert_eq!(cached_fee("fee-happy"), Some(10), "cache is untouched");
+    }
+
+    #[test]
+    fn transfer_bad_fee_refreshes_cache_and_retries_once() {
+        seed_metrics("fee-retry", Some(10));
+
+        let (result, calls) = run_with(
+            "fee-retry",
+            vec![
+                SettledTransfer::BadFee { expected_fee: 25 },
+                SettledTransfer::Block(9),
+            ],
+        );
+
+        assert!(matches!(result, Ok(9)));
+        assert_eq!(calls.len(), 2, "retries exactly once");
+        assert_eq!(
+            calls[0].0,
+            Some(Nat::from(10_u64)),
+            "first sends cached fee"
+        );
+        assert_eq!(
+            calls[1].0,
+            Some(Nat::from(25_u64)),
+            "retry sends the ledger's expected fee"
+        );
+        assert_eq!(calls[0].1, calls[1].1, "retry reuses the created_at_time");
+        assert_eq!(cached_fee("fee-retry"), Some(25), "cache is refreshed");
+    }
+
+    #[test]
+    fn transfer_second_bad_fee_fails_and_leaves_refreshed_cache() {
+        seed_metrics("fee-fail", Some(10));
+
+        let (result, calls) = run_with(
+            "fee-fail",
+            vec![
+                SettledTransfer::BadFee { expected_fee: 25 },
+                SettledTransfer::BadFee { expected_fee: 30 },
+            ],
+        );
+
+        assert!(matches!(result, Err(AssetError::TransferError(_))));
+        assert_eq!(calls.len(), 2, "never retries more than once");
+        assert_eq!(
+            cached_fee("fee-fail"),
+            Some(30),
+            "cache keeps the latest expected fee for the next try"
+        );
+    }
 
     #[test]
     fn settle_ok_returns_block() {
