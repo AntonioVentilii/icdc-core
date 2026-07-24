@@ -1707,6 +1707,59 @@ mod tests {
         params
     }
 
+    /// Lists series for `caller` with `due = Some(true)` evaluated at `now`,
+    /// returning the matching ids.
+    fn list_due_at(caller: Principal, now: u64) -> Vec<SeriesId> {
+        list_series_with_impl(
+            ListSeriesParams {
+                due: Some(true),
+                pagination: Some(PaginationParams {
+                    limit: None,
+                    cursor: None,
+                }),
+                ..Default::default()
+            },
+            caller,
+            now,
+        )
+        .items
+        .into_iter()
+        .map(|s| s.series_id)
+        .collect()
+    }
+
+    /// The `due` filter returns only expired, resolvable markets — the exact
+    /// candidate set a resolution solver iterates — so the read scales with the
+    /// due subset rather than the whole registry.
+    #[test]
+    fn due_filter_returns_only_expired_series() {
+        cleanup();
+        let caller = test_principal(1);
+
+        let mut early = base_params();
+        early.expiry_ns = 1_000;
+        let AddSeriesResult::Ok(early_id) = add_as_creator(early, caller, 0) else {
+            panic!("early create failed");
+        };
+
+        let mut late = base_params();
+        late.expiry_ns = 5_000;
+        let AddSeriesResult::Ok(late_id) = add_as_creator(late, caller, 0) else {
+            panic!("late create failed");
+        };
+
+        // now = 2000: early (1000) has expired and is due; late (5000) is not.
+        let due = list_due_at(caller, 2_000);
+        assert!(
+            due.contains(&early_id),
+            "an expired, resolvable series must be due"
+        );
+        assert!(
+            !due.contains(&late_id),
+            "a still-open series is not yet due"
+        );
+    }
+
     /// `None` is the only way to say "already live", so a start in the past — or
     /// at exactly `now` — is rejected rather than silently normalized. Otherwise
     /// the same market could be registered under two different ids.

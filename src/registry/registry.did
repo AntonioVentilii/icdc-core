@@ -323,6 +323,23 @@ type GroupResult = variant {
 };
 // Parameters for filtering the list of registered derivative series.
 type ListSeriesParams = record {
+	// When `Some(true)`, return only series that are **due for resolution**: at
+	// or past `expiry_ns`, carrying a non-empty resolution clause, and with a
+	// payoff model that has the data required to settle (see
+	// [`Series::has_resolvable_payoff`]). `Some(false)` and `None` apply no
+	// filtering.
+	//
+	// This is the exact candidate set a resolution solver iterates: markets that
+	// have expired but not yet settled and can actually be resolved. It is the
+	// mirror image of [`Self::tradeable_now`] on the expiry axis (expired rather
+	// than live) and lets the caller fetch only the due subset instead of paging
+	// the whole registry and discarding most of it. Settlement state itself is
+	// owned by the clearing canister, so a caller still subtracts the
+	// already-settled ids (see `clearing.list_settled_series`) from this set.
+	//
+	// Like the other clock-dependent filters, the expiry cutoff uses the
+	// canister's own server-side `time()`.
+	due : opt bool;
 	// Filter by the strike price.
 	strike : opt Price;
 	// Filter by the principal identifier of the creator.
