@@ -3,6 +3,7 @@ use serde::Serialize;
 use shared::types::SeriesId;
 
 use super::errors::SettlementError;
+use crate::types::plans::SettlementStatusView;
 
 /// Outcome of a derivative series settlement request.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -52,6 +53,23 @@ pub struct BackfillSettlementEventsResult {
     /// When `Some`, pass back as `start_after` to continue. `None` means the
     /// backfill is complete.
     pub next_cursor: Option<SeriesId>,
+}
+
+/// One series' settlement status, paired with the id it was requested for.
+///
+/// `status` is `Some` when a settlement plan exists for the series (in any
+/// [`PlanStatus`](crate::types::plans::PlanStatus) — a plan is opened the moment
+/// settlement begins) and `None` otherwise. A `None` covers both a still-open
+/// series and an unknown id; the two are not distinguished here. The `series_id`
+/// is echoed on each entry so callers can align results with their requested ids
+/// and attribute a `None`, which carries no id of its own.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct SeriesSettlementStatus {
+    /// The series this status is for (echoes the requested id).
+    pub series_id: SeriesId,
+    /// The settlement progress, or `None` if the series has no settlement plan
+    /// yet (still open / not being settled).
+    pub status: Option<SettlementStatusView>,
 }
 
 /// A page of settled (resolved) series ids.
