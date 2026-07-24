@@ -322,6 +322,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
             let res = handler
                 .transfer(AssetTransferParams {
                     asset: &config.asset,
+                    asset_id: &asset_id,
                     from: AssetAccount::UserClearing(user),
                     to: AssetAccount::external_icrc(plan.to_account.0, plan.to_account.1),
                     amount: AssetAmount::Fixed(amount_u128),
