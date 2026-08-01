@@ -25,7 +25,7 @@ ic-cdk = "0.20"
 num-traits = "0.2.19"
 ic-cdk-macros = "0.20"
 ic-cdk-timers = "1.0"
-pocket-ic = "13.0.0"
+pocket-ic = "15.0.0"
 
 # Compile dependencies (PocketIC, candid, serde, …) optimized even in debug
 # builds. Our own crates stay at the default unoptimized setting so
