@@ -33,6 +33,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "array-init"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d62b7694a562cdf5a74227903507c56ab2cc8bdd1f781ed5cb4cf9c9f810bfc"
+
+[[package]]
 name = "arrayvec"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -80,26 +86,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
-name = "binread"
-version = "2.2.0"
+name = "binrw"
+version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16598dfc8e6578e9b597d9910ba2e73618385dc9f4b1d43dd92c349d6be6418f"
+checksum = "6ad120d555272286c1017d25165ab8bd74806f13fc85b258484ec7e4ce75458f"
 dependencies = [
- "binread_derive",
- "lazy_static",
- "rustversion",
+ "array-init",
+ "binrw_derive",
+ "bytemuck",
 ]
 
 [[package]]
-name = "binread_derive"
-version = "2.1.0"
+name = "binrw_derive"
+version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d9672209df1714ee804b1f4d4f68c8eb2a90b1f7a07acf472f88ce198ef1fed"
+checksum = "6df92e0e9baae4dc82c7bad7715ca40c0a5c71539057bf2ea04a5c29c980410b"
 dependencies = [
  "either",
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.116",
 ]
 
 [[package]]
@@ -133,6 +139,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
 
 [[package]]
+name = "bytemuck"
+version = "1.25.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95832e849adfb21180ccb6826a99da14e5d266ae5c2e668e1602cf234f153797"
+
+[[package]]
 name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -146,12 +158,12 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "candid"
-version = "0.10.26"
+version = "0.10.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "846adba6d1b4a00eeb8d4a0e4b88dfab570c25ad150cd52e51dfdc4f9d0a66cd"
+checksum = "cdec808f2220b263bbc88557a2a44fb6b2db5875c99731ad00aae575ad59215c"
 dependencies = [
  "anyhow",
- "binread",
+ "binrw",
  "byteorder",
  "candid_derive",
  "hex",
@@ -169,9 +181,9 @@ dependencies = [
 
 [[package]]
 name = "candid_derive"
-version = "0.10.26"
+version = "0.10.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c367110b158be2edc335a4ad70f3467fa588d5c5675e149ef38638a8e281fc4"
+checksum = "2ee4839d8e442990b2853556e57ee9f6f4527371bbbfd7b4dcdd4f3c7d910964"
 dependencies = [
  "lazy_static",
  "proc-macro2",
@@ -1420,7 +1432,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1963,6 +1975,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
+ "windows-sys 0.52.0",
  "windows-sys 0.59.0",
 ]
 
