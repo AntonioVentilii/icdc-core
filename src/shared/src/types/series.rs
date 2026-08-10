@@ -335,11 +335,13 @@ impl Series {
     ///
     /// A market can be past expiry yet not meaningfully resolvable: a `Call`/`Put`
     /// with no `strike` has no reference to settle against — the clearing
-    /// canister's `get_unit_payoff` returns `MissingStrike` for it — and a
-    /// `Categorical` with no declared `outcomes` has nothing to resolve to. A
-    /// resolution solver should skip such a market rather than treat it as due
-    /// work. `Binary` needs only the settlement price the oracle supplies at
-    /// resolution, so it is always structurally resolvable.
+    /// canister's `get_unit_payoff` returns `MissingStrike` for it — a
+    /// `Categorical` with no declared `outcomes` has nothing to resolve to, and a
+    /// `Linear` with no `settlement_cap` has no band to clamp the fixing into
+    /// (`get_unit_payoff` returns `MissingSettlementCap`). A resolution solver
+    /// should skip such a market rather than treat it as due work. `Binary` needs
+    /// only the settlement price the oracle supplies at resolution, so it is
+    /// always structurally resolvable.
     ///
     /// This is a pure function of the series — the settlement price itself is
     /// provided by the oracle at resolution time, not stored here — so it reports
@@ -351,6 +353,7 @@ impl Series {
             PayoffType::Binary => true,
             PayoffType::Call | PayoffType::Put => self.strike.is_some(),
             PayoffType::Categorical => self.outcomes.as_ref().is_some_and(|o| !o.is_empty()),
+            PayoffType::Linear => self.settlement_cap.is_some(),
         }
     }
 }
