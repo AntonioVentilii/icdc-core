@@ -680,6 +680,12 @@ type PaymentIdempotency = variant {
 type PayoffType = variant {
 	// Payoff based on the positive difference between strike and underlying price.
 	Put;
+	// A linear (delta-one) payoff `net_qty · (S_T − F)`: outright forwards,
+	// non-deliverable forwards (NDFs), and dated futures. The agreed forward
+	// rate `F` is the trade price (captured in reserved margin, like an option
+	// premium); settlement is bounded to `[0, settlement_cap]` to keep the
+	// system solvent without a running liquidation engine. See ADR 0001.
+	Linear;
 	// A fixed payoff if the condition is met (all-or-nothing).
 	Binary;
 	// Payoff based on the positive difference between underlying price and strike.
@@ -840,6 +846,11 @@ type Series = record {
 	start_ns : opt nat64;
 	// Unique identifier computed from series parameters.
 	series_id : text;
+	// Upper settlement bound for `Linear` series (forwards/NDF/futures): the
+	// fixing is clamped to `[0, settlement_cap]` at settlement and short margin
+	// is reserved as `cap − entry`. Compulsory for `Linear`, `None` otherwise.
+	// Additive `opt` field — no state migration required (see ADR 0001).
+	settlement_cap : opt Price;
 	// The underlying asset ticker or identifier (e.g., "ICP/USD").
 	underlying : text;
 	// Optional [BCP 47](https://www.rfc-editor.org/info/bcp47) language tag
@@ -1195,6 +1206,15 @@ type TradeError = variant {
 	SelfTradingNotAllowed;
 	// The specified order was not found.
 	OrderNotFound : text;
+	// A `Linear` (forward/NDF/future) order price exceeds the series
+	// settlement cap. The agreed forward rate must stay within `[0, cap]` so
+	// the short leg is fully collateralized under the bounded-linear model.
+	PriceExceedsSettlementCap : record {
+		// The series settlement cap, scaled to USD base units.
+		cap_usd : nat;
+		// The submitted order price, scaled to USD base units.
+		price_usd : nat
+	};
 	// The series is scheduled and its trading window has not opened yet, so no
 	// trades, orders, or transfers can be initiated on it.
 	//

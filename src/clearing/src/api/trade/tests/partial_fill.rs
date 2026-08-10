@@ -30,6 +30,7 @@ fn binary_series(series_id: &SeriesId) -> Series {
         start_ns: None,
         payoff_type: PayoffType::Binary,
         strike: Some(Price::new(50_000, 0)),
+        settlement_cap: None,
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
         outcomes: None,

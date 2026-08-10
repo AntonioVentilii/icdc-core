@@ -22,6 +22,8 @@ pub enum PayoffError {
     InvalidSettlementType,
     /// Required strike price is missing for the series type.
     MissingStrike,
+    /// Required settlement cap is missing for a `Linear` series.
+    MissingSettlementCap,
     /// Outcome ID not provided for a categorical market.
     MissingOutcomeId,
     /// Internal math error (overflow/underflow).
@@ -119,7 +121,7 @@ pub fn get_unit_payoff(
                     ))
                 }
 
-                PayoffType::Categorical => unreachable!(),
+                PayoffType::Categorical | PayoffType::Linear => unreachable!(),
             }
         }
 
@@ -134,6 +136,36 @@ pub fn get_unit_payoff(
                 Some(id) if id == resolved_id => Ok(unit_payoff),
                 _ => Ok(0),
             }
+        }
+
+        PayoffType::Linear => {
+            // Linear (forward/NDF/future): the per-unit LONG gross payout is the
+            // fixing `S_T`, clamped to `[0, cap]`. The short's gross payout is
+            // derived as `cap - unit` in `get_settlement_value`, so clamping here
+            // guarantees long + short net to zero even if the oracle prints
+            // outside the band. Floor for system safety (never overpay).
+            let SettlementInput::Price(settlement_price) = settlement else {
+                return Err(PayoffError::InvalidSettlementType);
+            };
+            let cap = series
+                .settlement_cap
+                .as_ref()
+                .ok_or(PayoffError::MissingSettlementCap)?;
+
+            let settle_scaled = scale_price(
+                settlement_price.value(),
+                asset_decimals,
+                u32::from(settlement_price.decimals()),
+                RoundingMode::Floor,
+            );
+            let cap_scaled = scale_price(
+                cap.value(),
+                asset_decimals,
+                u32::from(cap.decimals()),
+                RoundingMode::Floor,
+            );
+
+            Ok(settle_scaled.min(cap_scaled))
         }
     }
 }
@@ -171,6 +203,31 @@ pub fn get_settlement_value(
                 // Short on losing outcome: receives their 1 unit collateral back (1 - 0 = 1).
                 // Short on winning outcome: pays out their 1 unit (1 - 1 = 0).
                 Ok(abs_qty * max_payoff.saturating_sub(unit_payoff))
+            }
+        }
+        PayoffType::Linear => {
+            // Linear zero-sum split, identical in shape to Binary/Categorical
+            // but bounded by the per-series `cap` instead of 1.0 unit:
+            //   long  gross payout = |qty| · S*
+            //   short gross payout = |qty| · (cap − S*)
+            // `unit_payoff` is `S*` (already clamped to [0, cap]). The signed PnL
+            // is realised downstream as `payout − reserved_margin` in
+            // `api/settlement/api.rs`.
+            let cap = series
+                .settlement_cap
+                .as_ref()
+                .ok_or(PayoffError::MissingSettlementCap)?;
+            let cap_scaled = scale_price(
+                cap.value(),
+                asset_decimals,
+                u32::from(cap.decimals()),
+                RoundingMode::Floor,
+            );
+
+            if qty >= 0 {
+                Ok(abs_qty * unit_payoff)
+            } else {
+                Ok(abs_qty * cap_scaled.saturating_sub(unit_payoff))
             }
         }
         _ => {
@@ -283,6 +340,43 @@ pub fn get_required_margin(
                 Ordering::Equal => Ok(0),
             }
         }
+
+        PayoffType::Linear => {
+            // Band-bounded max loss, using the trade `price` as the agreed
+            // forward rate F (captured like an option premium):
+            //   long  reserves |qty| · F         (loss floor at S_T = 0)
+            //   short reserves |qty| · (cap − F)  (loss cap at S_T = cap)
+            // Rounding must mirror settlement to stay exactly zero-sum: the
+            // entry `F` is ceiled (both legs reference the same ceiled `F`, so
+            // it cancels) and the `cap` is floored to match the settlement clamp
+            // in `get_unit_payoff` (a ceiled cap here would leave rounding dust
+            // between `payout` and `reserved_margin`).
+            let source_precision = u32::from(price.decimals());
+            let entry_scaled = scale_price(
+                price.value(),
+                asset_decimals,
+                source_precision,
+                RoundingMode::Ceil,
+            );
+
+            match qty.cmp(&0) {
+                Ordering::Greater => Ok(abs_qty * entry_scaled),
+                Ordering::Less => {
+                    let cap = series
+                        .settlement_cap
+                        .as_ref()
+                        .ok_or(PayoffError::MissingSettlementCap)?;
+                    let cap_scaled = scale_price(
+                        cap.value(),
+                        asset_decimals,
+                        u32::from(cap.decimals()),
+                        RoundingMode::Floor,
+                    );
+                    Ok(abs_qty * cap_scaled.saturating_sub(entry_scaled))
+                }
+                Ordering::Equal => Ok(0),
+            }
+        }
     }
 }
 
@@ -295,7 +389,7 @@ mod tests {
     };
 
     use crate::{
-        payoffs::{get_required_margin, get_settlement_value, PayoffError},
+        payoffs::{get_required_margin, get_settlement_value, get_unit_payoff, PayoffError},
         types::margin::Position,
     };
 
@@ -313,6 +407,7 @@ mod tests {
             start_ns: None,
             payoff_type,
             strike,
+            settlement_cap: None,
             price_precision: precision,
             payout_unit,
             oracle_source: "oracle".to_owned(),
@@ -584,5 +679,157 @@ mod tests {
 
         let result = get_settlement_value(&series, &pos, &settlement);
         assert_eq!(result.unwrap_err(), PayoffError::InvalidSettlementType);
+    }
+
+    // --- Linear (forward / NDF / future) ---
+
+    /// A `Linear` USD series with the given settlement cap (8-decimal value).
+    fn linear_series(cap_value_8dp: u128) -> Series {
+        let mut s = mock_series(PayoffType::Linear, None, 8, PayoutUnit::usd());
+        s.settlement_cap = Some(Price::new(cap_value_8dp, 8));
+        s
+    }
+
+    fn linear_pos(series: &Series, net_qty: i128) -> Position {
+        Position {
+            user: Principal::anonymous().into(),
+            series_id: series.series_id.clone(),
+            outcome_id: None,
+            net_qty,
+            reserved_margin_usd: 0,
+        }
+    }
+
+    #[test]
+    fn linear_settlement_is_zero_sum() {
+        // Forward on ICP: cap $20.00, agreed rate (trade price) $8.00, fixing $12.00.
+        let series = linear_series(20_0000_0000);
+        let entry = Price::new(8_0000_0000, 8);
+        let settle = SettlementInput::Price(Price::new(12_0000_0000, 8));
+
+        // per-unit long gross payout = clamp(S_T, 0, cap) = $12.00 -> 120_000 (4dp)
+        assert_eq!(get_unit_payoff(&series, &None, &settle).unwrap(), 120_000);
+
+        let long = linear_pos(&series, 10);
+        let short = linear_pos(&series, -10);
+        let payout_long = get_settlement_value(&series, &long, &settle).unwrap();
+        let payout_short = get_settlement_value(&series, &short, &settle).unwrap();
+        assert_eq!(payout_long, 1_200_000); // 10 * $12.00
+        assert_eq!(payout_short, 800_000); // 10 * ($20 - $12)
+
+        // Reserved margin uses the entry (forward) rate.
+        let res_long = get_required_margin(&series, &entry, 10, &None).unwrap();
+        let res_short = get_required_margin(&series, &entry, -10, &None).unwrap();
+        assert_eq!(res_long, 800_000); // 10 * $8.00
+        assert_eq!(res_short, 1_200_000); // 10 * ($20 - $8)
+
+        // Signed PnL = gross payout - reserved margin (settlement-layer identity).
+        let pnl_long = payout_long.cast_signed() - res_long.cast_signed();
+        let pnl_short = payout_short.cast_signed() - res_short.cast_signed();
+        assert_eq!(pnl_long, 400_000); // +$40 = 10 * ($12 - $8)
+        assert_eq!(pnl_short, -400_000); // -$40
+        assert_eq!(
+            pnl_long + pnl_short,
+            0,
+            "long and short PnL must net to zero"
+        );
+    }
+
+    #[test]
+    fn linear_settlement_clamps_above_cap() {
+        // Fixing $25.00 prints above the $20.00 cap: both legs settle at the cap,
+        // so the system stays zero-sum (short loss bounded, long gain bounded).
+        let series = linear_series(20_0000_0000);
+        let entry = Price::new(8_0000_0000, 8);
+        let settle = SettlementInput::Price(Price::new(25_0000_0000, 8));
+
+        assert_eq!(get_unit_payoff(&series, &None, &settle).unwrap(), 200_000); // capped $20
+        let long = linear_pos(&series, 10);
+        let short = linear_pos(&series, -10);
+        assert_eq!(
+            get_settlement_value(&series, &long, &settle).unwrap(),
+            2_000_000
+        );
+        assert_eq!(get_settlement_value(&series, &short, &settle).unwrap(), 0);
+
+        let pnl_long = 2_000_000_i128
+            - get_required_margin(&series, &entry, 10, &None)
+                .unwrap()
+                .cast_signed();
+        let pnl_short = 0_i128
+            - get_required_margin(&series, &entry, -10, &None)
+                .unwrap()
+                .cast_signed();
+        assert_eq!(pnl_long + pnl_short, 0);
+    }
+
+    #[test]
+    fn linear_zero_sum_with_cap_not_aligned_to_usd_decimals() {
+        // Cap $20.000050 does not divide evenly into USD_DECIMALS (4dp): it
+        // floors to 200_000 but ceils to 200_001. Margin and settlement must
+        // both use the *floored* cap, else the short over-reserves by 1 base
+        // unit and long+short PnL no longer nets to zero.
+        let series = linear_series(20_0000_5000); // $20.00005000 (8dp)
+        let entry = Price::new(5_0000_0000, 8); // $5.00
+        let settle = SettlementInput::Price(Price::new(8_0000_0000, 8)); // $8.00
+
+        let long = linear_pos(&series, 1);
+        let short = linear_pos(&series, -1);
+
+        let pnl_long = get_settlement_value(&series, &long, &settle)
+            .unwrap()
+            .cast_signed()
+            - get_required_margin(&series, &entry, 1, &None)
+                .unwrap()
+                .cast_signed();
+        let pnl_short = get_settlement_value(&series, &short, &settle)
+            .unwrap()
+            .cast_signed()
+            - get_required_margin(&series, &entry, -1, &None)
+                .unwrap()
+                .cast_signed();
+
+        assert_eq!(
+            pnl_long + pnl_short,
+            0,
+            "unaligned cap must still net to zero (long {pnl_long}, short {pnl_short})"
+        );
+    }
+
+    #[test]
+    fn linear_margin_band() {
+        let series = linear_series(20_0000_0000);
+        let entry = Price::new(8_0000_0000, 8);
+        assert_eq!(
+            get_required_margin(&series, &entry, 5, &None).unwrap(),
+            400_000
+        ); // 5 * $8
+        assert_eq!(
+            get_required_margin(&series, &entry, -5, &None).unwrap(),
+            600_000
+        ); // 5 * ($20-$8)
+        assert_eq!(get_required_margin(&series, &entry, 0, &None).unwrap(), 0);
+    }
+
+    #[test]
+    fn linear_missing_cap_is_rejected() {
+        // A `Linear` series without a cap cannot settle or margin its short leg.
+        let series = mock_series(PayoffType::Linear, None, 8, PayoutUnit::usd());
+        let entry = Price::new(8_0000_0000, 8);
+        let settle = SettlementInput::Price(Price::new(12_0000_0000, 8));
+
+        assert_eq!(
+            get_unit_payoff(&series, &None, &settle).unwrap_err(),
+            PayoffError::MissingSettlementCap
+        );
+        let long = linear_pos(&series, 10);
+        assert_eq!(
+            get_settlement_value(&series, &long, &settle).unwrap_err(),
+            PayoffError::MissingSettlementCap
+        );
+        assert_eq!(
+            get_required_margin(&series, &entry, -10, &None).unwrap_err(),
+            PayoffError::MissingSettlementCap
+        );
     }
 }

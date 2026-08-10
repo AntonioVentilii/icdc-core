@@ -89,6 +89,7 @@ pub fn upgrade_series(old: LegacySeries) -> Series {
         start_ns: None,
         payoff_type: old.payoff_type,
         strike: old.strike,
+        settlement_cap: None,
         price_precision: old.price_precision,
         payout_unit: old.payout_unit,
         outcomes: old.outcomes,
