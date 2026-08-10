@@ -16,7 +16,7 @@ use crate::{
         margin::{AccountState, Position, PositionsMap},
     },
     utils::{
-        series::ensure_series_registered,
+        series::{ensure_series_registered, SeriesAccess},
         system::{canister_id, now_ns},
     },
 };
@@ -25,7 +25,7 @@ use crate::{
 pub(crate) async fn internal_execute_trade(params: ExecuteTradeParams) -> Result<bool, TradeError> {
     let series_id = params.series_id.clone();
 
-    let series = ensure_series_registered(&series_id).await?;
+    let series = ensure_series_registered(&series_id, SeriesAccess::OpenExposure).await?;
 
     execute_trade_impl(&series, params)
 }

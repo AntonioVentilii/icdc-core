@@ -1,0 +1,100 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        type: choice
+        options:
+          - staging
+          - production
+        default: staging
+      force:
+        description: 'Auto-confirm the deploy (adds --yes to push through a confirmation prompt)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || (github.ref_type == 'tag' && 'production' || 'staging') }}
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  DFX_WARNING: '-mainnet_plaintext_identity'
+
+jobs:
+  deploy:
+    name: Deploy Canisters
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Determine environment
+        id: env
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          INPUT_ENVIRONMENT: ${{ github.event.inputs.environment }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            ENVIRONMENT="$INPUT_ENVIRONMENT"
+          elif [ "$REF_TYPE" = "tag" ]; then
+            ENVIRONMENT="production"
+          else
+            ENVIRONMENT="staging"
+          fi
+          case "$ENVIRONMENT" in
+            staging) SCRIPT="deploy:staging" ;;
+            production) SCRIPT="deploy:prod" ;;
+            *) echo "::error::Unknown environment '$ENVIRONMENT'"; exit 1 ;;
+          esac
+          echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
+          echo "script=$SCRIPT" >> "$GITHUB_OUTPUT"
+          echo "Deploying to $ENVIRONMENT via 'npm run $SCRIPT'"
+
+      - name: Setup dfx
+        uses: dfinity/setup-dfx@e50c04f104ee4285ec010f10609483cf41e4d365 # main
+        with:
+          dfx-version: '0.32.0'
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+
+      - name: Import deploy identity
+        env:
+          DFX_DEPLOY_KEY: ${{ secrets.DFX_DEPLOY_KEY }}
+        run: |
+          if [ -z "${DFX_DEPLOY_KEY:-}" ]; then
+            echo "::error::DFX_DEPLOY_KEY secret is not set."
+            exit 1
+          fi
+          pem="$(mktemp)"
+          printf '%s' "$DFX_DEPLOY_KEY" | base64 -d > "$pem"
+          dfx identity import --storage-mode=plaintext --force ci-deploy "$pem"
+          rm -f "$pem"
+          dfx identity use ci-deploy
+          echo "Deploying as principal: $(dfx identity get-principal)"
+
+      - name: Deploy canisters
+        env:
+          SCRIPT: ${{ steps.env.outputs.script }}
+          FORCE: ${{ github.event.inputs.force }}
+        run: |
+          if [ "$FORCE" = "true" ]; then
+            echo "Force enabled: appending --yes"
+            npm run "$SCRIPT" -- --yes
+          else
+            npm run "$SCRIPT"
+          fi

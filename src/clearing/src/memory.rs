@@ -22,6 +22,7 @@ use crate::{
         trade::{LimitOrder, OrderId, TradeId, TransferId},
         user::{DepositKey, User, WithdrawalKey},
     },
+    utils::system::now_ns,
     PositionProof,
 };
 
@@ -92,6 +93,36 @@ thread_local! {
     pub static ASSET_METRICS: RefCell<BTreeMap<AssetId, AssetMetrics>> = const { RefCell::new(BTreeMap::new()) };
     pub static DOMAIN_POLICIES: RefCell<BTreeMap<BalanceDomain, DomainPolicy>> = const { RefCell::new(BTreeMap::new()) };
     pub static MIGRATION_PLANS: RefCell<BTreeMap<MigrationKey, MigrationPlan>> = const { RefCell::new(BTreeMap::new()) };
+}
+
+/// Returns the cached transfer fee for `asset_id`, if one has been recorded.
+///
+/// This is the fee the clearing canister believes the ledger currently charges
+/// ([`AssetMetrics::latest_transfer_fee`]). It is populated by
+/// `refresh_icrc_asset_metadata` and self-healed by the ICRC transfer handler on
+/// `BadFee` (see [`crate::assets::icrc::IcrcHandler::transfer`]).
+#[must_use]
+pub fn cached_transfer_fee(asset_id: &AssetId) -> Option<u128> {
+    ASSET_METRICS.with(|m| {
+        m.borrow()
+            .get(asset_id)
+            .and_then(|metrics| metrics.latest_transfer_fee)
+    })
+}
+
+/// Records the ledger's authoritative transfer fee for `asset_id` after a
+/// `BadFee` rejection, so the next transfer sends the corrected value.
+///
+/// No-op when the asset has no metrics entry: the cache is a best-effort
+/// optimisation and an absent entry simply means the next transfer falls back to
+/// letting the ledger apply its own fee.
+pub fn update_cached_transfer_fee(asset_id: &AssetId, fee: u128) {
+    ASSET_METRICS.with(|m| {
+        if let Some(metrics) = m.borrow_mut().get_mut(asset_id) {
+            metrics.latest_transfer_fee = Some(fee);
+            metrics.last_updated_ns = Some(now_ns());
+        }
+    });
 }
 
 pub fn save_state() {

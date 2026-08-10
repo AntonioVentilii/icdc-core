@@ -164,6 +164,7 @@ pub async fn withdraw_fund(params: WithdrawFundParams) -> WithdrawFundResult {
                 let transfer_res = handler
                     .transfer(AssetTransferParams {
                         asset: &asset,
+                        asset_id: &asset_id,
                         from: AssetAccount::CanisterMain,
                         to: AssetAccount::external_principal(to),
                         amount: AssetAmount::Fixed(amount),

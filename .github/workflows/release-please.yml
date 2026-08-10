@@ -1,0 +1,65 @@
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Generate bot token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
+      - name: Run release-please
+        id: release
+        uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # The `simple` strategy bumps the versions in Cargo.toml/package.json via
+      # extra-file updaters but does not refresh the lockfiles. Re-lock both on
+      # the release PR and commit them so `cargo build --locked` succeeds and
+      # package-lock.json stays in sync with package.json.
+      - name: Checkout release PR branch
+        if: ${{ steps.release.outputs.pr }}
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
+
+      - name: Prepare
+        if: ${{ steps.release.outputs.pr }}
+        uses: ./.github/actions/prepare
+
+      - name: Re-lock
+        if: ${{ steps.release.outputs.pr }}
+        run: |
+          cargo update --workspace
+          npm install
+
+      - name: Commit lockfiles
+        if: ${{ steps.release.outputs.pr }}
+        uses: ./.github/actions/add-and-commit
+        with:
+          add: |
+            Cargo.lock
+            package-lock.json
+          message: 'chore: sync lockfiles with release version'
+          token: ${{ steps.app-token.outputs.token }}

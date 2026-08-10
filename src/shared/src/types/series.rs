@@ -329,6 +329,30 @@ impl Series {
     pub fn is_tradeable_at(&self, now: u64) -> bool {
         matches!(self.status(now), SeriesStatus::Live)
     }
+
+    /// Returns true when this series carries the minimal structural data its
+    /// payoff model needs to be resolved.
+    ///
+    /// A market can be past expiry yet not meaningfully resolvable: a `Call`/`Put`
+    /// with no `strike` has no reference to settle against — the clearing
+    /// canister's `get_unit_payoff` returns `MissingStrike` for it — and a
+    /// `Categorical` with no declared `outcomes` has nothing to resolve to. A
+    /// resolution solver should skip such a market rather than treat it as due
+    /// work. `Binary` needs only the settlement price the oracle supplies at
+    /// resolution, so it is always structurally resolvable.
+    ///
+    /// This is a pure function of the series — the settlement price itself is
+    /// provided by the oracle at resolution time, not stored here — so it reports
+    /// only whether the *contract* is resolvable, not whether an oracle value is
+    /// available yet.
+    #[must_use]
+    pub fn has_resolvable_payoff(&self) -> bool {
+        match self.payoff_type {
+            PayoffType::Binary => true,
+            PayoffType::Call | PayoffType::Put => self.strike.is_some(),
+            PayoffType::Categorical => self.outcomes.as_ref().is_some_and(|o| !o.is_empty()),
+        }
+    }
 }
 
 /// Where a series sits in its trading window at a given instant.
@@ -682,6 +706,23 @@ pub struct ListSeriesParams {
     /// Like the expiry cutoff, the clock is the canister's own server-side
     /// `time()`.
     pub tradeable_now: Option<bool>,
+    /// When `Some(true)`, return only series that are **due for resolution**: at
+    /// or past `expiry_ns`, carrying a non-empty resolution clause, and with a
+    /// payoff model that has the data required to settle (see
+    /// [`Series::has_resolvable_payoff`]). `Some(false)` and `None` apply no
+    /// filtering.
+    ///
+    /// This is the exact candidate set a resolution solver iterates: markets that
+    /// have expired but not yet settled and can actually be resolved. It is the
+    /// mirror image of [`Self::tradeable_now`] on the expiry axis (expired rather
+    /// than live) and lets the caller fetch only the due subset instead of paging
+    /// the whole registry and discarding most of it. Settlement state itself is
+    /// owned by the clearing canister, so a caller still subtracts the
+    /// already-settled ids (see `clearing.list_settled_series`) from this set.
+    ///
+    /// Like the other clock-dependent filters, the expiry cutoff uses the
+    /// canister's own server-side `time()`.
+    pub due: Option<bool>,
     /// Optional pagination parameters.
     pub pagination: Option<PaginationParams>,
 }
@@ -795,13 +836,38 @@ impl ListSeriesParams {
         }
     }
 
+    /// Returns true if `series` satisfies the `due` filter relative to `now`
+    /// (nanoseconds since the UNIX epoch).
+    ///
+    /// A series is due when it is at or past `expiry_ns` (the same
+    /// [`SeriesStatus::Expired`] boundary the rest of the system uses — expiry is
+    /// inclusive), carries a non-empty resolution clause, and has a resolvable
+    /// payoff (see [`Series::has_resolvable_payoff`]). Kept separate from
+    /// [`Self::matches`] because the expiry half depends on the caller's notion of
+    /// "now"; the registry supplies its own `time()` so the cutoff stays
+    /// server-authoritative.
+    ///
+    /// When the filter is unset or `Some(false)`, every series passes.
+    #[must_use]
+    pub fn matches_due(&self, series: &Series, now: u64) -> bool {
+        if self.due == Some(true) {
+            now >= series.expiry_ns
+                && !series.resolution.clause.trim().is_empty()
+                && series.has_resolvable_payoff()
+        } else {
+            true
+        }
+    }
+
     /// Applies every clock-dependent filter at once.
     ///
-    /// Convenience for call sites that must not forget one of the two: adding a
-    /// third time-based filter later extends this and every caller picks it up.
+    /// Convenience for call sites that must not forget one of them: adding a
+    /// further time-based filter later extends this and every caller picks it up.
     #[must_use]
     pub fn matches_time(&self, series: &Series, now: u64) -> bool {
-        self.matches_expiry(series, now) && self.matches_tradeable_now(series, now)
+        self.matches_expiry(series, now)
+            && self.matches_tradeable_now(series, now)
+            && self.matches_due(series, now)
     }
 }
 
@@ -908,7 +974,7 @@ mod tests {
     use candid::Principal;
 
     use crate::types::{
-        series::{is_valid_locale, ListSeriesParams, PaginationParams, SeriesStatus},
+        series::{is_valid_locale, ListSeriesParams, Outcome, PaginationParams, SeriesStatus},
         BalanceDomain, Description, PayoffType, PayoutUnit, Price, Resolution, Series, SeriesId,
         SeriesIdParams, TradingAccess,
     };
@@ -1715,6 +1781,122 @@ mod tests {
         assert!(!params.matches_time(&upcoming, 50), "not open yet");
         assert!(params.matches_time(&upcoming, 150), "inside the window");
         assert!(!params.matches_time(&upcoming, 250), "expired");
+    }
+
+    // --- due filter -------------------------------------------------------
+
+    /// `has_resolvable_payoff` must dereference exactly the fields the clearing
+    /// canister's payoff formula needs: nothing extra for `Binary`, a `strike`
+    /// for `Call`/`Put`, and at least one outcome for `Categorical`.
+    #[test]
+    fn has_resolvable_payoff_matches_required_data() {
+        let mut binary = series_with_id("s");
+        binary.payoff_type = PayoffType::Binary;
+        binary.strike = None;
+        assert!(binary.has_resolvable_payoff(), "binary needs no strike");
+
+        let mut call_no_strike = series_with_id("s");
+        call_no_strike.payoff_type = PayoffType::Call;
+        call_no_strike.strike = None;
+        assert!(
+            !call_no_strike.has_resolvable_payoff(),
+            "a call with no strike cannot settle"
+        );
+
+        let mut put_with_strike = series_with_id("s");
+        put_with_strike.payoff_type = PayoffType::Put;
+        put_with_strike.strike = Some(Price::new(100, 8));
+        assert!(put_with_strike.has_resolvable_payoff());
+
+        let mut categorical_empty = series_with_id("s");
+        categorical_empty.payoff_type = PayoffType::Categorical;
+        categorical_empty.outcomes = Some(vec![]);
+        assert!(
+            !categorical_empty.has_resolvable_payoff(),
+            "a categorical with no outcomes cannot settle"
+        );
+
+        let mut categorical = series_with_id("s");
+        categorical.payoff_type = PayoffType::Categorical;
+        categorical.outcomes = Some(vec![Outcome {
+            id: "yes".to_owned().into(),
+            title: "Yes".to_owned(),
+            description: None,
+            icon_url: None,
+        }]);
+        assert!(categorical.has_resolvable_payoff());
+    }
+
+    /// A due series is expired (expiry is inclusive), resolvable, and carries a
+    /// resolution clause.
+    #[test]
+    fn due_filter_selects_expired_resolvable_series() {
+        let series = windowed_series(None, 200); // Binary, clause "r", no strike needed
+
+        let params = ListSeriesParams {
+            due: Some(true),
+            ..Default::default()
+        };
+
+        assert!(!params.matches_due(&series, 199), "still live, not due");
+        assert!(
+            params.matches_due(&series, 200),
+            "due at exactly expiry (inclusive)"
+        );
+        assert!(params.matches_due(&series, 250), "still due after expiry");
+    }
+
+    /// An expired market whose payoff cannot be settled — a call with no strike —
+    /// is not due work: the solver would only hit a payoff error on it.
+    #[test]
+    fn due_filter_excludes_unresolvable_expired_series() {
+        let mut series = windowed_series(None, 200);
+        series.payoff_type = PayoffType::Call;
+        series.strike = None;
+
+        let params = ListSeriesParams {
+            due: Some(true),
+            ..Default::default()
+        };
+
+        assert!(
+            !params.matches_due(&series, 250),
+            "expired but unresolvable must be excluded"
+        );
+    }
+
+    /// An expired market with a blank resolution clause is not due: there is no
+    /// stated rule to resolve it by. (`add_series` rejects empty clauses, so this
+    /// guards a defensive edge rather than a common state.)
+    #[test]
+    fn due_filter_excludes_blank_resolution_clause() {
+        let mut series = windowed_series(None, 200);
+        series.resolution = Resolution::new("   ");
+
+        let params = ListSeriesParams {
+            due: Some(true),
+            ..Default::default()
+        };
+
+        assert!(!params.matches_due(&series, 250));
+    }
+
+    /// `due` unset or `Some(false)` filters nothing.
+    #[test]
+    fn due_filter_unset_admits_everything() {
+        let live = windowed_series(None, 200);
+
+        let unset = ListSeriesParams::default();
+        assert!(unset.matches_due(&live, 50), "None applies no filter");
+
+        let disabled = ListSeriesParams {
+            due: Some(false),
+            ..Default::default()
+        };
+        assert!(
+            disabled.matches_due(&live, 50),
+            "Some(false) applies no filter"
+        );
     }
 
     /// Stable state written before `start_ns` existed must still decode, with the

@@ -13,6 +13,38 @@ on:
 permissions: {}
 
 jobs:
+  pr-title:
+    name: PR Title
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: checks-pr-title-${{ github.ref }}
+      cancel-in-progress: false
+    permissions: {}
+
+    steps:
+      - name: Skip outside pull requests
+        if: github.event_name != 'pull_request'
+        run: echo "PR title check only runs for pull_request events."
+
+      - name: Validate Conventional Commit PR title (scope required)
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # Scope is REQUIRED: type(scope): description — or type(scope)!: … for a breaking change.
+          pattern='^(feat|fix|perf|deps|revert|docs|style|chore|refactor|test|build|ci)\([-a-zA-Z0-9,._/]+\)!?: .+$'
+
+          if [[ "$PR_TITLE" =~ $pattern ]]; then
+            echo "PR title OK."
+            exit 0
+          fi
+
+          # Keep the title off the start of a line so it can't inject a ::workflow:: command.
+          echo "::error::PR title must be a Conventional Commit WITH A SCOPE: 'type(scope): description' (or 'type(scope)!: …' for a breaking change)."
+          echo "::error::Scope = the affected area/crate, or a short area such as 'deps' for tooling. E.g. 'feat(clearing): add settlement guard'."
+          echo "Got title: $PR_TITLE"
+          exit 1
+
   format:
     name: Format
     runs-on: ubuntu-24.04
@@ -24,7 +56,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
@@ -60,20 +92,101 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
       - name: Prepare
         uses: ./.github/actions/prepare
 
+      - name: Restore cargo cache
+        id: cache-lint
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-lint-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
+            ${{ runner.os }}-cargo-lint-
+
       - name: Lint
         run: npm run lint
+
+      - name: Save cargo cache
+        if: always() && steps.cache-lint.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.cache-lint.outputs.cache-primary-key }}
+
+  did:
+    name: Candid
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: checks-did-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+
+      - name: Install candid-extractor
+        run: scripts/setup candid-extractor
+
+      - name: Restore cargo cache
+        id: cache-did
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-did-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-did-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
+            ${{ runner.os }}-cargo-did-
+
+      - name: Generate Candid
+        run: npm run did
+
+      - name: Check for drift
+        run: |
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "::error::Working tree changed after 'npm run did'. Run it locally and commit the result."
+            # Stage everything (incl. new/deleted/untracked) so the printed
+            # diff shows content for all changes, not just tracked ones.
+            git add -A
+            git --no-pager diff --cached
+            exit 1
+          fi
+
+      - name: Save cargo cache
+        if: always() && steps.cache-did.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.cache-did.outputs.cache-primary-key }}
 
   checks-pass:
     name: Checks Pass
     if: always()
-    needs: ['format', 'lint']
+    needs: ['pr-title', 'format', 'lint', 'did']
     runs-on: ubuntu-24.04
     concurrency:
       group: checks-pass-${{ github.ref }}
@@ -81,7 +194,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - uses: ./.github/actions/needs_success

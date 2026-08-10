@@ -9,8 +9,14 @@ use shared::types::{BalanceDomain, Price, Series, SeriesId, SettlementInput};
 
 use super::{
     errors::SettlementError,
-    params::{BackfillSettlementEventsParams, ListSettledSeriesParams, SettleSeriesParams},
-    results::{BackfillSettlementEventsResult, SettleSeriesResult, SettledSeriesPage},
+    params::{
+        BackfillSettlementEventsParams, ListSeriesSettlementStatusesParams,
+        ListSettledSeriesParams, SettleSeriesParams,
+    },
+    results::{
+        BackfillSettlementEventsResult, SeriesSettlementStatus, SettleSeriesResult,
+        SettledSeriesPage,
+    },
 };
 use crate::{
     guards::{caller_is_controller, caller_is_not_anonymous},
@@ -115,6 +121,46 @@ pub fn get_settlement_plan(series_id: SeriesId) -> Option<SettlementPlan> {
 #[must_use]
 pub fn get_settlement_status(series_id: SeriesId) -> Option<SettlementStatusView> {
     SETTLEMENT_PLANS.with(move |m| m.borrow().get(&series_id).map(SettlementStatusView::from))
+}
+
+/// Returns each requested series' settlement status in one call — the batch form
+/// of [`get_settlement_status`].
+///
+/// A resolution solver checks "is this market already settled?" for every due
+/// market on each pass; done one id at a time that is N sequential canister
+/// calls. This collapses them into one: each id is looked up in
+/// `SETTLEMENT_PLANS` and returned with its [`SettlementStatusView`], or `None`
+/// when no plan exists yet (the series is still open / not being settled).
+/// Results are one per requested id, in request order, so the caller can zip them
+/// back against its input; the `series_id` is echoed on each entry so a `None`
+/// status is still attributable.
+///
+/// The work is `O(#series_ids)` map lookups — bounded by the request, not by the
+/// number of plans — so callers should pass the (already bounded) set they care
+/// about, e.g. the registry's "due" candidates. Reads the same
+/// `SETTLEMENT_PLANS` map as [`get_settlement_status`] and mirrors the
+/// aggregate-read shape of
+/// [`list_series_traded_volumes`](crate::api::trade::list_series_traded_volumes).
+/// Guarded by `caller_is_not_anonymous`, matching the other settlement reads.
+#[query(guard = "caller_is_not_anonymous")]
+#[must_use]
+pub fn list_series_settlement_statuses(
+    params: ListSeriesSettlementStatusesParams,
+) -> Vec<SeriesSettlementStatus> {
+    let ListSeriesSettlementStatusesParams { series_ids } = params;
+
+    SETTLEMENT_PLANS.with(|plans| {
+        let plans = plans.borrow();
+
+        series_ids
+            .into_iter()
+            .map(|series_id| {
+                let status = plans.get(&series_id).map(SettlementStatusView::from);
+
+                SeriesSettlementStatus { series_id, status }
+            })
+            .collect()
+    })
 }
 
 /// Lists the ids of series that have been settled (resolved), with stable
@@ -816,8 +862,11 @@ mod tests {
 
     use crate::{
         api::settlement::{
-            api::check_settlement_solvency, errors::SettlementError, get_settlement_plan,
-            list_settled_series, params::ListSettledSeriesParams, prepare_settlement_impl,
+            api::check_settlement_solvency,
+            errors::SettlementError,
+            get_settlement_plan, list_series_settlement_statuses, list_settled_series,
+            params::{ListSeriesSettlementStatusesParams, ListSettledSeriesParams},
+            prepare_settlement_impl,
         },
         memory::{ACCOUNT_STATES, COLLATERAL_ASSETS, POSITIONS, SETTLEMENT_PLANS},
         types::{
@@ -1038,6 +1087,63 @@ mod tests {
 
         // Cleanup
         SETTLEMENT_PLANS.with(|m| m.borrow_mut().remove(&series_id));
+    }
+
+    /// The batch settlement-status read returns one entry per requested id, in
+    /// request order: `Some(status)` for series with a plan, `None` for series
+    /// that are still open or unknown — collapsing N `get_settlement_status`
+    /// calls into one.
+    #[test]
+    fn list_series_settlement_statuses_batches_lookups() {
+        let settled = SeriesId::from("batch_settled".to_owned());
+        let open = SeriesId::from("batch_open".to_owned());
+        let unknown = SeriesId::from("batch_unknown".to_owned());
+
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+
+        // Only `settled` has a plan.
+        let _plan = SettlementPlan::get_or_create(SettlementPlanParams {
+            series_id: settled.clone(),
+            settlement: SettlementInput::Price(Price::new(100, 0)),
+            oracle_source: "oracle".to_owned(),
+            fee: 7,
+            insurance_fee: 3,
+            positions: vec![],
+            balance_domain: BalanceDomain::Settlement,
+        });
+
+        // Request order deliberately interleaves the three cases; results must
+        // come back aligned to the input.
+        let result = list_series_settlement_statuses(ListSeriesSettlementStatusesParams {
+            series_ids: vec![open.clone(), settled.clone(), unknown.clone()],
+        });
+
+        assert_eq!(result.len(), 3, "one entry per requested id");
+
+        assert_eq!(result[0].series_id, open);
+        assert!(result[0].status.is_none(), "open series has no plan");
+
+        assert_eq!(result[1].series_id, settled);
+        let status = result[1]
+            .status
+            .as_ref()
+            .expect("settled series has a plan");
+        assert_eq!(status.series_id, settled);
+        assert_eq!(status.fee_usd, 7);
+        assert_eq!(status.insurance_fee_usd, 3);
+        assert_eq!(status.status, PlanStatus::Planned);
+
+        assert_eq!(result[2].series_id, unknown);
+        assert!(result[2].status.is_none(), "unknown series has no plan");
+
+        // An empty request yields an empty response.
+        let empty = list_series_settlement_statuses(ListSeriesSettlementStatusesParams {
+            series_ids: vec![],
+        });
+        assert!(empty.is_empty());
+
+        // Cleanup
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().remove(&settled));
     }
 
     #[test]
