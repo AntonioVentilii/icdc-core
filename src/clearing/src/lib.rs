@@ -22,8 +22,8 @@ use crate::{
                 UpdateDomainPolicyParams, WithdrawFundParams,
             },
             results::{
-                CancelFundWithdrawalResult, GetFundsResult, RefreshIcrcAssetMetadataResult,
-                RegisterIcrcAssetResult, UpdateAssetPriceResult,
+                CancelFundWithdrawalResult, GetFundsResult, ReassignAccountResult,
+                RefreshIcrcAssetMetadataResult, RegisterIcrcAssetResult, UpdateAssetPriceResult,
                 UpdateCollateralAllowedDomainsResult, WithdrawFundResult,
             },
         },
