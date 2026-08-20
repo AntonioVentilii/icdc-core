@@ -10,8 +10,9 @@ use shared::types::{
 
 use super::{
     errors::{
-        CancelFundWithdrawalError, RefreshIcrcAssetMetadataError, RegisterIcrcAssetError,
-        UpdateAssetPriceError, UpdateCollateralAllowedDomainsError, WithdrawFundError,
+        CancelFundWithdrawalError, ReassignAccountError, RefreshIcrcAssetMetadataError,
+        RegisterIcrcAssetError, UpdateAssetPriceError, UpdateCollateralAllowedDomainsError,
+        WithdrawFundError,
     },
     params::{
         CancelFundWithdrawalParams, FundType, RefreshIcrcAssetMetadataParams,
@@ -20,9 +21,9 @@ use super::{
         UpdateDomainPolicyParams, WithdrawFundParams,
     },
     results::{
-        CancelFundWithdrawalResult, GetFundsResult, RefreshIcrcAssetMetadataResult,
-        RegisterIcrcAssetResult, UpdateAssetPriceResult, UpdateCollateralAllowedDomainsResult,
-        WithdrawFundResult,
+        CancelFundWithdrawalResult, GetFundsResult, ReassignAccountResult,
+        RefreshIcrcAssetMetadataResult, RegisterIcrcAssetResult, UpdateAssetPriceResult,
+        UpdateCollateralAllowedDomainsResult, WithdrawFundResult,
     },
 };
 use crate::{
@@ -35,8 +36,9 @@ use crate::{
     },
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
-        ASSET_METRICS, COLLATERAL_ASSETS, CONFIG, DOMAIN_POLICIES, FUND_WITHDRAWAL_PLANS,
-        INSURANCE_FUND, REGISTRY_CANISTER, TREASURY,
+        ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, CONFIG, DEPOSIT_PLANS, DOMAIN_POLICIES,
+        FROZEN_TRANSFERS, FUND_WITHDRAWAL_PLANS, INSURANCE_FUND, LIMIT_ORDERS, MIGRATION_PLANS,
+        POSITIONS, REGISTRY_CANISTER, SETTLEMENT_PLANS, TREASURY, WITHDRAWAL_PLANS,
     },
     types::{
         account::AssetAccount,
@@ -44,6 +46,7 @@ use crate::{
         payment::PaymentReceipt,
         plans::{FundWithdrawalPlan, FundWithdrawalPlanParams, PlanStatus},
         state::Config,
+        user::User,
     },
     utils::{
         registry,
@@ -505,6 +508,167 @@ pub fn update_collateral_allowed_domains(
     res.into()
 }
 
+/// Atomically reassigns the entire clearing account of `old_owner` to `new_owner`.
+///
+/// Moves the full [`AccountState`](crate::types::margin::AccountState) (collateral
+/// balances across all assets and balance domains, internal cash balances (USD), and
+/// reserved margins per domain) plus every open position keyed by the old principal.
+/// The generic use case is an account-ownership handover, e.g. a custodial key
+/// rotation where an operator starts signing for the same logical account with a
+/// newly derived principal.
+///
+/// Guard rails (the call rejects, mutating nothing, when any fails):
+/// - `old_owner == new_owner`
+/// - `old_owner` has no account
+/// - `old_owner` has resting limit orders (cancel them first; the book's ownership is never
+///   rewritten behind its back)
+/// - `old_owner` has positions frozen for cross-canister transfer (their signed proofs are bound to
+///   the old principal)
+/// - `old_owner` or `new_owner` has non-finalised deposit / withdrawal / settlement /
+///   domain-migration plans
+/// - `new_owner` already holds any clearing state (this reassigns, it never merges)
+///
+/// The historical event log (and the leaderboard / accuracy projections derived
+/// from it) is left untouched: it is an audit trail of what happened under the old
+/// principal. Finalised plans likewise stay under their original keys as records.
+///
+/// This method is gated to canister controllers.
+#[update(guard = "caller_is_controller")]
+#[must_use]
+pub fn admin_reassign_account(old_owner: Principal, new_owner: Principal) -> ReassignAccountResult {
+    reassign_account_impl(old_owner.into(), new_owner.into()).into()
+}
+
+pub(crate) fn reassign_account_impl(
+    old_owner: User,
+    new_owner: User,
+) -> Result<(), ReassignAccountError> {
+    // ---------- Validation (no mutation before every check passes) ----------
+    if old_owner == new_owner {
+        return Err(ReassignAccountError::SameOwner);
+    }
+
+    if !ACCOUNT_STATES.with(|a| a.borrow().contains_key(&old_owner)) {
+        return Err(ReassignAccountError::AccountNotFound);
+    }
+
+    let old_has_orders =
+        LIMIT_ORDERS.with(|orders| orders.borrow().values().any(|o| o.creator == old_owner));
+    if old_has_orders {
+        return Err(ReassignAccountError::OpenOrdersExist);
+    }
+
+    let old_has_frozen =
+        FROZEN_TRANSFERS.with(|transfers| transfers.borrow().values().any(|p| p.user == old_owner));
+    if old_has_frozen {
+        return Err(ReassignAccountError::PendingPositionTransfersExist);
+    }
+
+    check_no_inflight_plans_for_reassignment(old_owner)?;
+    check_no_inflight_plans_for_reassignment(new_owner)?;
+
+    if target_has_clearing_state(new_owner) {
+        return Err(ReassignAccountError::TargetAccountNotEmpty);
+    }
+
+    // ---------- Atomic mutation (single synchronous message, no awaits) ----------
+    ACCOUNT_STATES.with(|accounts| {
+        let mut accounts = accounts.borrow_mut();
+        if let Some(mut state) = accounts.remove(&old_owner) {
+            state.user = new_owner;
+            accounts.insert(new_owner, state);
+        }
+    });
+
+    POSITIONS.with(|positions| {
+        let mut positions = positions.borrow_mut();
+        let old_keys: Vec<_> = positions
+            .keys()
+            .filter(|(user, _, _)| *user == old_owner)
+            .cloned()
+            .collect();
+        for key in old_keys {
+            if let Some(mut position) = positions.remove(&key) {
+                position.user = new_owner;
+                positions.insert((new_owner, key.1, key.2), position);
+            }
+        }
+    });
+
+    Ok(())
+}
+
+/// True when `owner` holds any clearing state that a reassignment would clobber:
+/// a non-empty account state, open positions, resting orders, or positions frozen
+/// for transfer. An empty [`AccountState`](crate::types::margin::AccountState)
+/// shell does not count: it carries no economic state and is simply replaced.
+fn target_has_clearing_state(owner: User) -> bool {
+    let has_account_state = ACCOUNT_STATES.with(|accounts| {
+        accounts.borrow().get(&owner).is_some_and(|state| {
+            !state.balances.is_empty()
+                || !state.cash_balances_usd.is_empty()
+                || !state.reserved_margins_usd.is_empty()
+        })
+    });
+
+    let has_positions =
+        POSITIONS.with(|positions| positions.borrow().keys().any(|(user, _, _)| *user == owner));
+
+    let has_orders =
+        LIMIT_ORDERS.with(|orders| orders.borrow().values().any(|o| o.creator == owner));
+
+    let has_frozen =
+        FROZEN_TRANSFERS.with(|transfers| transfers.borrow().values().any(|p| p.user == owner));
+
+    has_account_state || has_positions || has_orders || has_frozen
+}
+
+/// Rejects the reassignment while `user` has non-finalised deposit, withdrawal,
+/// settlement, or domain-migration plans: those plans reference the principal and
+/// would credit, refund, or settle against the wrong owner once the account moved.
+fn check_no_inflight_plans_for_reassignment(user: User) -> Result<(), ReassignAccountError> {
+    let has_deposit = DEPOSIT_PLANS.with(|plans| {
+        plans
+            .borrow()
+            .iter()
+            .any(|((u, _), p)| *u == user && p.status != PlanStatus::Finalised)
+    });
+    if has_deposit {
+        return Err(ReassignAccountError::InFlightPlansExist);
+    }
+
+    let has_withdrawal = WITHDRAWAL_PLANS.with(|plans| {
+        plans
+            .borrow()
+            .iter()
+            .any(|((u, _), p)| *u == user && p.status != PlanStatus::Finalised)
+    });
+    if has_withdrawal {
+        return Err(ReassignAccountError::InFlightPlansExist);
+    }
+
+    let has_migration = MIGRATION_PLANS.with(|plans| {
+        plans
+            .borrow()
+            .iter()
+            .any(|((u, _), p)| *u == user && p.status != PlanStatus::Finalised)
+    });
+    if has_migration {
+        return Err(ReassignAccountError::InFlightPlansExist);
+    }
+
+    let has_settlement = SETTLEMENT_PLANS.with(|plans| {
+        plans.borrow().values().any(|p| {
+            p.status != PlanStatus::Finalised && p.positions.iter().any(|pos| pos.user == user)
+        })
+    });
+    if has_settlement {
+        return Err(ReassignAccountError::InFlightPlansExist);
+    }
+
+    Ok(())
+}
+
 pub(crate) fn deduct_fund_balance_impl(
     asset_id: &AssetId,
     amount: u128,
@@ -527,11 +691,21 @@ pub(crate) fn deduct_fund_balance_impl(
 
 #[cfg(test)]
 mod tests {
-    use shared::types::AssetId;
+    use candid::Principal;
+    use shared::types::{AssetId, BalanceDomain, Price, SeriesId};
 
     use crate::{
-        api::admin::{api::deduct_fund_balance_impl, errors::WithdrawFundError, params::FundType},
-        memory::{INSURANCE_FUND, TREASURY},
+        api::admin::{
+            api::{deduct_fund_balance_impl, reassign_account_impl},
+            errors::{ReassignAccountError, WithdrawFundError},
+            params::FundType,
+        },
+        memory::{ACCOUNT_STATES, INSURANCE_FUND, LIMIT_ORDERS, POSITIONS, TREASURY},
+        types::{
+            margin::{AccountState, Position},
+            trade::{LimitOrder, OrderId, Side},
+            user::User,
+        },
     };
 
     #[test]
@@ -585,5 +759,256 @@ mod tests {
         TREASURY.with(|f| {
             assert_eq!(f.borrow().get(&asset_id).copied().unwrap(), 100_000);
         });
+    }
+
+    fn seed_account(user: User) {
+        ACCOUNT_STATES.with(|accounts| {
+            let mut state = AccountState::new(user);
+            state.set_balance(BalanceDomain::Settlement, "ICP".to_owned(), 1_000_000);
+            state.set_balance(BalanceDomain::Playground, "ckUSDC".to_owned(), 42);
+            state.set_cash_balance_usd(BalanceDomain::Settlement, -250_000);
+            state.set_reserved_margin_usd(BalanceDomain::Settlement, 100_000);
+            accounts.borrow_mut().insert(user, state);
+        });
+    }
+
+    fn seed_position(user: User, series: &str) {
+        let series_id = SeriesId::from(series.to_owned());
+        POSITIONS.with(|positions| {
+            positions.borrow_mut().insert(
+                (user, series_id.clone(), None),
+                Position {
+                    user,
+                    series_id,
+                    outcome_id: None,
+                    net_qty: 7,
+                    reserved_margin_usd: 100_000,
+                },
+            );
+        });
+    }
+
+    fn clear_reassign_state() {
+        ACCOUNT_STATES.with(|a| a.borrow_mut().clear());
+        POSITIONS.with(|p| p.borrow_mut().clear());
+        LIMIT_ORDERS.with(|o| o.borrow_mut().clear());
+    }
+
+    #[test]
+    fn reassign_account_moves_balances_and_positions() {
+        clear_reassign_state();
+        let old_owner = User(Principal::from_slice(&[201]));
+        let new_owner = User(Principal::from_slice(&[202]));
+
+        seed_account(old_owner);
+        seed_position(old_owner, "REASSIGN-A");
+        seed_position(old_owner, "REASSIGN-B");
+
+        let res = reassign_account_impl(old_owner, new_owner);
+        assert!(res.is_ok(), "expected Ok, got {res:?}");
+
+        ACCOUNT_STATES.with(|accounts| {
+            let accounts = accounts.borrow();
+            assert!(
+                accounts.get(&old_owner).is_none(),
+                "old account must be gone"
+            );
+
+            let state = accounts.get(&new_owner).expect("new account must exist");
+            assert_eq!(state.user, new_owner);
+            assert_eq!(
+                state.get_balance(BalanceDomain::Settlement, &"ICP".to_owned()),
+                1_000_000
+            );
+            assert_eq!(
+                state.get_balance(BalanceDomain::Playground, &"ckUSDC".to_owned()),
+                42
+            );
+            assert_eq!(
+                state.get_cash_balance_usd(BalanceDomain::Settlement),
+                -250_000
+            );
+            assert_eq!(
+                state.get_reserved_margin_usd(BalanceDomain::Settlement),
+                100_000
+            );
+        });
+
+        POSITIONS.with(|positions| {
+            let positions = positions.borrow();
+            assert!(
+                !positions.keys().any(|(u, _, _)| *u == old_owner),
+                "old owner must hold no positions"
+            );
+            let moved: Vec<_> = positions
+                .iter()
+                .filter(|((u, _, _), _)| *u == new_owner)
+                .collect();
+            assert_eq!(moved.len(), 2);
+            for (_, position) in moved {
+                assert_eq!(position.user, new_owner);
+                assert_eq!(position.net_qty, 7);
+                assert_eq!(position.reserved_margin_usd, 100_000);
+            }
+        });
+
+        clear_reassign_state();
+    }
+
+    #[test]
+    fn reassign_account_rejects_same_owner() {
+        let owner = User(Principal::from_slice(&[203]));
+        assert!(matches!(
+            reassign_account_impl(owner, owner),
+            Err(ReassignAccountError::SameOwner)
+        ));
+    }
+
+    #[test]
+    fn reassign_account_rejects_missing_account() {
+        clear_reassign_state();
+        let old_owner = User(Principal::from_slice(&[204]));
+        let new_owner = User(Principal::from_slice(&[205]));
+        assert!(matches!(
+            reassign_account_impl(old_owner, new_owner),
+            Err(ReassignAccountError::AccountNotFound)
+        ));
+    }
+
+    #[test]
+    fn reassign_account_rejects_open_orders() {
+        clear_reassign_state();
+        let old_owner = User(Principal::from_slice(&[206]));
+        let new_owner = User(Principal::from_slice(&[207]));
+
+        seed_account(old_owner);
+        LIMIT_ORDERS.with(|orders| {
+            orders.borrow_mut().insert(
+                OrderId::from("reassign_open_order".to_owned()),
+                LimitOrder {
+                    order_id: OrderId::from("reassign_open_order".to_owned()),
+                    creator: old_owner,
+                    series_id: SeriesId::from("REASSIGN-ORD".to_owned()),
+                    outcome_id: None,
+                    side: Side::Buy,
+                    qty: 1,
+                    price: Price::new(500_000, 6),
+                    blocked_margin_usd: 500_000,
+                    balance_domain: BalanceDomain::Settlement,
+                },
+            );
+        });
+
+        assert!(matches!(
+            reassign_account_impl(old_owner, new_owner),
+            Err(ReassignAccountError::OpenOrdersExist)
+        ));
+
+        // Nothing moved.
+        ACCOUNT_STATES.with(|accounts| {
+            assert!(accounts.borrow().contains_key(&old_owner));
+            assert!(!accounts.borrow().contains_key(&new_owner));
+        });
+
+        clear_reassign_state();
+    }
+
+    #[test]
+    fn reassign_account_rejects_non_empty_target() {
+        clear_reassign_state();
+        let old_owner = User(Principal::from_slice(&[208]));
+        let new_owner = User(Principal::from_slice(&[209]));
+
+        seed_account(old_owner);
+        seed_account(new_owner);
+
+        assert!(matches!(
+            reassign_account_impl(old_owner, new_owner),
+            Err(ReassignAccountError::TargetAccountNotEmpty)
+        ));
+
+        // Both accounts untouched.
+        ACCOUNT_STATES.with(|accounts| {
+            let accounts = accounts.borrow();
+            assert_eq!(accounts.get(&old_owner).unwrap().user, old_owner);
+            assert_eq!(accounts.get(&new_owner).unwrap().user, new_owner);
+        });
+
+        clear_reassign_state();
+    }
+
+    #[test]
+    fn reassign_account_allows_empty_target_shell() {
+        clear_reassign_state();
+        let old_owner = User(Principal::from_slice(&[210]));
+        let new_owner = User(Principal::from_slice(&[211]));
+
+        seed_account(old_owner);
+        // A drained account shell (no balances, cash, or margins) is not economic
+        // state; reassignment replaces it.
+        ACCOUNT_STATES.with(|accounts| {
+            accounts
+                .borrow_mut()
+                .insert(new_owner, AccountState::new(new_owner));
+        });
+
+        assert!(reassign_account_impl(old_owner, new_owner).is_ok());
+
+        ACCOUNT_STATES.with(|accounts| {
+            let accounts = accounts.borrow();
+            assert!(accounts.get(&old_owner).is_none());
+            assert_eq!(
+                accounts
+                    .get(&new_owner)
+                    .unwrap()
+                    .get_balance(BalanceDomain::Settlement, &"ICP".to_owned()),
+                1_000_000
+            );
+        });
+
+        clear_reassign_state();
+    }
+
+    #[test]
+    fn reassign_account_second_call_fails_cleanly() {
+        clear_reassign_state();
+        let old_owner = User(Principal::from_slice(&[212]));
+        let new_owner = User(Principal::from_slice(&[213]));
+
+        seed_account(old_owner);
+        seed_position(old_owner, "REASSIGN-TWICE");
+
+        assert!(reassign_account_impl(old_owner, new_owner).is_ok());
+
+        // The account moved exactly once; replaying the call finds no source
+        // account and mutates nothing.
+        assert!(matches!(
+            reassign_account_impl(old_owner, new_owner),
+            Err(ReassignAccountError::AccountNotFound)
+        ));
+
+        ACCOUNT_STATES.with(|accounts| {
+            let accounts = accounts.borrow();
+            assert!(accounts.get(&old_owner).is_none());
+            assert_eq!(
+                accounts
+                    .get(&new_owner)
+                    .unwrap()
+                    .get_balance(BalanceDomain::Settlement, &"ICP".to_owned()),
+                1_000_000
+            );
+        });
+        POSITIONS.with(|positions| {
+            assert_eq!(
+                positions
+                    .borrow()
+                    .keys()
+                    .filter(|(u, _, _)| *u == new_owner)
+                    .count(),
+                1
+            );
+        });
+
+        clear_reassign_state();
     }
 }

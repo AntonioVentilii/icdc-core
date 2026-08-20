@@ -762,6 +762,25 @@ type PriceHistoryInterval = variant {
 	// One candle per UTC hour.
 	Hour
 };
+type ReassignAccountError = variant {
+	// `old_owner` has no clearing account to reassign.
+	AccountNotFound;
+	// `new_owner` already has clearing state; this primitive reassigns, it never merges.
+	TargetAccountNotEmpty;
+	// `old_owner` has positions frozen for cross-canister transfer; the signed
+	// `PositionProof`s are bound to the old principal and cannot be reassigned.
+	PendingPositionTransfersExist;
+	// `old_owner` or `new_owner` has non-finalised deposit, withdrawal, settlement,
+	// or domain-migration plans that would act on the wrong owner mid-flight.
+	InFlightPlansExist;
+	// `old_owner` has resting limit orders; they must be cancelled first so the
+	// book's ownership assumptions are never mutated behind its back.
+	OpenOrdersExist;
+	// `old_owner` and `new_owner` are the same principal.
+	SameOwner;
+	Common : CommonError
+};
+type ReassignAccountResult = variant { Ok; Err : ReassignAccountError };
 type RefreshIcrcAssetMetadataError = variant {
 	AssetNotFound;
 	NotAnIcrcAsset;
@@ -1379,6 +1398,32 @@ service : (Config) -> {
 	// This method validates the series and increases the target user's position based on the provided
 	// proof. This method is gated to canister controllers.
 	accept_position_transfer : (PositionProof) -> (AcceptPositionTransferResult);
+	// Atomically reassigns the entire clearing account of `old_owner` to `new_owner`.
+	//
+	// Moves the full [`AccountState`](crate::types::margin::AccountState) (collateral
+	// balances across all assets and balance domains, internal cash balances (USD), and
+	// reserved margins per domain) plus every open position keyed by the old principal.
+	// The generic use case is an account-ownership handover, e.g. a custodial key
+	// rotation where an operator starts signing for the same logical account with a
+	// newly derived principal.
+	//
+	// Guard rails (the call rejects, mutating nothing, when any fails):
+	// - `old_owner == new_owner`
+	// - `old_owner` has no account
+	// - `old_owner` has resting limit orders (cancel them first; the book's ownership is never
+	// rewritten behind its back)
+	// - `old_owner` has positions frozen for cross-canister transfer (their signed proofs are bound to
+	// the old principal)
+	// - `old_owner` or `new_owner` has non-finalised deposit / withdrawal / settlement /
+	// domain-migration plans
+	// - `new_owner` already holds any clearing state (this reassigns, it never merges)
+	//
+	// The historical event log (and the leaderboard / accuracy projections derived
+	// from it) is left untouched: it is an audit trail of what happened under the old
+	// principal. Finalised plans likewise stay under their original keys as records.
+	//
+	// This method is gated to canister controllers.
+	admin_reassign_account : (principal, principal) -> (ReassignAccountResult);
 	// Aggregates, for a series, the long/short lean of a supplied set of
 	// principals, broken down per outcome.
 	//
