@@ -2,7 +2,10 @@ use candid::CandidType;
 use serde::{Deserialize, Serialize};
 use shared::types::SeriesId;
 
-use crate::types::{errors::CommonError, trade::OrderId, user::User};
+use crate::{
+    account::reassignment::ReassignmentConflict,
+    types::{errors::CommonError, trade::OrderId, user::User},
+};
 
 /// Errors occurring during trade submission or matching.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -62,6 +65,17 @@ pub enum TradeError {
         /// The timestamp (nanoseconds since the UNIX epoch) at which it opens.
         start_ns: u64,
     },
+    /// The account this call would mutate is being, or has just been, reassigned
+    /// to another principal.
+    ///
+    /// Returned when a call that was suspended at an await straddles an
+    /// `admin_reassign_account`: resuming it would recreate state under a
+    /// principal whose account has moved. The caller should retry with the
+    /// principal that now owns the account.
+    AccountUnderReassignment {
+        /// The principal whose account is being, or has just been, reassigned.
+        user: User,
+    },
     /// The series' trading window has closed, so no new exposure can be opened
     /// on it.
     ///
@@ -75,4 +89,12 @@ pub enum TradeError {
         /// The timestamp (nanoseconds since the UNIX epoch) at which it closed.
         expiry_ns: u64,
     },
+}
+
+impl From<ReassignmentConflict> for TradeError {
+    fn from(conflict: ReassignmentConflict) -> Self {
+        Self::AccountUnderReassignment {
+            user: conflict.user,
+        }
+    }
 }

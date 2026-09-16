@@ -14,18 +14,19 @@ use super::{
         UpdateAssetPriceError, UpdateCollateralAllowedDomainsError, WithdrawFundError,
     },
     params::{
-        CancelFundWithdrawalParams, FundType, RefreshIcrcAssetMetadataParams,
-        RegisterIcrcAssetParams, UpdateAssetMetricsParams, UpdateAssetPriceParams,
-        UpdateCollateralAllowedDomainsParams, UpdateCollateralAssetParams,
+        CancelFundWithdrawalParams, FundType, ReassignAccountParams,
+        RefreshIcrcAssetMetadataParams, RegisterIcrcAssetParams, UpdateAssetMetricsParams,
+        UpdateAssetPriceParams, UpdateCollateralAllowedDomainsParams, UpdateCollateralAssetParams,
         UpdateDomainPolicyParams, WithdrawFundParams,
     },
     results::{
-        CancelFundWithdrawalResult, GetFundsResult, RefreshIcrcAssetMetadataResult,
-        RegisterIcrcAssetResult, UpdateAssetPriceResult, UpdateCollateralAllowedDomainsResult,
-        WithdrawFundResult,
+        CancelFundWithdrawalResult, GetFundsResult, ReassignAccountResult,
+        RefreshIcrcAssetMetadataResult, RegisterIcrcAssetResult, UpdateAssetPriceResult,
+        UpdateCollateralAllowedDomainsResult, WithdrawFundResult,
     },
 };
 use crate::{
+    account::reassignment::reassign_account,
     assets::{
         asset::{
             handler::{get_handler, AssetHandler},
@@ -503,6 +504,37 @@ pub fn update_collateral_allowed_domains(
     })();
 
     res.into()
+}
+
+/// Reassigns the entire clearing account of `old_owner` to `new_owner`.
+///
+/// Moves the full [`AccountState`](crate::types::margin::AccountState) (collateral
+/// balances across all assets and balance domains, internal cash balances (USD), and
+/// reserved margins per domain), every open position keyed by the old principal, and
+/// the on-ledger custody funds held in the old principal's derived subaccounts. The
+/// generic use case is an account-ownership handover, e.g. a custodial key rotation
+/// where an operator starts signing for the same logical account with a newly derived
+/// principal.
+///
+/// The historical event log (and the leaderboard / accuracy projections derived
+/// from it) is left untouched: it is an audit trail of what happened under the old
+/// principal. Finalised plans likewise stay under their original keys as records.
+///
+/// See [`crate::account::reassignment`] for the guard rails, the ordering
+/// guarantee, and how an interrupted reassignment is resumed.
+///
+/// This method is gated to canister controllers.
+#[update(guard = "caller_is_controller")]
+pub async fn admin_reassign_account(params: ReassignAccountParams) -> ReassignAccountResult {
+    let ReassignAccountParams {
+        reassignment_id,
+        old_owner,
+        new_owner,
+    } = params;
+
+    reassign_account(reassignment_id, old_owner.into(), new_owner.into())
+        .await
+        .into()
 }
 
 pub(crate) fn deduct_fund_balance_impl(
