@@ -1,5 +1,6 @@
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
+use shared::types::{asset::errors::AssetError, AssetId};
 
 use crate::types::errors::CommonError;
 
@@ -65,4 +66,25 @@ pub enum ReassignAccountError {
     /// `old_owner` has positions frozen for cross-canister transfer; the signed
     /// `PositionProof`s are bound to the old principal and cannot be reassigned.
     PendingPositionTransfersExist,
+    /// One of the two principals is anonymous. Every account, position, deposit,
+    /// and withdrawal API rejects the anonymous caller, so an account assigned to
+    /// it would be permanently unreachable.
+    AnonymousOwner,
+    /// Another reassignment touching one of the two principals has not finalised.
+    /// Replay that one's `reassignment_id` to resume it.
+    ReassignmentInProgress,
+    /// The `reassignment_id` is already in use for `old_owner` with a different
+    /// `new_owner`.
+    ReassignmentIdReused,
+    /// The account holds an asset whose custody this canister cannot move
+    /// on-chain, so the funds would be stranded under the old principal.
+    UnsupportedCustodyAsset {
+        asset_id: AssetId,
+    },
+    /// A custody sweep did not settle. The re-key already happened and the plan
+    /// is still pending: replay the same `reassignment_id` to resume the sweep.
+    CustodyTransferFailed {
+        asset_id: AssetId,
+        error: AssetError,
+    },
 }

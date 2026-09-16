@@ -5,7 +5,8 @@ use shared::types::{AssetId, BalanceDomain, OutcomeId, SeriesId, SettlementInput
 use crate::{
     api::admin::params::FundType,
     memory::{
-        DEPOSIT_PLANS, FUND_WITHDRAWAL_PLANS, MIGRATION_PLANS, SETTLEMENT_PLANS, WITHDRAWAL_PLANS,
+        DEPOSIT_PLANS, FUND_WITHDRAWAL_PLANS, MIGRATION_PLANS, REASSIGNMENT_PLANS,
+        SETTLEMENT_PLANS, WITHDRAWAL_PLANS,
     },
     types::{
         payment::{PaymentIdempotency, PaymentReceipt},
@@ -452,5 +453,93 @@ impl From<&SettlementPlan> for SettlementStatusView {
             total_positions: plan.positions.len(),
             balance_domain: plan.balance_domain,
         }
+    }
+}
+
+/// Unique key for a reassignment plan: the principal being moved away from,
+/// plus the controller-provided identifier of the reassignment.
+pub type ReassignmentKey = (User, String);
+
+/// Input parameters for creating a [`ReassignmentPlan`].
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct ReassignmentPlanParams {
+    /// Controller-provided unique identifier for idempotency.
+    pub reassignment_id: String,
+    /// The principal the account is moved away from.
+    pub old_owner: User,
+    /// The principal the account is moved to.
+    pub new_owner: User,
+    /// The custody assets to drain from the old owner's subaccounts.
+    pub asset_ids: Vec<AssetId>,
+}
+
+/// The state of the custody drain for one asset of a [`ReassignmentPlan`].
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct CustodySweep {
+    /// The asset whose custody subaccount is being drained.
+    pub asset_id: AssetId,
+    /// Tokens moved to the new owner's subaccount, net of the ledger fee.
+    /// `None` while the sweep is outstanding, `Some(0)` when the old subaccount
+    /// held less than a fee's worth and nothing was worth moving.
+    pub moved_amount: Option<u128>,
+    /// Proof of the settled transfer; `None` when nothing was moved.
+    pub receipt: Option<PaymentReceipt>,
+}
+
+/// A plan for moving a whole clearing account from one principal to another.
+///
+/// The internal re-key happens atomically when the plan is created; the plan
+/// then tracks the on-ledger custody drain that follows it, so an interrupted
+/// reassignment can be resumed by replaying the same `reassignment_id`.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct ReassignmentPlan {
+    pub reassignment_id: String,
+    pub old_owner: User,
+    pub new_owner: User,
+    pub status: PlanStatus,
+    /// When the plan was created. Unlike the deposit and withdrawal plans this
+    /// is **not** used as a ledger idempotency key: each sweep attempt re-reads
+    /// the source subaccount and moves exactly what it finds, which is already
+    /// proof against a lost response, and a plan resumed after the ledger's
+    /// transaction window would fail forever on a stale `created_at_time`.
+    pub created_ns: u64,
+    /// One entry per custody asset, in the order they are drained.
+    pub sweeps: Vec<CustodySweep>,
+}
+
+impl ReassignmentPlan {
+    /// Retrieves an existing reassignment plan or creates a new one if it
+    /// doesn't exist.
+    #[must_use]
+    pub fn get_or_create(params: ReassignmentPlanParams) -> Self {
+        REASSIGNMENT_PLANS.with(|m| {
+            let mut m = m.borrow_mut();
+
+            let key: ReassignmentKey = (params.old_owner, params.reassignment_id.clone());
+
+            if let Some(existing) = m.get(&key) {
+                return existing.clone();
+            }
+
+            let plan = ReassignmentPlan {
+                reassignment_id: params.reassignment_id,
+                old_owner: params.old_owner,
+                new_owner: params.new_owner,
+                status: PlanStatus::Planned,
+                created_ns: now_ns(),
+                sweeps: params
+                    .asset_ids
+                    .into_iter()
+                    .map(|asset_id| CustodySweep {
+                        asset_id,
+                        moved_amount: None,
+                        receipt: None,
+                    })
+                    .collect(),
+            };
+
+            m.insert(key, plan.clone());
+            plan
+        })
     }
 }

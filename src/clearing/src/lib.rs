@@ -16,7 +16,7 @@ use crate::{
         },
         admin::{
             params::{
-                CancelFundWithdrawalParams, RefreshIcrcAssetMetadataParams,
+                CancelFundWithdrawalParams, ReassignAccountParams, RefreshIcrcAssetMetadataParams,
                 RegisterIcrcAssetParams, UpdateAssetMetricsParams, UpdateAssetPriceParams,
                 UpdateCollateralAllowedDomainsParams, UpdateCollateralAssetParams,
                 UpdateDomainPolicyParams, WithdrawFundParams,

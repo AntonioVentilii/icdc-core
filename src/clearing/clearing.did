@@ -277,7 +277,13 @@ type DepositCollateralError = variant {
 	// Overflow during collateral calculation.
 	MathOverflow;
 	// An error occurred while interacting with the asset.
-	Asset : AssetError
+	Asset : AssetError;
+	// The caller's account is being reassigned to another principal; deposits
+	// would land in a custody subaccount that is being drained.
+	AccountUnderReassignment : record {
+		// The principal whose account is being reassigned.
+		user : principal
+	}
 };
 // Input parameters for depositing collateral.
 type DepositCollateralParams = record {
@@ -767,18 +773,44 @@ type ReassignAccountError = variant {
 	AccountNotFound;
 	// `new_owner` already has clearing state; this primitive reassigns, it never merges.
 	TargetAccountNotEmpty;
+	// A custody sweep did not settle. The re-key already happened and the plan
+	// is still pending: replay the same `reassignment_id` to resume the sweep.
+	CustodyTransferFailed : record { error : AssetError; asset_id : text };
+	// The `reassignment_id` is already in use for `old_owner` with a different
+	// `new_owner`.
+	ReassignmentIdReused;
 	// `old_owner` has positions frozen for cross-canister transfer; the signed
 	// `PositionProof`s are bound to the old principal and cannot be reassigned.
 	PendingPositionTransfersExist;
 	// `old_owner` or `new_owner` has non-finalised deposit, withdrawal, settlement,
 	// or domain-migration plans that would act on the wrong owner mid-flight.
 	InFlightPlansExist;
+	// The account holds an asset whose custody this canister cannot move
+	// on-chain, so the funds would be stranded under the old principal.
+	UnsupportedCustodyAsset : record { asset_id : text };
+	// One of the two principals is anonymous. Every account, position, deposit,
+	// and withdrawal API rejects the anonymous caller, so an account assigned to
+	// it would be permanently unreachable.
+	AnonymousOwner;
+	// Another reassignment touching one of the two principals has not finalised.
+	// Replay that one's `reassignment_id` to resume it.
+	ReassignmentInProgress;
 	// `old_owner` has resting limit orders; they must be cancelled first so the
 	// book's ownership assumptions are never mutated behind its back.
 	OpenOrdersExist;
 	// `old_owner` and `new_owner` are the same principal.
 	SameOwner;
 	Common : CommonError
+};
+type ReassignAccountParams = record {
+	// The principal the account is moved away from.
+	old_owner : principal;
+	// Controller-provided unique identifier. Replaying a call with the same id
+	// resumes that reassignment (and returns `Ok` once it is complete) instead
+	// of starting a second one.
+	reassignment_id : text;
+	// The principal the account is moved to.
+	new_owner : principal
 };
 type ReassignAccountResult = variant { Ok; Err : ReassignAccountError };
 type RefreshIcrcAssetMetadataError = variant {
@@ -1259,6 +1291,17 @@ type TradeError = variant {
 	};
 	// The caller is not the creator of the order.
 	NotOrderCreator;
+	// The account this call would mutate is being, or has just been, reassigned
+	// to another principal.
+	//
+	// Returned when a call that was suspended at an await straddles an
+	// `admin_reassign_account`: resuming it would recreate state under a
+	// principal whose account has moved. The caller should retry with the
+	// principal that now owns the account.
+	AccountUnderReassignment : record {
+		// The principal whose account is being, or has just been, reassigned.
+		user : principal
+	};
 	// The specified series was not found in the registry.
 	SeriesNotFound : text;
 	// The series has an active or finalised settlement plan, so no new
@@ -1359,7 +1402,13 @@ type WithdrawCollateralError = variant {
 	// Overflow during collateral calculation.
 	MathOverflow;
 	// An error occurred while interacting with the asset.
-	Asset : AssetError
+	Asset : AssetError;
+	// The caller's account is being reassigned to another principal; its
+	// custody subaccount is mid-move and cannot pay out.
+	AccountUnderReassignment : record {
+		// The principal whose account is being reassigned.
+		user : principal
+	}
 };
 // Input parameters for withdrawing collateral.
 type WithdrawCollateralParams = record {
@@ -1398,32 +1447,25 @@ service : (Config) -> {
 	// This method validates the series and increases the target user's position based on the provided
 	// proof. This method is gated to canister controllers.
 	accept_position_transfer : (PositionProof) -> (AcceptPositionTransferResult);
-	// Atomically reassigns the entire clearing account of `old_owner` to `new_owner`.
+	// Reassigns the entire clearing account of `old_owner` to `new_owner`.
 	//
 	// Moves the full [`AccountState`](crate::types::margin::AccountState) (collateral
 	// balances across all assets and balance domains, internal cash balances (USD), and
-	// reserved margins per domain) plus every open position keyed by the old principal.
-	// The generic use case is an account-ownership handover, e.g. a custodial key
-	// rotation where an operator starts signing for the same logical account with a
-	// newly derived principal.
-	//
-	// Guard rails (the call rejects, mutating nothing, when any fails):
-	// - `old_owner == new_owner`
-	// - `old_owner` has no account
-	// - `old_owner` has resting limit orders (cancel them first; the book's ownership is never
-	// rewritten behind its back)
-	// - `old_owner` has positions frozen for cross-canister transfer (their signed proofs are bound to
-	// the old principal)
-	// - `old_owner` or `new_owner` has non-finalised deposit / withdrawal / settlement /
-	// domain-migration plans
-	// - `new_owner` already holds any clearing state (this reassigns, it never merges)
+	// reserved margins per domain), every open position keyed by the old principal, and
+	// the on-ledger custody funds held in the old principal's derived subaccounts. The
+	// generic use case is an account-ownership handover, e.g. a custodial key rotation
+	// where an operator starts signing for the same logical account with a newly derived
+	// principal.
 	//
 	// The historical event log (and the leaderboard / accuracy projections derived
 	// from it) is left untouched: it is an audit trail of what happened under the old
 	// principal. Finalised plans likewise stay under their original keys as records.
 	//
+	// See [`crate::account::reassignment`] for the guard rails, the ordering
+	// guarantee, and how an interrupted reassignment is resumed.
+	//
 	// This method is gated to canister controllers.
-	admin_reassign_account : (principal, principal) -> (ReassignAccountResult);
+	admin_reassign_account : (ReassignAccountParams) -> (ReassignAccountResult);
 	// Aggregates, for a series, the long/short lean of a supplied set of
 	// principals, broken down per outcome.
 	//

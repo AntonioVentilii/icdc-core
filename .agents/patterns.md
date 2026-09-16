@@ -59,7 +59,25 @@ upgrade traps in `post_upgrade`.
 > `src/clearing/src/api/migration/` (moving users between balance domains), which
 > is a permanent product API, not upgrade plumbing.
 
-## 6. Tooling & Quality Shortcuts
+## 6. Moving User State Between Principals
+
+Anything that re-keys a user's state (today: account reassignment, in
+`src/clearing/src/account/reassignment.rs`) has to survive two hazards that
+durable plans alone do not cover.
+
+- **In-flight user calls**: a call that passed its guard and is suspended at an await will
+  resume _after_ the re-key and happily recreate state under the old principal. Guard every
+  post-await mutation with a `ReassignmentGuard`: acquire it before the first await, revalidate
+  it immediately before the mutation. It rejects a principal that is locked by a pending move,
+  and one whose generation changed while the call was suspended.
+- **On-ledger custody**: internal balances are only half the account. Collateral physically
+  lives in a subaccount derived from the principal, so a re-key that does not drain it strands
+  the funds. Re-key first, synchronously, in the same message prefix as the validation, then
+  sweep each asset by re-reading the ledger balance and moving `balance - fee`. Deriving the
+  amount from the ledger (never from internal accounting) is what makes a retry idempotent: a
+  lost response or a duplicated call moves nothing the second time.
+
+## 7. Tooling & Quality Shortcuts
 
 Use the following `npm` scripts to maintain repository standards:
 
