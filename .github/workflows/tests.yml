@@ -58,7 +58,7 @@ jobs:
         run: npm run test:unit
 
       - name: Save cargo cache
-        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.changes.outputs.rust == 'true' && steps.cache-unit.outputs.cache-hit != 'true' }}
+        if: github.ref == 'refs/heads/main' && steps.changes.outputs.rust == 'true' && steps.cache-unit.outputs.cache-hit != 'true'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
@@ -116,7 +116,7 @@ jobs:
         run: npm run test:integration
 
       - name: Save cargo cache
-        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && steps.changes.outputs.rust == 'true' && steps.cache-integration.outputs.cache-hit != 'true' }}
+        if: github.ref == 'refs/heads/main' && steps.changes.outputs.rust == 'true' && steps.cache-integration.outputs.cache-hit != 'true'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |

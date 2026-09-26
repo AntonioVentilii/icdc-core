@@ -120,7 +120,7 @@ jobs:
         run: npm run lint
 
       - name: Save cargo cache
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache-lint.outputs.cache-hit != 'true' }}
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache-lint.outputs.cache-hit != 'true'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
@@ -177,7 +177,7 @@ jobs:
           fi
 
       - name: Save cargo cache
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache-did.outputs.cache-hit != 'true' }}
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache-did.outputs.cache-hit != 'true'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
