@@ -10,6 +10,11 @@ on:
   merge_group:
   workflow_dispatch:
 
+env:
+  # Incremental artifacts never get reused on a fresh runner and only bloat
+  # the cached `target/`.
+  CARGO_INCREMENTAL: 0
+
 permissions: {}
 
 jobs:
@@ -107,16 +112,15 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
+          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-lint-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
             ${{ runner.os }}-cargo-lint-
 
       - name: Lint
         run: npm run lint
 
       - name: Save cargo cache
-        if: always() && steps.cache-lint.outputs.cache-hit != 'true'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache-lint.outputs.cache-hit != 'true'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
@@ -154,9 +158,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-did-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
+          key: ${{ runner.os }}-cargo-did-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-did-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
             ${{ runner.os }}-cargo-did-
 
       - name: Generate Candid
@@ -174,7 +177,7 @@ jobs:
           fi
 
       - name: Save cargo cache
-        if: always() && steps.cache-did.outputs.cache-hit != 'true'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache-did.outputs.cache-hit != 'true'
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
