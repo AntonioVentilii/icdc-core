@@ -138,7 +138,7 @@ pub(crate) fn execute_trade_impl(
                 - (old_seller_margin.cast_signed())
                 - (seller_unblock_amount.unwrap_or(0).cast_signed());
 
-            Ok((
+            Ok::<_, TradeError>((
                 buyer_cash_delta,
                 seller_cash_delta,
                 b_reserved_delta,

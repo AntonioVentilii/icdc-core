@@ -11,8 +11,8 @@ use crate::types::{
     event::Event,
     margin::{AccountState, Position},
     plans::{
-        DepositPlan, FundWithdrawalPlan, MigrationKey, MigrationPlan, SettlementPlan,
-        WithdrawalPlan,
+        DepositPlan, FundWithdrawalPlan, MigrationKey, MigrationPlan, ReassignmentKey,
+        ReassignmentPlan, SettlementPlan, WithdrawalPlan,
     },
     trade::{LimitOrder, OrderId, TradeId, TransferId},
     user::{DepositKey, User, WithdrawalKey},
@@ -103,4 +103,7 @@ pub struct StableState {
     pub domain_policies: BTreeMap<BalanceDomain, DomainPolicy>,
     /// Active domain migration plans.
     pub migration_plans: BTreeMap<MigrationKey, MigrationPlan>,
+    /// Account reassignment plans. Optional so blobs written before account
+    /// reassignment existed still decode (see `docs/ai/migrations.md`).
+    pub reassignment_plans: Option<BTreeMap<ReassignmentKey, ReassignmentPlan>>,
 }

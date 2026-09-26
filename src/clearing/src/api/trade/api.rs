@@ -22,6 +22,7 @@ use super::{
     },
 };
 use crate::{
+    account::reassignment::ReassignmentGuard,
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
         ACCEPTED_TRANSFERS, ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, EVENTS,
@@ -72,12 +73,16 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
             return Ok(true);
         }
 
+        let reassignment = ReassignmentGuard::acquire(caller)?;
+
         let series =
             ensure_series_registered(&params.series_id, SeriesAccess::OpenExposure).await?;
 
         check_trading_access(&series, caller.0).await?;
 
         validate_no_arbitrage(&series, &params)?;
+
+        reassignment.revalidate()?;
 
         let SubmitLimitOrderParams {
             order_id,
@@ -170,9 +175,16 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
                 .ok_or(TradeError::OrderNotFound(matching_order_id.clone()))
         })?;
 
+        // Only the taker needs a guard: the maker's account cannot be reassigned
+        // while their order is resting, because a reassignment rejects an owner
+        // that still has orders on the book.
+        let reassignment = ReassignmentGuard::acquire(taker)?;
+
         let series = ensure_series_registered(&order.series_id, SeriesAccess::OpenExposure).await?;
 
         check_trading_access(&series, taker.0).await?;
+
+        reassignment.revalidate()?;
 
         submit_market_order_impl(taker, &order, &trade_id, &series, qty)
     })
@@ -452,8 +464,12 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
             return Ok(true);
         }
 
+        let reassignment = ReassignmentGuard::acquire(proof.user)?;
+
         let series =
             ensure_series_registered(&proof.series_id, SeriesAccess::ReduceExposure).await?;
+
+        reassignment.revalidate()?;
 
         let valuation_price = proof
             .valuation_price
@@ -951,8 +967,10 @@ pub fn list_orders(params: ListOrdersParams) -> Vec<LimitOrder> {
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn mint_complete_set(series_id: SeriesId, qty: i128) -> Result<bool, TradeError> {
     let caller: User = msg_caller().into();
+    let reassignment = ReassignmentGuard::acquire(caller)?;
     let series = ensure_series_registered(&series_id, SeriesAccess::OpenExposure).await?;
     check_trading_access(&series, caller.0).await?;
+    reassignment.revalidate()?;
     mint_complete_set_logic(caller, &series_id, &series, qty)
 }
 
@@ -1054,8 +1072,10 @@ pub(crate) fn mint_complete_set_logic(
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn redeem_complete_set(series_id: SeriesId, qty: i128) -> Result<bool, TradeError> {
     let caller: User = msg_caller().into();
+    let reassignment = ReassignmentGuard::acquire(caller)?;
     let series = ensure_series_registered(&series_id, SeriesAccess::ReduceExposure).await?;
     check_trading_access(&series, caller.0).await?;
+    reassignment.revalidate()?;
     redeem_complete_set_logic(caller, &series_id, &series, qty)
 }
 

@@ -99,6 +99,7 @@ pub fn into_current(legacy: LegacyStableState) -> StableState {
         asset_metrics: legacy.asset_metrics,
         domain_policies: legacy.domain_policies,
         migration_plans: legacy.migration_plans,
+        reassignment_plans: None,
     }
 }
 
