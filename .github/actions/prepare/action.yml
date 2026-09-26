@@ -2,6 +2,12 @@ name: Prepare
 
 description: Checkout and install dependencies
 
+inputs:
+  lint-tools:
+    description: Install the formatting and lint tools (shfmt, cargo-binstall, cargo-sort, zizmor, yq). Jobs that only build and test can skip them.
+    required: false
+    default: 'true'
+
 runs:
   using: composite
   steps:
@@ -21,21 +27,26 @@ runs:
       run: scripts/setup rust
 
     - name: Install shfmt
+      if: inputs.lint-tools == 'true'
       shell: bash
       run: scripts/setup shfmt
 
     - name: Install binstall
+      if: inputs.lint-tools == 'true'
       shell: bash
       run: scripts/setup cargo-binstall
 
     - name: Install cargo dependency sorter
+      if: inputs.lint-tools == 'true'
       shell: bash
       run: cargo binstall --no-confirm cargo-sort@1.0.9
 
     - name: Install zizmor
+      if: inputs.lint-tools == 'true'
       shell: bash
       run: scripts/setup zizmor
 
     - name: Install yq
+      if: inputs.lint-tools == 'true'
       shell: bash
       run: scripts/setup yq
