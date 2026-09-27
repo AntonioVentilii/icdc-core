@@ -14,8 +14,8 @@ use shared::{
             PaginationParams, Series, SeriesError, SeriesPage, SeriesStatus,
             UpdateSeriesMetadataParams, UpdateSeriesResult,
         },
-        BalanceDomain, EngineRole, NonMonetaryUnit, PayoutUnit, SeriesId, SeriesIdParams,
-        TradingAccess,
+        BalanceDomain, EngineRole, NonMonetaryUnit, PayoffType, PayoutUnit, SeriesId,
+        SeriesIdParams, TradingAccess,
     },
 };
 
@@ -92,6 +92,7 @@ fn add_series_impl(
         start_ns,
         payoff_type,
         strike,
+        settlement_cap,
         price_precision,
         payout_unit,
         oracle_source,
@@ -165,6 +166,26 @@ fn add_series_impl(
         }
     }
 
+    // Linear (forward/NDF/future) invariants: a `settlement_cap` is compulsory
+    // and must be strictly positive; the forward rate is the trade price, so a
+    // fixed `strike` and categorical `outcomes` are both rejected. Conversely,
+    // `settlement_cap` is meaningless on any non-`Linear` payoff.
+    if payoff_type == PayoffType::Linear {
+        match settlement_cap.as_ref() {
+            None => return Err(SeriesError::LinearRequiresSettlementCap).into(),
+            Some(cap) if cap.value() == 0 => return Err(SeriesError::InvalidSettlementCap).into(),
+            Some(_) => {}
+        }
+        if outcomes.is_some() {
+            return Err(SeriesError::LinearRejectsOutcomes).into();
+        }
+        if strike.is_some() {
+            return Err(SeriesError::LinearRejectsStrike).into();
+        }
+    } else if settlement_cap.is_some() {
+        return Err(SeriesError::SettlementCapOnlyForLinear).into();
+    }
+
     // A scheduled series must have a window it can actually be traded in, and
     // "already live" must have exactly one encoding (`None`) — otherwise the same
     // market could be registered twice under two different ids, since `start_ns`
@@ -194,6 +215,7 @@ fn add_series_impl(
         start_ns,
         payoff_type: &payoff_type,
         strike: strike.as_ref(),
+        settlement_cap: settlement_cap.as_ref(),
         price_precision,
         payout_unit: &payout_unit,
         outcomes: outcomes.as_deref(),
@@ -211,6 +233,7 @@ fn add_series_impl(
         start_ns,
         payoff_type,
         strike,
+        settlement_cap,
         price_precision,
         payout_unit,
         outcomes,
@@ -372,6 +395,7 @@ fn fork_series_impl(
             start_ns: source.start_ns,
             payoff_type: &source.payoff_type,
             strike: source.strike.as_ref(),
+            settlement_cap: source.settlement_cap.as_ref(),
             price_precision: source.price_precision,
             payout_unit: &source.payout_unit,
             outcomes: source.outcomes.as_deref(),
@@ -393,6 +417,7 @@ fn fork_series_impl(
             start_ns: source.start_ns,
             payoff_type: source.payoff_type,
             strike: source.strike,
+            settlement_cap: source.settlement_cap,
             price_precision: source.price_precision,
             payout_unit: source.payout_unit,
             outcomes: source.outcomes,
@@ -633,7 +658,7 @@ mod tests {
             engine::{Engine, EngineId},
             groups::GroupId,
             BalanceDomain, Description, FiatUnit, Group, NonMonetaryUnit, PayoffType, PayoutUnit,
-            Resolution, SocialLimits, SocialReward, TradingAccess,
+            Price, Resolution, SocialLimits, SocialReward, TradingAccess,
         },
     };
 
@@ -675,6 +700,7 @@ mod tests {
             start_ns: None,
             payoff_type: PayoffType::Binary,
             strike: None,
+            settlement_cap: None,
             price_precision: 8,
             payout_unit: PayoutUnit::usd(),
             oracle_source: "oracle".to_owned(),
@@ -699,6 +725,7 @@ mod tests {
             start_ns: None,
             payoff_type: PayoffType::Binary,
             strike: None,
+            settlement_cap: None,
             price_precision: 0,
             payout_unit: PayoutUnit::NonMonetary(NonMonetaryUnit::Social(SocialReward {
                 title: "Pizza".to_owned(),
@@ -1675,6 +1702,85 @@ mod tests {
 
         assert_eq!(updated.banner_url, None);
         assert_eq!(updated.locale.as_deref(), Some("es"));
+    }
+
+    // --- Linear (forward/NDF/future) validation ---
+
+    fn linear_params() -> AddSeriesParams {
+        AddSeriesParams {
+            payoff_type: PayoffType::Linear,
+            strike: None,
+            settlement_cap: Some(Price::new(20_0000_0000, 8)),
+            ..base_params()
+        }
+    }
+
+    #[test]
+    fn linear_happy_path() {
+        cleanup();
+        let res = add_as_creator(linear_params(), test_principal(1), 1_000_000_000);
+        assert!(matches!(res, AddSeriesResult::Ok(_)));
+    }
+
+    #[test]
+    fn linear_requires_settlement_cap() {
+        cleanup();
+        let mut p = linear_params();
+        p.settlement_cap = None;
+        let res = add_as_creator(p, test_principal(1), 1_000_000_000);
+        assert!(matches!(
+            res,
+            AddSeriesResult::Err(SeriesError::LinearRequiresSettlementCap)
+        ));
+    }
+
+    #[test]
+    fn linear_rejects_zero_cap() {
+        cleanup();
+        let mut p = linear_params();
+        p.settlement_cap = Some(Price::new(0, 8));
+        let res = add_as_creator(p, test_principal(1), 1_000_000_000);
+        assert!(matches!(
+            res,
+            AddSeriesResult::Err(SeriesError::InvalidSettlementCap)
+        ));
+    }
+
+    #[test]
+    fn linear_rejects_strike() {
+        cleanup();
+        let mut p = linear_params();
+        p.strike = Some(Price::new(8_0000_0000, 8));
+        let res = add_as_creator(p, test_principal(1), 1_000_000_000);
+        assert!(matches!(
+            res,
+            AddSeriesResult::Err(SeriesError::LinearRejectsStrike)
+        ));
+    }
+
+    #[test]
+    fn linear_rejects_outcomes() {
+        cleanup();
+        let mut p = linear_params();
+        p.outcomes = Some(Vec::new());
+        let res = add_as_creator(p, test_principal(1), 1_000_000_000);
+        assert!(matches!(
+            res,
+            AddSeriesResult::Err(SeriesError::LinearRejectsOutcomes)
+        ));
+    }
+
+    #[test]
+    fn settlement_cap_only_for_linear() {
+        cleanup();
+        // base_params is a Binary series; a cap is meaningless there.
+        let mut p = base_params();
+        p.settlement_cap = Some(Price::new(20_0000_0000, 8));
+        let res = add_as_creator(p, test_principal(1), 1_000_000_000);
+        assert!(matches!(
+            res,
+            AddSeriesResult::Err(SeriesError::SettlementCapOnlyForLinear)
+        ));
     }
 
     // --- start_ns (scheduled series) --------------------------------------

@@ -26,6 +26,7 @@ fn social_trade_scenario() {
         start_ns: None,
         payoff_type: PayoffType::Binary,
         strike: None,
+        settlement_cap: None,
         price_precision: 0,
         payout_unit: PayoutUnit::NonMonetary(NonMonetaryUnit::Social(SocialReward {
             title: "Pizza 🍕".to_owned(),

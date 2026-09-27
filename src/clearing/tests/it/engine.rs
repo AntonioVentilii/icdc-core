@@ -28,6 +28,7 @@ fn add_series_as(
         start_ns: None,
         payoff_type: PayoffType::Binary,
         strike: None,
+        settlement_cap: None,
         price_precision: 6,
         payout_unit: PayoutUnit::usd(),
         oracle_source: "Chainlink".to_owned(),
