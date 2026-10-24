@@ -30,7 +30,7 @@
 		"init:prod": "npm run init:registry:prod && npm run init:clearing:prod"
 	},
 	"devDependencies": {
-		"@icp-sdk/bindgen": "^0.4.0",
+		"@icp-sdk/bindgen": "^0.4.1",
 		"prettier": "^3.9.6",
 		"prettier-plugin-motoko": "^0.13.0",
 		"prettier-plugin-organize-imports": "^4.3.0"
