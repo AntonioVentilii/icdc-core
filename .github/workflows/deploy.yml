@@ -35,6 +35,9 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      module-hashes: ${{ steps.module-hashes.outputs.markdown }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -56,12 +59,13 @@ jobs:
             ENVIRONMENT="staging"
           fi
           case "$ENVIRONMENT" in
-            staging) SCRIPT="deploy:staging" ;;
-            production) SCRIPT="deploy:prod" ;;
+            staging) SCRIPT="deploy:staging"; NETWORK="staging" ;;
+            production) SCRIPT="deploy:prod"; NETWORK="ic" ;;
             *) echo "::error::Unknown environment '$ENVIRONMENT'"; exit 1 ;;
           esac
           echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
           echo "script=$SCRIPT" >> "$GITHUB_OUTPUT"
+          echo "network=$NETWORK" >> "$GITHUB_OUTPUT"
           echo "Deploying to $ENVIRONMENT via 'npm run $SCRIPT'"
 
       - name: Setup dfx
@@ -98,3 +102,60 @@ jobs:
           else
             npm run "$SCRIPT"
           fi
+
+      - name: Record installed module hashes
+        id: module-hashes
+        if: always()
+        env:
+          NETWORK: ${{ steps.env.outputs.network }}
+          JOB_STATUS: ${{ job.status }}
+          GIT_REF: ${{ github.ref_name }}
+        run: |
+          record="$RUNNER_TEMP/module-hashes.md"
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          {
+            echo "## Installed module hashes"
+            echo
+            echo "Read from \`$NETWORK\` at $(date -u +%Y-%m-%dT%H:%M:%SZ) by [deploy run $GITHUB_RUN_ID]($run_url), job status \`$JOB_STATUS\`."
+            echo
+            scripts/record.module-hashes.sh "$NETWORK" "$GIT_REF@${GITHUB_SHA:0:12}"
+          } > "$record"
+          cat "$record" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo 'markdown<<MODULE_HASHES_EOF'
+            cat "$record"
+            echo 'MODULE_HASHES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+  # Run summaries expire, so production keeps its record in the release notes. This is a
+  # separate job so that the write token never shares a job with the deploy secret.
+  record-release-hashes:
+    name: Record Hashes In Release
+    needs: deploy
+    if: always() && needs.deploy.outputs.environment == 'production' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # Required to append the installed module hashes to the GitHub Release notes.
+    steps:
+      - name: Append module hashes to release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODULE_HASHES: ${{ needs.deploy.outputs.module-hashes }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ -z "$MODULE_HASHES" ]; then
+            echo "::warning::The deploy job recorded no module hashes, so the notes of release $TAG were left unchanged."
+            exit 0
+          fi
+          notes="$(mktemp)"
+          for attempt in 1 2 3 4 5; do
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$notes"; then
+              printf '\n\n%s\n' "$MODULE_HASHES" >> "$notes"
+              gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$notes"
+              echo "Appended the module hashes to the notes of release $TAG."
+              exit 0
+            fi
+            echo "Release $TAG not readable yet (attempt $attempt of 5)."
+            sleep 30
+          done
+          echo "::warning::Release $TAG could not be read, so its notes do not record the installed module hashes. Copy the table from the deploy job summary of this run into the release notes before the run expires."
