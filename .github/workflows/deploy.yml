@@ -156,6 +156,8 @@ jobs:
               exit 0
             fi
             echo "Release $TAG not readable yet (attempt $attempt of 5)."
-            sleep 30
+            if [ "$attempt" -lt 5 ]; then
+              sleep 30
+            fi
           done
           echo "::warning::Release $TAG could not be read, so its notes do not record the installed module hashes. Copy the table from the deploy job summary of this run into the release notes before the run expires."
