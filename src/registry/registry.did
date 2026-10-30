@@ -30,6 +30,9 @@ type AddSeriesParams = record {
 	// Omit (`None`) for a series that is tradeable immediately. When set, it
 	// must be strictly in the future and strictly before `expiry_ns`.
 	start_ns : opt nat64;
+	// Upper settlement bound for `Linear` series (forwards/NDF/futures).
+	// Compulsory for `Linear`, `None` otherwise. See `Series::settlement_cap`.
+	settlement_cap : opt Price;
 	// The underlying asset ticker (case-insensitive, e.g., "ICP").
 	underlying : text;
 	// Optional [BCP 47](https://www.rfc-editor.org/info/bcp47) locale tag for
@@ -456,6 +459,12 @@ type PaginationParams = record {
 type PayoffType = variant {
 	// Payoff based on the positive difference between strike and underlying price.
 	Put;
+	// A linear (delta-one) payoff `net_qty · (S_T − F)`: outright forwards,
+	// non-deliverable forwards (NDFs), and dated futures. The agreed forward
+	// rate `F` is the trade price (captured in reserved margin, like an option
+	// premium); settlement is bounded to `[0, settlement_cap]` to keep the
+	// system solvent without a running liquidation engine. See ADR 0001.
+	Linear;
 	// A fixed payoff if the condition is met (all-or-nothing).
 	Binary;
 	// Payoff based on the positive difference between underlying price and strike.
@@ -558,6 +567,11 @@ type Series = record {
 	start_ns : opt nat64;
 	// Unique identifier computed from series parameters.
 	series_id : text;
+	// Upper settlement bound for `Linear` series (forwards/NDF/futures): the
+	// fixing is clamped to `[0, settlement_cap]` at settlement and short margin
+	// is reserved as `cap − entry`. Compulsory for `Linear`, `None` otherwise.
+	// Additive `opt` field — no state migration required (see ADR 0001).
+	settlement_cap : opt Price;
 	// The underlying asset ticker or identifier (e.g., "ICP/USD").
 	underlying : text;
 	// Optional [BCP 47](https://www.rfc-editor.org/info/bcp47) language tag
@@ -611,6 +625,8 @@ type Series = record {
 };
 // Errors that can occur during series-related operations.
 type SeriesError = variant {
+	// The provided `settlement_cap` is not strictly positive.
+	InvalidSettlementCap;
 	// Social reward description exceeds limit.
 	RewardDescriptionTooLong;
 	// The caller has reached the maximum number of social markets allowed per user.
@@ -620,6 +636,8 @@ type SeriesError = variant {
 	// The provided `start_ns` is at or after `expiry_ns`, leaving no window in
 	// which the series could ever be traded.
 	StartNotBeforeExpiry;
+	// A `Linear` series requires a `settlement_cap`.
+	LinearRequiresSettlementCap;
 	// Returned when the provided title exceeds the maximum allowed length.
 	TitleTooLong;
 	// Social reward icon URL exceeds limit.
@@ -634,6 +652,8 @@ type SeriesError = variant {
 	EngineIdRequired;
 	// Returned when the caller is not authorized to add a series.
 	Unauthorized;
+	// `settlement_cap` was provided on a non-`Linear` series.
+	SettlementCapOnlyForLinear;
 	// Forked series must have `Restricted` trading access.
 	ForkMustBeRestricted;
 	// Returned when the provided payout unit is not supported by the protocol.
@@ -661,7 +681,12 @@ type SeriesError = variant {
 	// Returned when the targeted series does not exist.
 	SeriesNotFound;
 	// The specified Engine does not exist or the caller does not hold the required role on it.
-	EngineRoleNotHeld
+	EngineRoleNotHeld;
+	// A `Linear` series must not define categorical `outcomes`.
+	LinearRejectsOutcomes;
+	// A `Linear` series must not define a `strike`: the forward rate is the
+	// trade price, not a series-fixed strike.
+	LinearRejectsStrike
 };
 // A paginated page of registered series.
 type SeriesPage = record {
