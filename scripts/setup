@@ -27,7 +27,7 @@ for tool in "${@}"; do
     cargo install "$tool@$(jq -r '.[env.tool].version' dev-tools.json)"
     ;;
   "cargo-binstall")
-    cargo binstall --force --no-confirm "${tool}@$(jq -r '.[env.tool].version' dev-tools.json)"
+    cargo binstall --force --no-confirm --locked "${tool}@$(jq -r '.[env.tool].version' dev-tools.json)"
     ;;
   "go")
     GOBIN="$HOME/.local/bin" go install "$(jq -r '.[env.tool].source' dev-tools.json)@$(jq -r '.[env.tool].version' dev-tools.json)"
