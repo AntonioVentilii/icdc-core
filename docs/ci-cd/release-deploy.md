@@ -110,7 +110,9 @@ release PR (`GITHUB_TOKEN`-authored PRs don't trigger workflows).
 5. Note the **App ID**; **Generate a private key** (downloads a `.pem`).
 6. **Install App** on `icdc-core`.
 7. Repo → Settings → Secrets and variables → Actions:
-   - Variable **`RELEASE_BOT_APP_ID`** = the App ID
+   - Variable **`RELEASE_BOT_APP_ID`** = the App ID. The workflow passes it as
+     the token action's `client-id`, which GitHub accepts as either the App ID
+     or the Client ID.
    - Secret **`RELEASE_BOT_PRIVATE_KEY`** = full `.pem` contents
 
 ### 2. Deploy identity (controller PEM)
