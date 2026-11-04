@@ -39,7 +39,7 @@ runs:
     - name: Install cargo dependency sorter
       if: inputs.lint-tools == 'true'
       shell: bash
-      run: cargo binstall --no-confirm cargo-sort@1.0.9
+      run: scripts/setup cargo-sort
 
     - name: Install zizmor
       if: inputs.lint-tools == 'true'
