@@ -50,7 +50,7 @@
 	},
 	"cargo-sort": {
 		"method": "cargo-binstall",
-		"version": "1.0.9"
+		"version": "2.1.4"
 	},
 	"candid-extractor": {
 		"method": "cargo-binstall",
