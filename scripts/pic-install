@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 
 # Needs env vars:
-POCKET_IC_SERVER_VERSION="${POCKET_IC_SERVER_VERSION:-6.0.0}"
+# The pocket-ic crate rejects a server of another major, so keep this in step with Cargo.toml.
+# Tests only use this binary when POCKET_IC_BIN points at it; otherwise the crate downloads its own.
+POCKET_IC_SERVER_VERSION="${POCKET_IC_SERVER_VERSION:-16.1.0}"
 POCKET_IC_SERVER_PATH="${POCKET_IC_SERVER_PATH:-./target/pocket-ic}"
 
 if [[ $OSTYPE == "linux-gnu"* ]] || [[ $RUNNER_OS == "Linux" ]]; then
