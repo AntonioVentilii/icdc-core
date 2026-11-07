@@ -49,7 +49,7 @@ fn stamp_audit(group: &mut Group, caller: Principal) {
 ///
 /// # Errors
 ///
-/// * [`GroupError::NameTooLong`] — if `params.name` exceeds [`MAX_GROUP_NAME_LEN`] chars.
+/// * [`GroupError::NameTooLong`]: if `params.name` exceeds [`MAX_GROUP_NAME_LEN`] chars.
 ///
 /// # Access
 ///
@@ -101,9 +101,9 @@ pub fn create_group(params: CreateGroupParams) -> CreateGroupResult {
 ///
 /// # Errors
 ///
-/// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
-/// * [`GroupError::Unauthorized`] — the caller is not a group admin.
-/// * [`GroupError::NameTooLong`] — if a new name exceeds [`MAX_GROUP_NAME_LEN`] chars.
+/// * [`GroupError::GroupNotFound`]: the `group_id` does not exist.
+/// * [`GroupError::Unauthorized`]: the caller is not a group admin.
+/// * [`GroupError::NameTooLong`]: if a new name exceeds [`MAX_GROUP_NAME_LEN`] chars.
 ///
 /// # Access
 ///
@@ -155,8 +155,8 @@ pub fn update_group(params: UpdateGroupParams) -> GroupResult {
 ///
 /// # Errors
 ///
-/// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
-/// * [`GroupError::Unauthorized`] — the caller is not a group admin.
+/// * [`GroupError::GroupNotFound`]: the `group_id` does not exist.
+/// * [`GroupError::Unauthorized`]: the caller is not a group admin.
 ///
 /// # Access
 ///
@@ -191,8 +191,8 @@ pub fn delete_group(group_id: GroupId) -> GroupResult {
 ///
 /// # Errors
 ///
-/// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
-/// * [`GroupError::Unauthorized`] — the caller is not a group admin.
+/// * [`GroupError::GroupNotFound`]: the `group_id` does not exist.
+/// * [`GroupError::Unauthorized`]: the caller is not a group admin.
 ///
 /// # Access
 ///
@@ -231,8 +231,8 @@ pub fn add_group_admins(params: UpdateGroupAdminsParams) -> GroupResult {
 ///
 /// # Errors
 ///
-/// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
-/// * [`GroupError::Unauthorized`] — the caller is not a group admin.
+/// * [`GroupError::GroupNotFound`]: the `group_id` does not exist.
+/// * [`GroupError::Unauthorized`]: the caller is not a group admin.
 ///
 /// # Access
 ///
@@ -275,8 +275,8 @@ pub fn remove_group_admins(params: UpdateGroupAdminsParams) -> GroupResult {
 ///
 /// # Errors
 ///
-/// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
-/// * [`GroupError::Unauthorized`] — the caller is not a group admin.
+/// * [`GroupError::GroupNotFound`]: the `group_id` does not exist.
+/// * [`GroupError::Unauthorized`]: the caller is not a group admin.
 ///
 /// # Access
 ///
@@ -313,8 +313,8 @@ pub fn add_group_members(params: UpdateGroupMembersParams) -> GroupResult {
 ///
 /// # Errors
 ///
-/// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
-/// * [`GroupError::Unauthorized`] — the caller is not a group admin.
+/// * [`GroupError::GroupNotFound`]: the `group_id` does not exist.
+/// * [`GroupError::Unauthorized`]: the caller is not a group admin.
 ///
 /// # Access
 ///
@@ -355,7 +355,7 @@ pub fn remove_group_members(params: UpdateGroupMembersParams) -> GroupResult {
 ///
 /// # Access
 ///
-/// Public query — any caller.
+/// Public query, open to any caller.
 #[query]
 #[must_use]
 pub fn get_group(group_id: GroupId) -> Option<Group> {
@@ -366,12 +366,12 @@ pub fn get_group(group_id: GroupId) -> Option<Group> {
 ///
 /// # Arguments
 ///
-/// * `creator` — if `Some`, only groups created by this principal are returned. If `None`, all
+/// * `creator`: if `Some`, only groups created by this principal are returned. If `None`, all
 ///   groups are returned.
 ///
 /// # Access
 ///
-/// Public query — any caller.
+/// Public query, open to any caller.
 #[query]
 #[must_use]
 pub fn list_groups(creator: Option<Principal>) -> Vec<Group> {
@@ -390,7 +390,7 @@ pub fn list_groups(creator: Option<Principal>) -> Vec<Group> {
 ///
 /// # Access
 ///
-/// Public query — any caller.
+/// Public query, open to any caller.
 #[query]
 #[must_use]
 pub fn is_group_member(group_id: GroupId, principal: Principal) -> bool {
@@ -410,7 +410,7 @@ pub fn is_group_member(group_id: GroupId, principal: Principal) -> bool {
 ///
 /// The real [`is_controller`] panics outside of a canister context, which
 /// makes any code that calls it untestable by `cargo test`. In `cfg(test)`
-/// we bypass it and return `false` — controller-specific behavior is
+/// we bypass it and return `false`; controller-specific behavior is
 /// exercised in integration tests that run inside a canister simulator.
 #[inline]
 fn caller_is_canister_controller(principal: &Principal) -> bool {
@@ -491,11 +491,11 @@ pub fn can_principal_see_series(series: &Series, principal: &Principal) -> bool 
 ///      the referenced groups.
 /// 4. If no policy grants access, returns `false`.
 ///
-/// **Note:** `trading_access` must never be empty — the API layer enforces this.
+/// **Note:** `trading_access` must never be empty; the API layer enforces this.
 ///
 /// # Access
 ///
-/// Public query — any caller. Called by the clearing canister during
+/// Public query, open to any caller. Called by the clearing canister during
 /// `submit_limit_order` / `submit_market_order` for restricted series.
 #[query]
 #[must_use]
@@ -548,9 +548,9 @@ pub fn is_trading_authorized(principal: Principal, series_id: SeriesId) -> bool 
 ///
 /// # Errors
 ///
-/// * [`GroupError::EmptyTradingAccess`] — the provided list is empty.
-/// * [`GroupError::Unauthorized`] — the caller is not a canister controller.
-/// * [`GroupError::SeriesNotFound`] — the series ID does not exist.
+/// * [`GroupError::EmptyTradingAccess`]: the provided list is empty.
+/// * [`GroupError::Unauthorized`]: the caller is not a canister controller.
+/// * [`GroupError::SeriesNotFound`]: the series ID does not exist.
 ///
 /// # Access
 ///

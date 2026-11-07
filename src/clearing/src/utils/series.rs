@@ -18,10 +18,10 @@ use crate::{
 /// choice rather than a forgotten check.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SeriesAccess {
-    /// The caller creates or increases exposure — orders, trades, minting a
+    /// The caller creates or increases exposure: orders, trades, minting a
     /// complete set. Requires the series to be inside its full trading window.
     OpenExposure,
-    /// The caller only releases or relocates exposure that already exists —
+    /// The caller only releases or relocates exposure that already exists:
     /// redeeming a complete set, accepting a transferred position. Still barred
     /// from settled and not-yet-open series, but allowed after expiry.
     ReduceExposure,
@@ -46,7 +46,7 @@ pub enum SeriesAccess {
 /// The expiry exemption is not a convenience. Settlement is oracle-triggered and chunked, so the
 /// gap between `expiry_ns` and a settlement plan existing is unbounded operational latency. During
 /// it, `redeem_complete_set` is the only way a user can release reserved margin, and withdrawals
-/// are refused while equity sits below reserved margin — gating it would strand collateral until
+/// are refused while equity sits below reserved margin, so gating it would strand collateral until
 /// an operator got around to settling. `accept_position_transfer` is exempt for a different
 /// reason: its counterpart `freeze_position_for_transfer` is ungated and destroys the source
 /// position first, so rejecting the accept would strand the position mid-migration with no
@@ -122,8 +122,8 @@ pub async fn ensure_series_registered(
 /// Rejects trading paths on a scheduled series whose trading window has not
 /// opened yet.
 ///
-/// The comparison is inclusive at the open — a series is tradeable at exactly
-/// `start_ns` — matching [`Series::status`] in the registry, so a client
+/// The comparison is inclusive at the open (a series is tradeable at exactly
+/// `start_ns`), matching [`Series::status`] in the registry, so a client
 /// counting down to the announced instant is never told "not yet" at zero.
 ///
 /// Reading the cached copy is safe despite clearing never refreshing its

@@ -47,8 +47,8 @@ pub struct Event {
 /// Each executed trade emits two [`Event`] rows (one per counterparty) that
 /// share the same `event_id`, `price`, and `timestamp`. A price history needs
 /// only one point per trade, so this collapses the pair to the trade-level
-/// facts a front end plots — `price`/`timestamp` for the sparkline, `qty` for
-/// optional volume — without exposing either counterparty's principal in a
+/// facts a front end plots (`price`/`timestamp` for the sparkline, `qty` for
+/// optional volume) without exposing either counterparty's principal in a
 /// market-wide read.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct SeriesTradePoint {
@@ -64,12 +64,12 @@ pub struct SeriesTradePoint {
 }
 
 impl SeriesTradePoint {
-    /// Traded notional of this single trade — `qty · price` — in USD base units
+    /// Traded notional of this single trade (`qty · price`) in USD base units
     /// (the `USD_DECIMALS` scale).
     ///
     /// Scales by the decimal *delta* between the price's precision and
     /// `USD_DECIMALS`, so when a series prices in `USD_DECIMALS` (the common
-    /// case) the result is exactly `qty · value` — no intermediate
+    /// case) the result is exactly `qty · value`, with no intermediate
     /// `×10^USD_DECIMALS` that could clamp before a later divide cancels it.
     /// Saturating, so a pathological trade clamps rather than overflows.
     #[must_use]
@@ -89,7 +89,7 @@ impl SeriesTradePoint {
 /// Running per-series traded-volume totals, maintained alongside the trade
 /// index so a batch volume read stays `O(#series)` instead of scanning each
 /// series' tape. A pure projection of the executed rows in `EVENTS` (not
-/// persisted) — rebuilt on upgrade and folded incrementally on each trade.
+/// persisted), rebuilt on upgrade and folded incrementally on each trade.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SeriesVolumeAggregate {
     /// Cumulative traded notional (Σ `qty · price`) in USD base units.

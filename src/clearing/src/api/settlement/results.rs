@@ -58,7 +58,7 @@ pub struct BackfillSettlementEventsResult {
 /// One series' settlement status, paired with the id it was requested for.
 ///
 /// `status` is `Some` when a settlement plan exists for the series (in any
-/// [`PlanStatus`](crate::types::plans::PlanStatus) — a plan is opened the moment
+/// [`PlanStatus`](crate::types::plans::PlanStatus); a plan is opened the moment
 /// settlement begins) and `None` otherwise. A `None` covers both a still-open
 /// series and an unknown id; the two are not distinguished here. The `series_id`
 /// is echoed on each entry so callers can align results with their requested ids

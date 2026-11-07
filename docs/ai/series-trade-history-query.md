@@ -12,7 +12,7 @@ Clearing only exposed `get_trade_history : () -> (vec Event) query`, which is
 **market/series-scoped** trade or price history.
 
 The vici-app market UI wants a real price-history sparkline on the market detail
-page and the flow card — the YES-probability over time for a given series,
+page and the flow card: the YES-probability over time for a given series,
 derived from that series' executed trades. With only the caller-scoped query the
 front end could plot only the _viewer's own_ trades on a market (flat for markets
 the viewer never traded). The interim FE shipped in vici-app PR #385 documents
@@ -21,11 +21,11 @@ this limitation.
 ## What changed
 
 A new fast `query` (non-replicated) read returns the **executed-trade events for
-a single series**, with stable cursor pagination — enough to derive a
+a single series**, with stable cursor pagination, enough to derive a
 YES-probability sparkline from the per-trade `price`/`timestamp`. Read-only; no
 settlement or correctness implications.
 
-### Clearing — series trade history (new query)
+### Clearing: series trade history (new query)
 
 ```candid
 type SeriesTradePoint = record {
@@ -66,8 +66,8 @@ service : {
 ## Performance / cycles design decision
 
 An executed trade emits **two** `Event` rows (buyer + seller) that share one
-`event_id`, `price`, and `timestamp`. The naive query — filter the flat
-`EVENTS: Vec<Event>` by `series_id`, clone all matches, sort, paginate — is
+`event_id`, `price`, and `timestamp`. The naive query (filter the flat
+`EVENTS: Vec<Event>` by `series_id`, clone all matches, sort, paginate) is
 `O(total events)` in compute **and** clones every match before discarding all
 but one page, on a read that fires on essentially every market view. It also
 returns both counterparty rows (duplicate price points) and the duplicate
@@ -81,14 +81,14 @@ Chosen design: a **per-series price-history index** maintained on write.
   `event_id`. The query is then `O(log series + page)`: map lookup +
   `partition_point` for the cursor + clone of just the page.
 - **Heap-only, rebuilt on upgrade.** The index is a pure projection of `EVENTS`,
-  so it is **not** added to the persisted `StableState` — `post_upgrade`
+  so it is **not** added to the persisted `StableState`; `post_upgrade`
   reconstructs it via `rebuild_series_trade_history` after `EVENTS` is restored.
   This avoids a stable-layout migration and keeps the persisted state minimal;
   the cost is one extra `O(N)` pass per upgrade, which is negligible (upgrades
   are rare and `post_upgrade` is already `O(N)`).
 - **Dedup + bare cursor.** Collapsing the buyer/seller pair to one point per
   trade is what a sparkline wants, halves the payload, and makes `event_id` a
-  unique, strictly-increasing key — so the cursor is a bare `nat64` instead of a
+  unique, strictly-increasing key, so the cursor is a bare `nat64` instead of a
   `(timestamp, event_id)` tuple, and the duplicate-key edge case disappears.
 - **Privacy.** `SeriesTradePoint` omits the per-trade buyer/seller principal, so
   this market-wide read exposes only the public trade tape (price, qty, time),
@@ -97,7 +97,7 @@ Chosen design: a **per-series price-history index** maintained on write.
 Write cost is one `Vec::push` per trade at the single execution site
 (`trade::service::internal_execute_trade`); trades are far rarer than sparkline
 reads, so moving work to the write path is the right trade. If per-series heap
-ever matters, the index could store `EVENTS` offsets instead of cloned points —
+ever matters, the index could store `EVENTS` offsets instead of cloned points:
 a self-contained follow-up that doesn't change this endpoint's candid shape.
 
 ## Front-end wiring (separate vici-app PR)
@@ -119,7 +119,7 @@ Cross-ref: vici-app sparkline interim in PR #385.
   `event_id` ordering (jumbled seed sorted on rebuild), stable exclusive-cursor
   pagination across pages, the exact-boundary no-cursor case, `limit = 0`
   forward progress, the unknown-series empty case, and a live-execution test
-  asserting the write path (`internal_execute_trade`) populates the index — not
+  asserting the write path (`internal_execute_trade`) populates the index, not
   just the `post_upgrade` rebuild.
 
 Integration (pocket-ic) tests require the downloaded `ledger`/`index` wasm

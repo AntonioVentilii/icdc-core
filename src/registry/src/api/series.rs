@@ -187,7 +187,7 @@ fn add_series_impl(
     }
 
     // A scheduled series must have a window it can actually be traded in, and
-    // "already live" must have exactly one encoding (`None`) — otherwise the same
+    // "already live" must have exactly one encoding (`None`). Otherwise the same
     // market could be registered twice under two different ids, since `start_ns`
     // is hashed into the id.
     if let Some(start_ns) = start_ns {
@@ -283,7 +283,7 @@ fn add_series_impl(
 ///    `NonMonetary` payout) into their own closed circle, subject to the same per-user rate limits
 ///    as social market creation. This is the "Challenge your friends" flow.
 ///
-/// In all cases the fork's `trading_access` must be fully `Restricted` — a fork
+/// In all cases the fork's `trading_access` must be fully `Restricted`: a fork
 /// never widens access.
 #[update(guard = "caller_is_not_anonymous")]
 #[must_use]
@@ -387,7 +387,7 @@ fn fork_series_impl(
             balance_domain: source.balance_domain,
             expiry_ns: source.expiry_ns,
             // A fork is the source contract re-titled, so it inherits the whole
-            // trading window verbatim — including a start that has already passed,
+            // trading window verbatim, including a start that has already passed,
             // which simply means the fork is open immediately. Forks cannot
             // collide regardless (`fork_caller` + `fork_index` make the id
             // unique), so the "future start only" rule that `add_series` enforces
@@ -507,7 +507,7 @@ fn caller_can_manage_series_metadata(
 ///
 /// Only `description`, `icon_url`, `banner_url`, and `locale` can be changed.
 /// The series' identity-bearing economic fields, `title`, and `resolution` are
-/// immutable here by design — see [`UpdateSeriesMetadataParams`].
+/// immutable here by design (see [`UpdateSeriesMetadataParams`]).
 ///
 /// # Authorization
 ///
@@ -579,7 +579,7 @@ pub fn get_series(series_id: SeriesId) -> Option<Series> {
 ///
 /// Clients could derive this from `start_ns`/`expiry_ns` themselves, but only
 /// against their own clock. This evaluates the window with the canister's
-/// `time()`, which is the same clock the trading gate uses — so a countdown built
+/// `time()`, which is the same clock the trading gate uses, so a countdown built
 /// on it cannot disagree with whether an order will actually be accepted.
 ///
 /// Settlement state is not folded in: it lives in the clearing canister. A series
@@ -620,8 +620,8 @@ pub fn list_series(pagination: PaginationParams) -> SeriesPage {
 /// Implementation of `list_series_with` with an injectable caller and clock for
 /// unit tests.
 ///
-/// `now` is the cutoff for every clock-dependent filter — `only_unexpired` and
-/// `tradeable_now` — applied together via [`ListSeriesParams::matches_time`].
+/// `now` is the cutoff for every clock-dependent filter (`only_unexpired` and
+/// `tradeable_now`), applied together via [`ListSeriesParams::matches_time`].
 /// The public query passes the canister's `time()`; tests pass an explicit
 /// value.
 #[must_use]
@@ -1481,7 +1481,7 @@ mod tests {
         };
 
         // Default params (only_unexpired = None) return the series even when
-        // `now` is far past its expiry — the historical contract.
+        // `now` is far past its expiry: the historical contract.
         let visible: Vec<SeriesId> =
             list_series_with_impl(ListSeriesParams::default(), caller, 1_000_000_000)
                 .items
@@ -1607,7 +1607,7 @@ mod tests {
             ..empty_update(id.clone())
         };
 
-        // admin is neither controller nor creator — authorized via the engine.
+        // admin is neither controller nor creator; authorized via the engine.
         update_series_metadata_impl(params, admin, false).expect("engine admin update ok");
         assert_eq!(fetch(&id).description.plain, "Engine admin edit");
 
@@ -1834,8 +1834,8 @@ mod tests {
         .collect()
     }
 
-    /// The `due` filter returns only expired, resolvable markets — the exact
-    /// candidate set a resolution solver iterates — so the read scales with the
+    /// The `due` filter returns only expired, resolvable markets (the exact
+    /// candidate set a resolution solver iterates), so the read scales with the
     /// due subset rather than the whole registry.
     #[test]
     fn due_filter_returns_only_expired_series() {
@@ -1866,8 +1866,8 @@ mod tests {
         );
     }
 
-    /// `None` is the only way to say "already live", so a start in the past — or
-    /// at exactly `now` — is rejected rather than silently normalized. Otherwise
+    /// `None` is the only way to say "already live", so a start in the past (or
+    /// at exactly `now`) is rejected rather than silently normalized. Otherwise
     /// the same market could be registered under two different ids.
     #[test]
     fn add_series_rejects_start_at_or_before_now() {

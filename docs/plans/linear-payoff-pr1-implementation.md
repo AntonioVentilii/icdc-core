@@ -1,4 +1,4 @@
-# Implementation Plan — PR 1: `Linear` payoff (bounded forwards / NDFs)
+# Implementation Plan for PR 1: `Linear` payoff (bounded forwards / NDFs)
 
 Satisfies the "Plan First" rule in
 [`.policies/code-modification.md`](../../.policies/code-modification.md) for
@@ -14,17 +14,17 @@ Title: `feat(clearing,registry,shared): add Linear payoff (bounded forwards/NDF)
 
 ## Guiding constraints
 
-- **Reuse existing math** — route Linear through `get_unit_payoff`,
+- **Reuse existing math**: route Linear through `get_unit_payoff`,
   `get_settlement_value`, `get_required_margin`, `scale_price`, `Price`. No new
   pricing model. No Black–Scholes in-core.
-- **Solvency first** ([policy rule 4](../../.policies/code-modification.md)) —
+- **Solvency first** ([policy rule 4](../../.policies/code-modification.md)):
   both legs pre-reserve max loss within the band; long+short PnL nets to zero.
-- **Additive state** — new `Series.settlement_cap` is an `opt` field ⇒ no
+- **Additive state**: new `Series.settlement_cap` is an `opt` field ⇒ no
   migration ([patterns.md §5](../../.agents/patterns.md)); re-verify decode.
 
 ## Steps (ordered; each compiles + tests green before the next)
 
-### 1. `shared` — type surface
+### 1. `shared`: type surface
 
 - [`types/series.rs`](../../src/shared/src/types/series.rs): add
   `PayoffType::Linear`; add `PayoffType::Linear => b"LINEAR"` to `as_id_bytes()`.
@@ -32,19 +32,19 @@ Title: `feat(clearing,registry,shared): add Linear payoff (bounded forwards/NDF)
 - Decide `SeriesIdParams` inclusion: fold `settlement_cap` into id generation
   **only when `Some`** so two Linear series differing only by cap get distinct
   ids; existing ids unchanged. (Open question flagged for review.)
-- `SettlementInput` unchanged — Linear settles via `Price` (reuses the Call/Put
+- `SettlementInput` unchanged: Linear settles via `Price` (reuses the Call/Put
   settlement path).
 
-### 2. No signature change — reuse the existing signed cashflow
+### 2. No signature change: reuse the existing signed cashflow
 
 The settlement layer already turns a non-negative gross payout into a signed
 cashflow: `cashflow = payout − reserved_margin − fees`
 ([`api/settlement/api.rs` ~L430](../../src/clearing/src/api/settlement/api.rs)).
-Linear reuses this **unchanged** — we define its gross payout (`≥ 0`) and
+Linear reuses this **unchanged**: we define its gross payout (`≥ 0`) and
 reserved margin so `payout − reserved = net_qty·(S_T − K)`. `get_settlement_value`
 stays `-> u128`. No `i128` refactor.
 
-### 3. `clearing/payoffs/mod.rs` — the three arms (band-bounded, zero-sum)
+### 3. `clearing/payoffs/mod.rs`: the three arms (band-bounded, zero-sum)
 
 Let `S* = clamp(S_T, 0, cap)`, all scaled to `USD_DECIMALS` via `scale_price`.
 
@@ -58,22 +58,22 @@ Let `S* = clamp(S_T, 0, cap)`, all scaled to `USD_DECIMALS` via `scale_price`.
 - Invariant to test: `long PnL + short PnL == 0` for `S*` inside and outside the
   band (clamp guarantees it).
 
-### 4. `clearing/api/trade/api.rs` — trade-path arms
+### 4. `clearing/api/trade/api.rs`: trade-path arms
 
 - Audit the `match series.payoff_type` at
   [`api/trade/api.rs:614`](../../src/clearing/src/api/trade/api.rs) and the
   `!= PayoffType::Categorical` guards (`:977`, `:1077`): `Linear` is scalar
-  (non-categorical, no outcomes) — confirm it flows down the scalar path and add
+  (non-categorical, no outcomes); confirm it flows down the scalar path and add
   an explicit `Linear` arm where the match is exhaustive.
 
-### 5. `registry/api/series.rs` — validation
+### 5. `registry/api/series.rs`: validation
 
 - In `add_series_impl`, add Linear invariants: **require** `strike` (the agreed
   forward rate `K`); **require** `settlement_cap` and `cap > K`; **reject**
   `outcomes`. New `SeriesError` variants:
   `LinearRequiresStrike`, `LinearRequiresSettlementCap`, `LinearRejectsOutcomes`.
 
-### 6. Migrations — re-verify, don't add
+### 6. Migrations: re-verify, don't add
 
 - Confirm the `Legacy*` shadows in
   [`src/shared/src/migrations/`](../../src/shared/src/migrations/),
@@ -110,7 +110,7 @@ RUSTFLAGS="-D warnings" cargo test --test it
 npm run did
 ```
 
-## PR body (template — all three sections required)
+## PR body (template; all three sections required)
 
 - **Motivation**: FX linear leg (forward = NDF on a cash-settled CCP); first half
   of ADR 0001. Bounded/solvency-safe; variation margin is a follow-up.
@@ -127,7 +127,7 @@ settlement cap, and the pre-existing naked short-`Call` under-collateralization.
 
 1. Include `settlement_cap` in `SeriesIdParams` id generation (recommended:
    yes, when `Some`)?
-2. Settlement-price clamp lives in `get_unit_payoff` (Linear) — confirm the
+2. Settlement-price clamp lives in `get_unit_payoff` (Linear). Confirm the
    oracle-outside-band case (`S_T > cap`) settling at `cap` is the desired policy
    (vs. rejecting settlement). Recommended: clamp, for guaranteed solvency.
 3. Band policy: per-series `settlement_cap` now; later a per-underlying default?

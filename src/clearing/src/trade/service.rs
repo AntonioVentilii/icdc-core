@@ -295,8 +295,8 @@ pub(crate) fn execute_trade_impl(
         current
     });
 
-    // Single timestamp for the trade so both counterparty rows — and the
-    // price-history point derived from them — agree.
+    // Single timestamp for the trade so both counterparty rows (and the
+    // price-history point derived from them) agree.
     let timestamp = now_ns();
 
     EVENTS.with(|events| {

@@ -209,7 +209,7 @@ fn linear_order_price_cap_validation() {
         Err(TradeError::PriceExceedsSettlementCap { .. })
     ));
 
-    // Buy above the cap is likewise rejected — the cap is enforced on both sides.
+    // Buy above the cap is likewise rejected: the cap is enforced on both sides.
     assert!(matches!(
         validate_no_arbitrage(&series, &order("lin_buy_over", Side::Buy, 25_000_000)),
         Err(TradeError::PriceExceedsSettlementCap { .. })

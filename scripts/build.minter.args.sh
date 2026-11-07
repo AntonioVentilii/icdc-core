@@ -14,7 +14,7 @@ set -euo pipefail
 #
 # Choosing Init vs Upgrade based on the current install state is what stops dfx
 # from prompting for the argument on every deploy. The auto-detection can be
-# overridden with MINTER_ARGS_VARIANT=init|upgrade — needed e.g. for
+# overridden with MINTER_ARGS_VARIANT=init|upgrade, which is needed e.g. for
 # `dfx deploy --mode reinstall` (which calls `init`, not `post_upgrade`, and
 # therefore requires the `Init` variant even though a module is installed) or
 # for disaster recovery.

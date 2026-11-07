@@ -6,7 +6,7 @@ This page mirrors the structure of
 [`dfinity/control-panel`'s `docs/ai/pr-and-ci.md`](https://github.com/dfinity/control-panel/blob/main/docs/ai/pr-and-ci.md)
 and adapts it to icdc-core's Rust-workspace + npm-script stack.
 
-## 1. PR title — Conventional Commits
+## 1. PR title: Conventional Commits
 
 Use a [Conventional Commits](https://www.conventionalcommits.org/) title:
 
@@ -15,7 +15,7 @@ type(scope): description
 type(scope)!: description   # breaking change
 ```
 
-The scope is **required** — a scopeless title is rejected. Use the affected
+The scope is **required**: a scopeless title is rejected. Use the affected
 area/crate as the scope, or a short tooling area such as `deps`.
 
 Examples:
@@ -44,7 +44,7 @@ and feeds the aggregate `checks-pass` gate, so a malformed title blocks merge.
 | `chore`    | misc maintenance (release bumps, dependency hygiene, …)  |
 | `build`    | build system / packaging (`scripts/build.*`, `dfx.json`) |
 | `ci`       | CI workflows / actions / `dev-tools.json`                |
-| `style`    | formatting only — no logic change                        |
+| `style`    | formatting only, no logic change                         |
 
 ### Scope
 
@@ -60,11 +60,11 @@ Common scopes used in this repo:
 
 If you introduce a new scope, keep it short and lowercase, no spaces.
 
-## 2. PR body — template
+## 2. PR body: template
 
 Always follow the repo's PR template. The canonical source is
-[`.github/pull_request_template.md`](../../.github/pull_request_template.md)
-— never invent your own structure, never drop sections, never replace
+[`.github/pull_request_template.md`](../../.github/pull_request_template.md).
+Never invent your own structure, never drop sections, never replace
 it with a free-form description. If the template changes, the new
 version wins; re-read it before opening a PR.
 
@@ -100,7 +100,7 @@ Rules:
 - **Do not hard-wrap lines.** Write one line per paragraph or list
   item and let the GitHub renderer wrap. Hard-wrapping at ~80 columns
   (a default many models fall back to) breaks rendering inside lists,
-  blockquotes, and tables. This applies to the PR body only — source
+  blockquotes, and tables. This applies to the PR body only; source
   files still follow `rustfmt` / `prettier` / `shfmt`.
 - **Atomicity statement.** If the PR touches more than one logical
   thing, add a one-liner under `# Motivation` explaining why they
@@ -113,7 +113,7 @@ the user explicitly tells you to use a different base.
 
 This applies **even when work is split into a wave / stack of related
 PRs**. Each PR in the wave still branches from `main` and targets
-`main` — never target another open PR's branch as a base.
+`main`. Never target another open PR's branch as a base.
 
 If a PR depends on another PR that has not landed yet:
 
@@ -121,7 +121,7 @@ If a PR depends on another PR that has not landed yet:
 - Note the dependency in the PR body under `# Motivation` (e.g.
   "Depends on #1234. Will mark ready once that lands.").
 - Once the prerequisite merges into `main`, pull `main` into the
-  dependent branch (regular merge — no force-push, see
+  dependent branch (regular merge, no force-push, see
   [§8](#8-updating-an-existing-pr)) and flip the PR to "ready for
   review".
 
@@ -134,7 +134,7 @@ Why this rule exists:
   target.
 
 **Draft state** is also the correct status for any PR that is not yet
-ready for review — work-in-progress, waiting on an upstream
+ready for review: work-in-progress, waiting on an upstream
 dependency, smoke-testing in CI. Mark it draft on creation and flip to
 "ready for review" only once it stands on its own.
 
@@ -156,7 +156,7 @@ enforced by the
 [reviewer agent](../../.agents/reviewer.md).
 
 When a wave of dependent PRs is genuinely needed, follow the base
-branch + draft rule in [§3](#3-base-branch--draft-state) — atomicity
+branch + draft rule in [§3](#3-base-branch--draft-state); atomicity
 and stacking are complementary, not in conflict.
 
 ## 5. Local quality gates (run before opening the PR)
@@ -199,8 +199,8 @@ Defined under [`.github/workflows/`](../../.github/workflows/):
 
 | Workflow      | Job(s)                      | What it runs                                                                                                                                                  |
 | ------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `checks.yml`  | `format`                    | `npm run format`. Fails the job whenever it produces a diff — run `npm run format` locally and push.                                                          |
-| `checks.yml`  | `lint`                      | `npm run lint` — `prettier --check` + `scripts/lint.sh` (rust, did, shell).                                                                                   |
+| `checks.yml`  | `format`                    | `npm run format`. Fails the job whenever it produces a diff: run `npm run format` locally and push.                                                           |
+| `checks.yml`  | `lint`                      | `npm run lint`: `prettier --check` + `scripts/lint.sh` (rust, did, shell).                                                                                    |
 | `checks.yml`  | `checks-pass`               | Aggregator gate via `.github/actions/needs_success`.                                                                                                          |
 | `tests.yml`   | `unit`                      | `npm run build` then `npm run test:unit` (`cargo test --lib --bins`).                                                                                         |
 | `tests.yml`   | `integration`               | `npm run build` then `npm run test:integration`.                                                                                                              |
@@ -216,7 +216,7 @@ to add or upgrade one of these.
 
 Cargo caches (`~/.cargo/registry`, `~/.cargo/git`, `target`) are keyed
 on their inputs only (`Cargo.lock`, `rust-toolchain.toml`, plus the
-build/download scripts for integration) — never on `github.sha` — and
+build/download scripts for integration), never on `github.sha`, and
 are saved from `main` only. Branches restore `main`'s entry; saving
 per commit or per branch fills the 10 GB repo quota and evicts it.
 
@@ -234,7 +234,7 @@ per commit or per branch fills the 10 GB repo quota and evicts it.
   RUSTFLAGS="-D warnings" cargo test --lib --bins
   RUSTFLAGS="-D warnings" cargo test --test it
   ```
-  Don't commit `#[ignore]` to bypass — failing tests are a signal,
+  Don't commit `#[ignore]` to bypass: failing tests are a signal,
   not a nuisance. See
   [`.policies/testing-policy.md`](../../.policies/testing-policy.md)
   for the broader testing rules.
@@ -247,7 +247,7 @@ CI fixes, follow-up tweaks), **add new commits**. Do not rewrite history.
 - **Never `git push --force` / `--force-with-lease`** on a PR branch.
 - **Never `git commit --amend`** a commit that is already on the remote.
 - **Never `git rebase` / squash / reword** pushed commits.
-- Just `git commit` the new change and `git push` — the PR will pick it
+- Just `git commit` the new change and `git push`; the PR will pick it
   up.
 
 The only exception is an **explicit user instruction** to force-push,
@@ -258,7 +258,7 @@ branch history as append-only.
 ## 9. CODEOWNERS auto-routing
 
 [`.github/CODEOWNERS`](../../.github/CODEOWNERS) currently routes every
-path to `@antonioventilii`. Agents do not assign reviewers — the file
+path to `@antonioventilii`. Agents do not assign reviewers; the file
 does it. If/when team-based ownership is introduced (mirror
 control-panel for the pattern), update this section in the same PR.
 
@@ -274,5 +274,5 @@ Deployment is separate: `main` → staging, `v*` tag → production. The
 full flow, versioning rationale, and one-time setup live in
 [`docs/ci-cd/release-deploy.md`](../ci-cd/release-deploy.md).
 
-Do not edit release artifacts in tree (`*.wasm.gz`, `*.did`) — they
+Do not edit release artifacts in tree (`*.wasm.gz`, `*.did`): they
 come from the build, not from source.

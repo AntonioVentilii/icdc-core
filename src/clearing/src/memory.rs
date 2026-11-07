@@ -55,7 +55,7 @@ thread_local! {
     pub static NEXT_EVENT_ID: RefCell<u64> = const { RefCell::new(0) };
     /// Per-series price-history index: one [`SeriesTradePoint`] per executed
     /// trade, in execution order (ascending `event_id`). Derived entirely from
-    /// the executed rows in `EVENTS`, so it is **not** persisted — it is rebuilt
+    /// the executed rows in `EVENTS`, so it is **not** persisted; it is rebuilt
     /// from `EVENTS` in `post_upgrade` via [`rebuild_series_trade_history`] and
     /// maintained incrementally on each trade. Lets `list_series_trade_history`
     /// serve a market's price history in O(log series + page) instead of
@@ -73,7 +73,7 @@ thread_local! {
     /// Each settled position folds its signed `cashflow_usd` into the current
     /// week, month, and all-time buckets. Like [`SERIES_TRADE_HISTORY`] this is
     /// a pure projection of the `Settled` rows in `EVENTS`, so it is **not**
-    /// persisted — it is rebuilt from `EVENTS` in `post_upgrade` via
+    /// persisted; it is rebuilt from `EVENTS` in `post_upgrade` via
     /// [`rebuild_leaderboard`] and maintained incrementally as settlements emit
     /// events. Lets `list_leaderboard` rank a window without scanning the whole
     /// event log per call.
