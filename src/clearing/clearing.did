@@ -1341,8 +1341,8 @@ type TradeError = variant {
 // A series may carry multiple policies simultaneously. For example:
 // - `[Open]`: open to everyone (default).
 // - `[Restricted { groups: [g1, g2] }]`: only members of g1 or g2.
-// - `[Open, Restricted { groups: [g1] }]`: open to everyone *and* additionally tagged as
-// belonging to g1 (useful for discovery/UI filtering).
+// - `[Open, Restricted { groups: [g1] }]`: open to everyone *and* additionally tagged as belonging
+// to g1 (useful for discovery/UI filtering).
 //
 // # Extensibility
 //
