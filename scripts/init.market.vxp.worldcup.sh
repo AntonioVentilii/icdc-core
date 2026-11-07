@@ -73,7 +73,7 @@ NUM_MATCHED=${#MATCHED_SIDS[@]}
 echo "Matched $NUM_MATCHED of $NUM_SCALAR scalar markets to the deck (deck-only; other markets left untouched)."
 
 if [[ "$NUM_MATCHED" -eq 0 ]]; then
-  echo "No deck markets present in the registry — nothing to seed. (Deploy the deck first.)"
+  echo "No deck markets present in the registry, nothing to seed. (Deploy the deck first.)"
   cleanup_market_tmps
   exit 0
 fi
@@ -103,7 +103,7 @@ for SID in "${MATCHED_SIDS[@]}"; do
   CONS=${CONSENSUS_BY_TITLE["$TITLE"]}
   MID_VAL=$(consensus_to_mid "$CONS")
   SPREAD_VAL=$(random_spread_val)
-  echo "Processing Scalar Market: $TITLE ($SID) — consensus $CONS => mid $MID_VAL"
+  echo "Processing Scalar Market: $TITLE ($SID), consensus $CONS => mid $MID_VAL"
   place_outcome_orders "$SID" "null" "$MID_VAL" "$SPREAD_VAL"
 done
 

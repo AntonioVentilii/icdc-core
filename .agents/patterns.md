@@ -40,7 +40,7 @@ When writing internal execution logic (like `execute_trade_impl`), pass all depe
 
 Canister state is persisted with candid, and **candid decoding fails on a
 missing non-optional field**. Adding a compulsory field (or renaming/retyping
-one) to a persisted type therefore requires a migration — otherwise the next
+one) to a persisted type therefore requires a migration. Otherwise the next
 upgrade traps in `post_upgrade`.
 
 - **Quarantine migration code** in a dedicated `migrations/` module, never mixed

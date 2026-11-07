@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 /// Settlement terms for a series. Compulsory on every market.
 ///
 /// Modeled as a struct (not a bare `String`) so it can grow without a breaking
-/// candid change: future fields — e.g. structured `rules` (named source +
-/// settle date + day-count, see issue #64) — are added as `opt` fields, which
+/// candid change: future fields (for example structured `rules`: named source +
+/// settle date + day-count, see issue #64) are added as `opt` fields, which
 /// candid can decode against records persisted before the field existed.
 /// Variants were considered and rejected: adding an enum variant risks decode
 /// failures in already-deployed consumers, whereas appending `opt` record

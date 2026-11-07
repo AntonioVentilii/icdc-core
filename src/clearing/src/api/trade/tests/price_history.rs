@@ -42,7 +42,7 @@ fn trade(
     }
 }
 
-/// Seeds `EVENTS` and rebuilds the per-series price-history index from it — the
+/// Seeds `EVENTS` and rebuilds the per-series price-history index from it, the
 /// same projection `post_upgrade` performs.
 fn seed(events: Vec<Event>) {
     EVENTS.with(|e| {
@@ -151,7 +151,7 @@ fn windows_by_inclusive_start_and_exclusive_end() {
         trade(2, &series, 30, 1, 2 * HOUR), // hour 2
     ]);
 
-    // [HOUR, 2*HOUR): keeps only the hour-1 trade — start inclusive, end exclusive.
+    // [HOUR, 2*HOUR): keeps only the hour-1 trade (start inclusive, end exclusive).
     let candles = history(
         &series,
         PriceHistoryInterval::Hour,
@@ -218,7 +218,7 @@ fn unknown_or_untraded_series_returns_empty_history() {
         "unknown series → empty"
     );
 
-    // A window before any trade also yields nothing — no fabricated points.
+    // A window before any trade also yields nothing: no fabricated points.
     assert!(
         history(&traded, PriceHistoryInterval::Hour, Some(DAY), None).is_empty(),
         "window with no trades → empty"
@@ -229,7 +229,7 @@ fn unknown_or_untraded_series_returns_empty_history() {
 fn caps_to_the_most_recent_points() {
     let series = SeriesId::from("series".to_owned());
 
-    // 1_001 trades, one per day, so each lands in its own daily bucket — one
+    // 1_001 trades, one per day, so each lands in its own daily bucket: one
     // more than the MAX_PRICE_HISTORY_POINTS cap of 1_000.
     let events = (0..=1_000_u64)
         .map(|i| trade(i, &series, u128::from(i), 1, i * DAY))
@@ -250,14 +250,14 @@ fn oldest_kept_bucket_at_the_cap_is_fully_aggregated() {
 
     // Day 0 (overflow → dropped) and day 1 (the oldest kept bucket) each carry
     // several trades. The newest-first scan must fold every trade of the oldest
-    // kept bucket before the next, strictly-older bucket ends the scan — not cut
+    // kept bucket before the next, strictly-older bucket ends the scan, not cut
     // it off mid-bucket once the cap is reached.
     let mut events = vec![
-        trade(0, &series, 99, 1, 0),       // day 0 — dropped
-        trade(1, &series, 98, 1, 1),       // day 0 — dropped
-        trade(2, &series, 10, 1, DAY),     // day 1 — earliest → open
+        trade(0, &series, 99, 1, 0),       // day 0: dropped
+        trade(1, &series, 98, 1, 1),       // day 0: dropped
+        trade(2, &series, 10, 1, DAY),     // day 1: earliest → open
         trade(3, &series, 20, 1, DAY + 1), // day 1
-        trade(4, &series, 30, 1, DAY + 2), // day 1 — latest → close
+        trade(4, &series, 30, 1, DAY + 2), // day 1: latest → close
     ];
     // Fill days 2..=1000 with one trade each, so day 1 is exactly the 1000th
     // (oldest) kept bucket and day 0 is the overflow that stops the scan. Five

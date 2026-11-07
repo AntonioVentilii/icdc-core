@@ -38,7 +38,7 @@ const MAX_LEADERBOARD_MEMBERS: usize = 10_000;
 /// Principals are ranked by net realized `PnL` (the signed sum of their
 /// settlement cashflows in the window) descending, using competition ranking
 /// (ties share a rank). Pass `members` to rank within a league / affiliation
-/// member set instead of the whole population — that set is ranked in
+/// member set instead of the whole population; that set is ranked in
 /// isolation and every listed member is included even with no settlements in
 /// the window, so the front end can read a user's rank within their league.
 ///
@@ -55,14 +55,14 @@ pub fn list_leaderboard(params: ListLeaderboardParams) -> LeaderboardPage {
 /// Aggregates each supplied principal's settled-position win/total counts (and
 /// net realized `PnL`) over an arbitrary half-open window `[from_ts, to_ts)`.
 ///
-/// `win_count / settled_count` per entry is that principal's window accuracy —
+/// `win_count / settled_count` per entry is that principal's window accuracy,
 /// the same metric [`list_leaderboard`] exposes, but over a caller-chosen span
 /// rather than a fixed calendar bucket. A consumer scoring a cohort (e.g. one
 /// league side of a "battle") sums the entries it gets back for that side's
 /// members.
 ///
 /// Unlike [`list_leaderboard`], the arbitrary window cannot use the
-/// `(window, period)` index, so this scans the raw `EVENTS` log once —
+/// `(window, period)` index, so this scans the raw `EVENTS` log once:
 /// `O(events)`, the same cost class as [`get_trade_history`] and the
 /// post-upgrade leaderboard rebuild. Only `Settled` events count; a `Settled`
 /// event's `qty` is the position's signed `cashflow_usd`, so a win is
@@ -180,7 +180,7 @@ fn list_leaderboard_impl(
     // Only the top `end` entries have to be ordered to serve the page and its
     // ranks: an entry's competition rank counts the strictly-higher `PnL`s, which
     // are themselves all within the top `end`. So partition the top `end` out
-    // in O(total) and sort just that prefix — instead of sorting the whole
+    // in O(total) and sort just that prefix, instead of sorting the whole
     // population on every call. `by_rank` is a strict total order (principals
     // are unique), so the top `end` is well-defined even across `PnL` ties.
     if end < total {
@@ -192,7 +192,7 @@ fn list_leaderboard_impl(
     let page = &ranked[start..];
 
     // Prior period (if any): the page needs each shown principal's prior rank
-    // for the ↑/↓ delta — not the whole prior ranking — so compute only those.
+    // for the ↑/↓ delta (not the whole prior ranking), so compute only those.
     let prior_ranks = window
         .prior_period_id(now_ns)
         .map(|period| prior_ranks_for(idx, window, period, members, page));
@@ -221,7 +221,7 @@ fn list_leaderboard_impl(
 
 /// Total order used to rank standings: realized `PnL` descending, ties broken by
 /// principal ascending. Strict (principals are unique), so the top-`k` of a
-/// population is uniquely defined — which is what lets a paged read select a
+/// population is uniquely defined, which is what lets a paged read select a
 /// page without sorting the whole population.
 fn by_rank(a: &(Principal, PnlAggregate), b: &(Principal, PnlAggregate)) -> Ordering {
     b.1.realized_pnl
@@ -233,8 +233,8 @@ fn by_rank(a: &(Principal, PnlAggregate), b: &(Principal, PnlAggregate)) -> Orde
 /// **unsorted**.
 ///
 /// With `members = Some`, the bucket is restricted to that set and **every**
-/// listed member is included — those absent from the bucket get a zeroed
-/// aggregate — so a league ranking covers the full member set. Duplicate
+/// listed member is included (those absent from the bucket get a zeroed
+/// aggregate), so a league ranking covers the full member set. Duplicate
 /// members are de-duplicated. With `members = None`, only principals present in
 /// the bucket (i.e. who settled at least one position in the period) are
 /// returned.
@@ -325,8 +325,8 @@ fn prior_ranks_for(
 /// A competition rank is `1 + count(entries with strictly higher PnL)`. We tally
 /// that for every shown principal in a single O(bucket · log page) pass: with
 /// the shown principals' distinct prior `PnL`s sorted ascending as `targets`, each
-/// bucket entry with `PnL` `v` contributes to exactly the targets it exceeds — the
-/// prefix `[0, j)` where `j` is the number of targets below `v` — accumulated as
+/// bucket entry with `PnL` `v` contributes to exactly the targets it exceeds (the
+/// prefix `[0, j)` where `j` is the number of targets below `v`), accumulated as
 /// a range increment and resolved by a prefix sum.
 fn global_prior_ranks(
     bucket: Option<&BTreeMap<User, PnlAggregate>>,
@@ -750,7 +750,7 @@ mod tests {
 
     #[test]
     fn optimized_matches_naive_reference_over_random_inputs() {
-        // xorshift64 — a deterministic PRNG so failures reproduce without a dep.
+        // xorshift64: a deterministic PRNG so failures reproduce without a dep.
         let mut state = 0x1234_5678_9abc_def0_u64;
         let mut next = move || {
             state ^= state << 13;

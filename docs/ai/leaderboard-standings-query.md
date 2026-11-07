@@ -11,14 +11,14 @@ vici-app has three leaderboard / standings stats whose UI already exists (tabs,
 ↑/↓ arrows, rank pills) but render placeholder data, because the underlying
 per-window ranking lives in the clearing canister, not the satellite:
 
-- **Leaderboard per window** — This week / This month / All time.
-- **Rank delta** — each principal's prior-window rank, for ↑/↓ movement.
-- **Your league rank** — a user's rank within their league's member set.
+- **Leaderboard per window**: This week / This month / All time.
+- **Rank delta**: each principal's prior-window rank, for ↑/↓ movement.
+- **Your league rank**: a user's rank within their league's member set.
 
 The clearing canister already records, per settled position, a `Settled`
 [`Event`] whose `qty` is the position's signed `cashflow_usd` (realized PnL;
 positive = winner). That is exactly the per-principal realized PnL the standings
-rank by — but there was no query that aggregates it into ranked, windowed
+rank by, but there was no query that aggregates it into ranked, windowed
 standings. The satellite owns the social graph / league membership, the clearing
 canister owns settlement, so the ranking primitive belongs here and the league
 filter is supplied by the caller.
@@ -61,8 +61,8 @@ service : {
 };
 ```
 
-- **Ranking metric.** Net realized PnL over the window — the signed sum of the
-  principal's `Settled` cashflows — descending. `win_count / settled_count`
+- **Ranking metric.** Net realized PnL over the window (the signed sum of the
+  principal's `Settled` cashflows), descending. `win_count / settled_count`
   gives the FE an accuracy figure without exposing the per-settlement breakdown.
 - **Competition ranking.** Equal-PnL principals share a rank and the next
   distinct PnL skips the tied positions (e.g. `1, 2, 2, 4`), so a tie reads as a
@@ -73,8 +73,8 @@ service : {
   `None` for the `AllTime` window (no prior period) or for a principal absent
   from the prior period (a newcomer).
 - **League rank.** With `members` set, only that set is ranked, in isolation,
-  and **every** listed member is included — even one with no settlements in the
-  window, with a zeroed aggregate — so "your rank within your league" covers the
+  and **every** listed member is included (even one with no settlements in the
+  window, with a zeroed aggregate), so "your rank within your league" covers the
   full membership. With `members = None`, the global standings list only
   principals who settled at least one position in the window.
 - Guarded by `caller_is_not_anonymous`, matching `get_trade_history`,
@@ -89,7 +89,7 @@ service : {
 - The caller-supplied `members` set is capped at 10,000 principals (it is
   ranked in full); a longer list is truncated.
 
-### Window semantics — calendar, not rolling
+### Window semantics: calendar, not rolling
 
 `Week` is an ISO week (Monday 00:00:00 UTC through the following Sunday) and
 `Month` is a UTC calendar month. **Calendar (fixed) buckets** were chosen over
@@ -108,7 +108,7 @@ month) → a monotonic month index.
 
 A leaderboard tab is read on essentially every standings view; settlements
 (writes) are far rarer. The naive query would scan the whole `EVENTS` log for
-`Settled` rows, bucket them by window, then rank — `O(total events)` on every
+`Settled` rows, bucket them by window, then rank: `O(total events)` on every
 call.
 
 Chosen design: a **per-`(window, period)` aggregate index**, mirroring the
@@ -117,11 +117,11 @@ Chosen design: a **per-`(window, period)` aggregate index**, mirroring the
 - `SETTLEMENT_LEADERBOARD`, keyed by `(window, period)` and holding a
   per-`User` `PnlAggregate`. Each settled position folds its signed
   `cashflow_usd` into its current week, month, and all-time buckets. A query
-  then ranks only the two relevant buckets (current + prior period) —
+  then ranks only the two relevant buckets (current + prior period):
   `O(bucket)` instead of `O(total events)`.
 - **Heap-only, rebuilt on upgrade.** The index is a pure projection of the
   `Settled` rows in `EVENTS`, so it is **not** added to the persisted
-  `StableState` — `post_upgrade` reconstructs it via `rebuild_leaderboard` after
+  `StableState`; `post_upgrade` reconstructs it via `rebuild_leaderboard` after
   `EVENTS` is restored. No stable-layout migration. Period bucketing is a
   deterministic function of each event's `timestamp`, so the rebuild reproduces
   exactly the live buckets.
@@ -131,7 +131,7 @@ Chosen design: a **per-`(window, period)` aggregate index**, mirroring the
   index stays current between upgrades. Write cost is three `BTreeMap` updates
   per settled position.
 - **Privacy.** The shape is an aggregate: window totals (net PnL, settled/win
-  counts) and rank only — never the per-series or per-settlement breakdown. A
+  counts) and rank only, never the per-series or per-settlement breakdown. A
   public leaderboard inherently associates principals with standings; this
   exposes no more than that, and the per-trade counterparty principals stay out
   of the market-wide reads (`list_series_trade_history` already omits them).
@@ -145,8 +145,8 @@ optimizations keep that cost proportional to the page, not the population:
 - **Bounded top-K selection for the current period.** A competition rank counts
   the strictly-higher PnLs, which for any shown entry are themselves within the
   top `end` of the population. So the query uses `select_nth_unstable_by` to
-  partition the top `end` in `O(total)` and sorts only that prefix —
-  `O(total + end·log end)` — instead of an `O(total·log total)` full sort on
+  partition the top `end` in `O(total)` and sorts only that prefix
+  (`O(total + end·log end)`) instead of an `O(total·log total)` full sort on
   every call. The comparator is a strict total order (PnL desc, then principal),
   so the top-K is well-defined even across PnL ties. It degrades to a full sort
   only when the caller asks for everything (`limit = None`), i.e. never worse.
@@ -159,7 +159,7 @@ optimizations keep that cost proportional to the page, not the population:
   (`members = Some`) are bounded by the member set, so they just rank it in
   full.
 
-Both are pure read-path algebra over the same index — no extra state, no cache
+Both are pure read-path algebra over the same index: no extra state, no cache
 to invalidate, output identical to a full-sort reference (asserted by a
 randomized equivalence test over 600 cases across all windows, league filters,
 cursors, and limits).
@@ -176,7 +176,7 @@ cursors, and limits).
 
 ## Tests
 
-- `src/clearing/src/types/leaderboard.rs`: window math — Monday-aligned weeks,
+- `src/clearing/src/types/leaderboard.rs`: window math, covering Monday-aligned weeks,
   sub-day resolution, calendar months across year boundaries and a leap year,
   all-time single period, prior-period `= id - 1`, no prior at epoch start, and
   the aggregate's win/loss folding.
@@ -190,7 +190,7 @@ cursors, and limits).
   selection + sort-free prior ranks) matches a naive full-sort reference over
   600 cases across all windows, league filters, cursors, and limits.
 
-`cargo test -p clearing --lib` — 81 passed (18 new). `npm run quality` and
+`cargo test -p clearing --lib`: 81 passed (18 new). `npm run quality` and
 `npm run did` pass.
 
 [`Event`]: ../../src/clearing/src/types/event.rs

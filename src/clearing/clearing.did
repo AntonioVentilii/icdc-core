@@ -56,7 +56,7 @@ type AggregateLeanParams = record {
 	// The derivative series to aggregate the lean over.
 	series_id : text;
 	// The set of principals to aggregate over. The set is caller-supplied and
-	// scanned in full, so it is capped — any list longer than the cap is
+	// scanned in full, so it is capped: any list longer than the cap is
 	// truncated. Duplicate principals are de-duplicated and never affect the
 	// counts. The clearing layer ascribes no meaning to the set; how it is
 	// chosen is entirely a consumer concern.
@@ -67,8 +67,8 @@ type AggregateLeanParams = record {
 //
 // Aggregates each supplied principal's settled-position win/total counts over
 // an arbitrary half-open time window `[from_ts, to_ts)`. Unlike
-// [`ListLeaderboardParams`] — which ranks over fixed calendar windows backed
-// by the maintained `SETTLEMENT_LEADERBOARD` index — this scans the raw event
+// [`ListLeaderboardParams`], which ranks over fixed calendar windows backed
+// by the maintained `SETTLEMENT_LEADERBOARD` index, this scans the raw event
 // log so a consumer can score a cohort over a bespoke window (e.g. a league
 // "battle" running an arbitrary 7-day span that does not align to a calendar
 // week). The clearing layer ascribes no meaning to the set or the window; how
@@ -80,8 +80,8 @@ type AggregateSettlementAccuracyParams = record {
 	// the same settlement.
 	to_ts : opt nat64;
 	// The principals to aggregate over (e.g. a league's member set). The set
-	// is caller-controlled and scanned in full, so it is capped at 10,000 —
-	// any realistic cohort is well under this; a longer list is truncated to
+	// is caller-controlled and scanned in full, so it is capped at 10,000.
+	// Any realistic cohort is well under this; a longer list is truncated to
 	// the first 10,000. Duplicate principals are de-duplicated and never
 	// double-count.
 	members : vec principal;
@@ -188,11 +188,11 @@ type BackfillSettlementEventsResult = record {
 };
 // Represents a distinct domain for balances and trading logic.
 type BalanceDomain = variant {
-	// VICI XP (loyalty points) — segregated from Playground test assets.
+	// VICI XP (loyalty points), segregated from Playground test assets.
 	ViciXp;
 	// Non-monetary social bets (e.g., betting a pizza).
 	Social;
-	// Testnet / sandbox collateral (e.g. TESTICP, Sepolia) — not real funds.
+	// Testnet / sandbox collateral (e.g. TESTICP, Sepolia), not real funds.
 	Playground;
 	// Real collateralized trading (e.g., using ckUSDC, ICP).
 	Settlement
@@ -455,7 +455,7 @@ type HttpResponse = record {
 //
 // The shape is intentionally an **aggregate**: it exposes only window totals
 // (net realized `PnL` plus the settled / win counts a front end needs for an
-// accuracy figure) and the principal's rank — never the per-series or
+// accuracy figure) and the principal's rank, never the per-series or
 // per-settlement breakdown.
 type LeaderboardEntry = record {
 	// The ranked principal.
@@ -468,7 +468,7 @@ type LeaderboardEntry = record {
 	// Competition ranking: principals with equal `PnL` share a rank, and the
 	// next distinct `PnL` skips the tied positions (e.g. `1, 2, 2, 4`).
 	rank : nat64;
-	// Net realized `PnL` over the window, in internal USD (`vUSD`) base units —
+	// Net realized `PnL` over the window, in internal USD (`vUSD`) base units:
 	// the signed sum of the principal's settlement cashflows.
 	realized_pnl : int;
 	// Number of those settlements that were net positive. `win_count /
@@ -496,7 +496,7 @@ type LeaderboardPage = record {
 // has a well-defined immediately-preceding period (the "prior window") for the
 // ↑/↓ rank deltas the front end renders:
 //
-// - [`Week`](LeaderboardWindow::Week): an ISO week — Monday 00:00:00 UTC through the following
+// - [`Week`](LeaderboardWindow::Week): an ISO week, Monday 00:00:00 UTC through the following
 // Sunday. (Unix epoch day 0, 1970-01-01, was a Thursday, hence the `+ 3` Monday alignment
 // below.)
 // - [`Month`](LeaderboardWindow::Month): a calendar month in UTC.
@@ -539,13 +539,13 @@ type LimitOrder = record {
 type ListLeaderboardParams = record {
 	// When set, rank **only** within this set of principals (a league /
 	// affiliation member set) instead of the whole population, and include
-	// every listed member — even those with no settlements in the window —
+	// every listed member (even those with no settlements in the window)
 	// with a zeroed aggregate, so the result covers the full league. When
 	// `None`, the global standings are returned and only principals that
 	// settled at least one position in the window appear.
 	//
 	// The set is caller-controlled and ranked in full, so it is capped at
-	// 10,000 principals — any realistic league is well under this; a longer
+	// 10,000 principals. Any realistic league is well under this; a longer
 	// list is truncated to the first 10,000.
 	members : opt vec principal;
 	// Which calendar window to rank: current week, current month, or all time.
@@ -570,7 +570,7 @@ type ListOrdersParams = record {
 //
 // Batches the per-series settlement check a resolution solver would otherwise
 // make one call at a time. Callers pass the (bounded) set of series they care
-// about — typically the "due" candidates from the registry — and receive one
+// about (typically the "due" candidates from the registry) and receive one
 // status per id in request order. Unknown or still-open series come back with a
 // `None` status. The read looks each id up in `SETTLEMENT_PLANS`, so the work is
 // `O(#series_ids)` regardless of how many plans exist. Mirrors
@@ -662,7 +662,7 @@ type Outcome = record {
 // Aggregate lean of the supplied principal set on a single outcome of a
 // series.
 //
-// Carries **counts only** — no principal identities, sides, quantities, or
+// Carries **counts only**: no principal identities, sides, quantities, or
 // P&L. Long is the number of net-long holders, short the number of net-short
 // holders; flat (zero net) positions are excluded from both.
 type OutcomeLean = record {
@@ -755,7 +755,7 @@ type Price = record {
 //
 // Buckets are **fixed-width and epoch-aligned** (each bucket is `[k * width,
 // (k + 1) * width)` ns since the Unix epoch), not rolling spans, so the same
-// instant always falls in the same bucket regardless of when the query runs —
+// instant always falls in the same bucket regardless of when the query runs:
 // two calls over an overlapping range return byte-identical candles for the
 // shared buckets. Hourly resolution backs the short windows the front end
 // renders (1d / 7d) and daily resolution the long ones (30d / all) without the
@@ -843,8 +843,8 @@ type RegisterIcrcAssetResult = variant { Ok; Err : RegisterIcrcAssetError };
 // Settlement terms for a series. Compulsory on every market.
 //
 // Modeled as a struct (not a bare `String`) so it can grow without a breaking
-// candid change: future fields — e.g. structured `rules` (named source +
-// settle date + day-count, see issue #64) — are added as `opt` fields, which
+// candid change: future fields (for example structured `rules`: named source +
+// settle date + day-count, see issue #64) are added as `opt` fields, which
 // candid can decode against records persisted before the field existed.
 // Variants were considered and rejected: adding an enum variant risks decode
 // failures in already-deployed consumers, whereas appending `opt` record
@@ -874,7 +874,7 @@ type Series = record {
 	banner_url : opt text;
 	// Optional timestamp in nanoseconds since UNIX epoch at which trading opens.
 	//
-	// `None` means the series is tradeable from the moment it is registered —
+	// `None` means the series is tradeable from the moment it is registered:
 	// the historical behavior, and the canonical way to express "live now".
 	// `Some(t)` schedules the series: it is listed and discoverable immediately
 	// but trading is rejected until `t`. The window is inclusive at the open
@@ -885,7 +885,7 @@ type Series = record {
 	// series that differ only in their trading window are distinct contracts,
 	// so a scheduled series can never silently collide with an already-live one
 	// and inherit a start date its creator did not ask for. To keep that
-	// guarantee meaningful `None` is the only encoding of "already live" —
+	// guarantee meaningful, `None` is the only encoding of "already live":
 	// `add_series` rejects a `start_ns` at or before the current time, so the
 	// same market cannot exist under two ids.
 	start_ns : opt nat64;
@@ -905,7 +905,7 @@ type Series = record {
 	// localized clones of the same market).
 	//
 	// When `None`, consumers should assume the default locale `"en"` and are
-	// responsible for translating into the user's preferred locale — the
+	// responsible for translating into the user's preferred locale; the
 	// canister never stores translations on-chain.
 	locale : opt text;
 	// A detailed description of the series.
@@ -924,7 +924,7 @@ type Series = record {
 	// An optional icon URL for the market.
 	icon_url : opt text;
 	// The set of trading access policies governing who may trade this series.
-	// **Must never be empty** — every series carries at least one policy.
+	// **Must never be empty**: every series carries at least one policy.
 	//
 	// Evaluated as a logical OR: a caller is authorized if **any** policy
 	// in the list grants them access.
@@ -956,7 +956,7 @@ type SeriesPriceCandle = record {
 	// Highest trade price in the bucket.
 	high : Price;
 	// Price of the last trade in the bucket (latest timestamp, ties broken by
-	// execution order) — the consensus a sparkline/chart plots.
+	// execution order): the consensus a sparkline/chart plots.
 	close : Price;
 	// Price of the first trade in the bucket (earliest timestamp, ties broken
 	// by execution order).
@@ -981,7 +981,7 @@ type SeriesPriceHistory = record {
 // One series' settlement status, paired with the id it was requested for.
 //
 // `status` is `Some` when a settlement plan exists for the series (in any
-// [`PlanStatus`](crate::types::plans::PlanStatus) — a plan is opened the moment
+// [`PlanStatus`](crate::types::plans::PlanStatus); a plan is opened the moment
 // settlement begins) and `None` otherwise. A `None` covers both a still-open
 // series and an unknown id; the two are not distinguished here. The `series_id`
 // is echoed on each entry so callers can align results with their requested ids
@@ -1009,8 +1009,8 @@ type SeriesTradeHistoryPage = record {
 // Each executed trade emits two [`Event`] rows (one per counterparty) that
 // share the same `event_id`, `price`, and `timestamp`. A price history needs
 // only one point per trade, so this collapses the pair to the trade-level
-// facts a front end plots — `price`/`timestamp` for the sparkline, `qty` for
-// optional volume — without exposing either counterparty's principal in a
+// facts a front end plots (`price`/`timestamp` for the sparkline, `qty` for
+// optional volume) without exposing either counterparty's principal in a
 // market-wide read.
 type SeriesTradePoint = record {
 	// Traded quantity (positive).
@@ -1025,8 +1025,8 @@ type SeriesTradePoint = record {
 };
 // One series' cumulative market-wide traded volume.
 //
-// `volume` is the traded *notional* — the sum over executed trades of
-// `qty · price`, the value that changed hands — in USD base units (the
+// `volume` is the traded *notional*, i.e. the sum over executed trades of
+// `qty · price` (the value that changed hands), in USD base units (the
 // `USD_DECIMALS` scale), not a contract count. `trade_count` is the number of
 // executed trades. An untraded or unknown series totals zero on both.
 type SeriesTradedVolume = record {
@@ -1067,13 +1067,13 @@ type SettledSeriesPage = record {
 // Mirrors the aggregate-only contract of [`LeaderboardEntry`]: window totals
 // (settled / win counts plus net realized `PnL`) and never a per-settlement
 // breakdown. `win_count / settled_count` is the window accuracy. Only
-// principals with at least one settlement in the window are returned — a
+// principals with at least one settlement in the window are returned: a
 // member with no settlement contributes nothing to a cohort's accuracy, and
 // the caller already knows the full set it asked for.
 type SettlementAccuracyEntry = record {
 	// The aggregated principal.
 	"principal" : principal;
-	// Net realized `PnL` over the window, in internal USD (`vUSD`) base units —
+	// Net realized `PnL` over the window, in internal USD (`vUSD`) base units:
 	// the signed sum of the principal's settlement cashflows.
 	realized_pnl : int;
 	// Number of those settlements that were net positive (`cashflow_usd > 0`).
@@ -1339,10 +1339,10 @@ type TradeError = variant {
 // # Combining policies
 //
 // A series may carry multiple policies simultaneously. For example:
-// - `[Open]` — open to everyone (default).
-// - `[Restricted { groups: [g1, g2] }]` — only members of g1 or g2.
-// - `[Open, Restricted { groups: [g1] }]` — open to everyone *and* additionally tagged as
-// belonging to g1 (useful for discovery/UI filtering).
+// - `[Open]`: open to everyone (default).
+// - `[Restricted { groups: [g1, g2] }]`: only members of g1 or g2.
+// - `[Open, Restricted { groups: [g1] }]`: open to everyone *and* additionally tagged as belonging
+// to g1 (useful for discovery/UI filtering).
 //
 // # Extensibility
 //
@@ -1469,7 +1469,7 @@ service : (Config) -> {
 	// Aggregates, for a series, the long/short lean of a supplied set of
 	// principals, broken down per outcome.
 	//
-	// The clearing layer ascribes no meaning to the set — it is just a list of
+	// The clearing layer ascribes no meaning to the set: it is just a list of
 	// principals the caller passes in; how it is assembled is a concern of the
 	// consuming layer-2 / application, not of clearing.
 	//
@@ -1485,14 +1485,14 @@ service : (Config) -> {
 	// Aggregates each supplied principal's settled-position win/total counts (and
 	// net realized `PnL`) over an arbitrary half-open window `[from_ts, to_ts)`.
 	//
-	// `win_count / settled_count` per entry is that principal's window accuracy —
+	// `win_count / settled_count` per entry is that principal's window accuracy,
 	// the same metric [`list_leaderboard`] exposes, but over a caller-chosen span
 	// rather than a fixed calendar bucket. A consumer scoring a cohort (e.g. one
 	// league side of a "battle") sums the entries it gets back for that side's
 	// members.
 	//
 	// Unlike [`list_leaderboard`], the arbitrary window cannot use the
-	// `(window, period)` index, so this scans the raw `EVENTS` log once —
+	// `(window, period)` index, so this scans the raw `EVENTS` log once:
 	// `O(events)`, the same cost class as [`get_trade_history`] and the
 	// post-upgrade leaderboard rebuild. Only `Settled` events count; a `Settled`
 	// event's `qty` is the position's signed `cashflow_usd`, so a win is
@@ -1584,8 +1584,8 @@ service : (Config) -> {
 	// `start_time`/`end_time` window the trades considered (inclusive lower,
 	// exclusive upper), letting the caller request just the window it draws; the
 	// `interval` selects hourly or daily resolution. Buckets with no trades are
-	// omitted — a young or untraded market returns an empty history rather than
-	// fabricated points — and the result is capped at [`MAX_PRICE_HISTORY_POINTS`]
+	// omitted (a young or untraded market returns an empty history rather than
+	// fabricated points), and the result is capped at [`MAX_PRICE_HISTORY_POINTS`]
 	// most-recent candles.
 	//
 	// Served from the same `SERIES_TRADE_HISTORY` index as
@@ -1603,7 +1603,7 @@ service : (Config) -> {
 	// Returns the public settlement progress for a derivative series without exposing user positions.
 	get_settlement_status : (text) -> (opt SettlementStatusView) query;
 	// Retrieves the trade history for the caller. Returns events that move the
-	// user's economic position — executed trades, settlements, and liquidations.
+	// user's economic position: executed trades, settlements, and liquidations.
 	// Order-placement events are excluded so the response is bounded to events
 	// that materially settle cashflow.
 	//
@@ -1626,7 +1626,7 @@ service : (Config) -> {
 	// Principals are ranked by net realized `PnL` (the signed sum of their
 	// settlement cashflows in the window) descending, using competition ranking
 	// (ties share a rank). Pass `members` to rank within a league / affiliation
-	// member set instead of the whole population — that set is ranked in
+	// member set instead of the whole population; that set is ranked in
 	// isolation and every listed member is included even with no settlements in
 	// the window, so the front end can read a user's rank within their league.
 	//
@@ -1639,7 +1639,7 @@ service : (Config) -> {
 	list_orders : (ListOrdersParams) -> (vec LimitOrder) query;
 	// Returns a list of all derivative series currently cached in the clearing canister.
 	list_series : () -> (vec Series) query;
-	// Returns each requested series' settlement status in one call — the batch form
+	// Returns each requested series' settlement status in one call: the batch form
 	// of [`get_settlement_status`].
 	//
 	// A resolution solver checks "is this market already settled?" for every due
@@ -1651,8 +1651,8 @@ service : (Config) -> {
 	// back against its input; the `series_id` is echoed on each entry so a `None`
 	// status is still attributable.
 	//
-	// The work is `O(#series_ids)` map lookups — bounded by the request, not by the
-	// number of plans — so callers should pass the (already bounded) set they care
+	// The work is `O(#series_ids)` map lookups, bounded by the request rather than by the
+	// number of plans, so callers should pass the (already bounded) set they care
 	// about, e.g. the registry's "due" candidates. Reads the same
 	// `SETTLEMENT_PLANS` map as [`get_settlement_status`] and mirrors the
 	// aggregate-read shape of
@@ -1664,13 +1664,13 @@ service : (Config) -> {
 	// Returns the executed-trade history for a single series, with stable cursor
 	// pagination.
 	//
-	// Unlike [`get_trade_history`] — which is caller-scoped — this surfaces every
+	// Unlike [`get_trade_history`], which is caller-scoped, this surfaces every
 	// participant's executed trades on `series_id`, so a front end can derive a
 	// market-wide price history (e.g. a YES-probability sparkline) from the
 	// per-trade `price`/`timestamp` rather than only the viewer's own fills.
 	//
 	// Each trade is returned as a single [`SeriesTradePoint`] (the two
-	// counterparty rows are collapsed), ordered by `event_id` ascending — i.e.
+	// counterparty rows are collapsed), ordered by `event_id` ascending, i.e.
 	// execution order. Served from the `SERIES_TRADE_HISTORY` index, so the read
 	// is `O(log series + page)` rather than a scan of the whole event log. The
 	// cursor is the last trade's `event_id` and is exclusive; since executed-trade
@@ -1679,14 +1679,14 @@ service : (Config) -> {
 	list_series_trade_history : (ListSeriesTradeHistoryParams) -> (
 		SeriesTradeHistoryPage
 	) query;
-	// Returns each requested series' cumulative market-wide traded volume — the
-	// notional that changed hands (sum of `qty · price`) in USD base units — plus
+	// Returns each requested series' cumulative market-wide traded volume (the
+	// notional that changed hands, i.e. the sum of `qty · price`, in USD base units) plus
 	// its executed-trade count, one entry per requested id in request order.
 	//
 	// Lets a front end label a page of market cards in a single call instead of a
 	// per-card read. An unknown or untraded series totals zero. Reads the
 	// `SERIES_TRADED_VOLUME` aggregate that [`index_executed_trade`] maintains
-	// alongside the trade index, so the work is `O(#series_ids)` lookups — bounded
+	// alongside the trade index, so the work is `O(#series_ids)` lookups, bounded
 	// regardless of how many trades a series has accumulated, rather than scanning
 	// each series' tape. Guarded by `caller_is_not_anonymous`, matching the other
 	// series-scoped reads.
@@ -1698,8 +1698,8 @@ service : (Config) -> {
 	// Lists the ids of series that have been settled (resolved), with stable
 	// cursor pagination.
 	//
-	// A series appears here as soon as a [`SettlementPlan`] is opened for it — in
-	// any [`PlanStatus`] — which is precisely when it stops being tradeable. This
+	// A series appears here as soon as a [`SettlementPlan`] is opened for it (in
+	// any [`PlanStatus`]), which is precisely when it stops being tradeable. This
 	// is the authoritative resolution set: the clearing canister owns settlement
 	// state, the registry does not. Front ends that build a "currently-tradeable"
 	// candidate set call the registry's `list_series_with` with `only_unexpired`
