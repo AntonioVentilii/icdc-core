@@ -16,14 +16,14 @@ use crate::{
         },
         admin::{
             params::{
-                CancelFundWithdrawalParams, RefreshIcrcAssetMetadataParams,
+                CancelFundWithdrawalParams, ReassignAccountParams, RefreshIcrcAssetMetadataParams,
                 RegisterIcrcAssetParams, UpdateAssetMetricsParams, UpdateAssetPriceParams,
                 UpdateCollateralAllowedDomainsParams, UpdateCollateralAssetParams,
                 UpdateDomainPolicyParams, WithdrawFundParams,
             },
             results::{
-                CancelFundWithdrawalResult, GetFundsResult, RefreshIcrcAssetMetadataResult,
-                RegisterIcrcAssetResult, UpdateAssetPriceResult,
+                CancelFundWithdrawalResult, GetFundsResult, ReassignAccountResult,
+                RefreshIcrcAssetMetadataResult, RegisterIcrcAssetResult, UpdateAssetPriceResult,
                 UpdateCollateralAllowedDomainsResult, WithdrawFundResult,
             },
         },

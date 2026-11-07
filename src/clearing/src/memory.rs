@@ -9,14 +9,15 @@ use shared::types::{
 };
 
 use crate::{
+    account::reassignment::ReassignmentMark,
     migrations::{into_current, LegacyStableState},
     types::{
         event::{Event, EventType, SeriesTradePoint, SeriesVolumeAggregate},
         leaderboard::{LeaderboardWindow, PnlAggregate},
         margin::{AccountState, Position, PositionsMap},
         plans::{
-            DepositPlan, FundWithdrawalPlan, MigrationKey, MigrationPlan, SettlementPlan,
-            WithdrawalPlan,
+            DepositPlan, FundWithdrawalPlan, MigrationKey, MigrationPlan, PlanStatus,
+            ReassignmentKey, ReassignmentPlan, SettlementPlan, WithdrawalPlan,
         },
         state::{Config, StableState},
         trade::{LimitOrder, OrderId, TradeId, TransferId},
@@ -93,6 +94,17 @@ thread_local! {
     pub static ASSET_METRICS: RefCell<BTreeMap<AssetId, AssetMetrics>> = const { RefCell::new(BTreeMap::new()) };
     pub static DOMAIN_POLICIES: RefCell<BTreeMap<BalanceDomain, DomainPolicy>> = const { RefCell::new(BTreeMap::new()) };
     pub static MIGRATION_PLANS: RefCell<BTreeMap<MigrationKey, MigrationPlan>> = const { RefCell::new(BTreeMap::new()) };
+    /// Account reassignment plans, keyed by the principal the account is moved
+    /// away from plus the controller-provided reassignment id.
+    pub static REASSIGNMENT_PLANS: RefCell<BTreeMap<ReassignmentKey, ReassignmentPlan>> = const { RefCell::new(BTreeMap::new()) };
+    /// Per-principal reassignment bookkeeping, read by every user-facing
+    /// mutation that can be suspended at an await (see
+    /// [`ReassignmentGuard`](crate::account::reassignment::ReassignmentGuard)).
+    /// Derived from [`REASSIGNMENT_PLANS`], so it is **not** persisted: the lock
+    /// flags are rebuilt in `post_upgrade` via [`rebuild_reassignment_marks`],
+    /// and generations restart from zero because no suspended call survives an
+    /// upgrade to revalidate against them.
+    pub static REASSIGNMENT_MARKS: RefCell<BTreeMap<User, ReassignmentMark>> = const { RefCell::new(BTreeMap::new()) };
 }
 
 /// Returns the cached transfer fee for `asset_id`, if one has been recorded.
@@ -157,6 +169,8 @@ pub fn save_state() {
         DOMAIN_POLICIES.with(|f| f.borrow().clone());
     let migration_plans: BTreeMap<MigrationKey, MigrationPlan> =
         MIGRATION_PLANS.with(|f| f.borrow().clone());
+    let reassignment_plans: BTreeMap<ReassignmentKey, ReassignmentPlan> =
+        REASSIGNMENT_PLANS.with(|f| f.borrow().clone());
     let state = StableState {
         config,
         positions,
@@ -180,6 +194,7 @@ pub fn save_state() {
         asset_metrics,
         domain_policies,
         migration_plans,
+        reassignment_plans: Some(reassignment_plans),
     };
 
     storage::stable_save((state,)).expect("Save failed");
@@ -225,6 +240,7 @@ pub fn restore_state() {
         asset_metrics,
         domain_policies,
         migration_plans,
+        reassignment_plans,
     } = state;
 
     POSITIONS.with(|p: &RefCell<PositionsMap>| {
@@ -260,6 +276,32 @@ pub fn restore_state() {
     ASSET_METRICS.with(|f| *f.borrow_mut() = asset_metrics);
     DOMAIN_POLICIES.with(|f| *f.borrow_mut() = domain_policies);
     MIGRATION_PLANS.with(|f| *f.borrow_mut() = migration_plans);
+    REASSIGNMENT_PLANS.with(|f| *f.borrow_mut() = reassignment_plans.unwrap_or_default());
+    rebuild_reassignment_marks();
+}
+
+/// Re-locks the principals of every reassignment that had not finalised when
+/// the canister was upgraded, so a resumed custody sweep still runs against a
+/// source account nobody can feed.
+///
+/// [`REASSIGNMENT_MARKS`] is a projection of [`REASSIGNMENT_PLANS`] and is not
+/// persisted; `restore_state` reconstructs it once the plans are loaded.
+pub(crate) fn rebuild_reassignment_marks() {
+    REASSIGNMENT_MARKS.with(|marks| {
+        let mut marks = marks.borrow_mut();
+        marks.clear();
+
+        REASSIGNMENT_PLANS.with(|plans| {
+            for plan in plans.borrow().values() {
+                if plan.status == PlanStatus::Finalised {
+                    continue;
+                }
+                for user in [plan.old_owner, plan.new_owner] {
+                    marks.entry(user).or_default().locked = true;
+                }
+            }
+        });
+    });
 }
 
 /// Records an executed trade in the per-series price-history index

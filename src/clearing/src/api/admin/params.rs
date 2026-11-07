@@ -68,3 +68,15 @@ pub struct UpdateDomainPolicyParams {
 pub struct RefreshIcrcAssetMetadataParams {
     pub asset_id: AssetId,
 }
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct ReassignAccountParams {
+    /// Controller-provided unique identifier. Replaying a call with the same id
+    /// resumes that reassignment (and returns `Ok` once it is complete) instead
+    /// of starting a second one.
+    pub reassignment_id: String,
+    /// The principal the account is moved away from.
+    pub old_owner: Principal,
+    /// The principal the account is moved to.
+    pub new_owner: Principal,
+}

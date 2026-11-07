@@ -209,9 +209,16 @@ Defined under [`.github/workflows/`](../../.github/workflows/):
 
 The `Prepare` composite action (`.github/actions/prepare`) installs
 the rust toolchain (`rust-toolchain.toml`), npm deps, `cargo-binstall`,
-`cargo-sort`, `shfmt`, `zizmor`, and `yq`. Touch
-[`dev-tools.json`](../../dev-tools.json) when you need to add or
-upgrade one of these.
+`cargo-sort`, `shfmt`, `zizmor`, and `yq`. Jobs that only build and
+test pass `lint-tools: 'false'` to skip everything after the rust
+toolchain. Touch [`dev-tools.json`](../../dev-tools.json) when you need
+to add or upgrade one of these.
+
+Cargo caches (`~/.cargo/registry`, `~/.cargo/git`, `target`) are keyed
+on their inputs only (`Cargo.lock`, `rust-toolchain.toml`, plus the
+build/download scripts for integration) — never on `github.sha` — and
+are saved from `main` only. Branches restore `main`'s entry; saving
+per commit or per branch fills the 10 GB repo quota and evicts it.
 
 ## 7. After CI fails
 
