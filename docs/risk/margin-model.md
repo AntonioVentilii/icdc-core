@@ -211,6 +211,24 @@ The Argentine peso needs its own treatment:
 
 Its margin is driven by stress scenarios rather than volatility: a step devaluation at least as large as December 2023 is a mandatory stress scenario, `stress_weight = 1`, and `k` starts at 2.
 
+### 9.5 Live prices
+
+Margin, mark-to-market and liquidation need a live index for every underlying, not only history. The guiding constraint is cost: the design picks the cheapest option that stays verifiable.
+
+| Option                                                                             | What it provides                                              | Cost (13-node subnet)                                                                                              | Limits                                                                                                   |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| Exchange Rate Canister (XRC)                                                       | Crypto rates at minute granularity; fiat rates **once a day** | 20M cycles per fiat/fiat or cached request, 260M when one asset is crypto or USDT (1B attached, the rest refunded) | No intraday FX; supported currency list to be checked for KRW, TWD, CLP, ARS                             |
+| HTTPS outcalls to a data API                                                       | Whatever the API provides                                     | Roughly 100M cycles per call, every node calls the API                                                             | Each of the 13 nodes hits the API, so free tiers run out 13 times faster; API keys sit in canister state |
+| Off-chain price pushers (the existing oracle mechanism with authorized principals) | Any source, at any frequency                                  | One batched update call per push, around 10 to 15M cycles                                                          | Trust rests on the pushers, mitigated below                                                              |
+
+Decision:
+
+1. **Live index: off-chain pushers.** Each pusher reads free public sources (crypto from Coinbase and Binance; FX from a free intraday feed for the G10 currencies and from the official daily fixings for the NDF currencies) and pushes all prices in one batched call. The canister accepts prices from several authorized pushers and uses the median, requiring at least two that agree within a tolerance. A pusher can run as a scheduled serverless job at no cost.
+2. **On-chain check: XRC once a day per underlying.** The daily XRC rate is appended to the history (section 9.2) and used as a sanity bound: if the pushed median drifts from it by more than a configured band, the underlying is treated as stale (section 5) until the sources agree again.
+3. **No HTTPS outcalls for live prices.** They cost more than pushers and multiply rate-limit usage by the number of nodes.
+
+Indicative cycle budget for the 20 underlyings of section 9.1: XRC daily sampling about 1.4B cycles per day, and one batched push per minute about 20B cycles per day, together well under 10T cycles (about 10 XDR) per year. Data licensing of each free source is checked before use.
+
 ## 10. Lifecycle
 
 ### 10.1 Pre-trade
@@ -283,7 +301,7 @@ Defaults are starting points to be calibrated per underlying (section 12). Only 
 Each phase is its own small, verifiable change.
 
 1. Price history per underlying: storage, the backfill endpoint with provenance, daily sampling of the oracle; EWMA volatility, floor, event calendar and manual multiplier.
-2. Mark price service: index (including a live FX source, open question 15.5), `Linear` mark, Black-76 for options in volatility time.
+2. Live prices (section 9.5: medianized pushers, daily XRC check) and the mark price service: index, `Linear` mark, Black-76 for options in volatility time.
 3. Option premium flow, and the short side of `Call`/`Put` corrected.
 4. Scenario engine: filtered historical simulation as the primary measure, the SPAN grid as the floor, the short option minimum; the account-level pre-trade IM check replaces `get_required_margin` for `Linear`, `Call` and `Put`.
 5. Heartbeat mark-to-market, MM check, liquidation and insurance fund.
@@ -307,7 +325,7 @@ No test exercises this path; the settlement tests set cashflows by hand. Phase 3
 2. Who governs the parameters long term: controllers, an SNS DAO, or a dedicated risk committee role?
 3. When the insurance fund is exhausted: socialized loss across profitable accounts, or auto-deleveraging of the most profitable opposite positions?
 4. Should carry (interest-rate differential) enter the `Linear` mark from day one for FX underlyings?
-5. The current live oracle (CoinGecko) covers crypto but not FX. Which live source provides FX index prices: the Exchange Rate Canister, or a market-data provider through HTTPS outcalls?
+5. Which free intraday FX feed the pushers use for the G10 currencies, subject to its licence terms (live-price architecture decided in section 9.5).
 
 ## 16. References
 
@@ -324,4 +342,5 @@ No test exercises this path; the settlement tests set cashflows by hand. Phase 3
 - Clark, I. J. (2011), _Foreign Exchange Option Pricing: A Practitioner's Guide_, Wiley: volatility time and event weights.
 - Board of Governors of the Federal Reserve System, _H.10 Foreign Exchange Rates_, via FRED (Federal Reserve Bank of St. Louis).
 - European Central Bank, _Euro foreign exchange reference rates_.
+- DFINITY, _Exchange rate canister_ documentation and source (`github.com/dfinity/exchange-rate-canister`): request cost and data cadence.
 - Deribit, _Standard Margin_ and _Portfolio Margin_ documentation.
