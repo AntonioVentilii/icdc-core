@@ -152,3 +152,108 @@ fn exhaustive_settlement_journey() {
     // Total fees: 0.45 USD
     assert_eq!(total_final_cash, -4_500);
 }
+
+/// End-to-end forward (Linear) round-trip: register a `Linear` series, match a
+/// forward at an agreed rate, settle above it, and assert the long earns a
+/// signed profit while the short takes the mirror loss.
+#[test]
+fn linear_forward_settles_with_signed_pnl() {
+    let env = TestSetup::with_icp();
+    // Only test_user(54..=58) are pre-funded with ICP by the harness.
+    let long = test_user(54);
+    let short = test_user(55);
+
+    env.setup_vusd();
+
+    // Forward on USD/BRL with a $20.00 settlement cap.
+    let s = env.add_linear_series("USDBRL", 20_000_000, BalanceDomain::Settlement);
+
+    // Fund both sides (1000 ICP = $15,000 each; short margin = 100 * ($20 - $5) = $1,500).
+    let deposit = Nat::from(100_000_000_000_u128);
+    for user in [long, short] {
+        env.deposit_collateral(
+            user,
+            "ICP",
+            deposit.clone(),
+            Some(BalanceDomain::Settlement),
+        );
+    }
+    env.pic.tick();
+
+    // `long` buys 100 from `short` at the agreed forward rate $5.00.
+    let matched: SubmitMatchedTradeResult = env
+        .clearing
+        .update(
+            env.controller,
+            "submit_matched_trade",
+            (SubmitMatchedTradeParams {
+                trade_id: TradeId::from("lin_fwd".to_owned()),
+                series_id: s.clone(),
+                outcome_id: None,
+                buyer: long.into(),
+                seller: short.into(),
+                qty: 100,
+                price: Price::new(5_000_000, 6),
+                buyer_unblock_amount: None,
+                seller_unblock_amount: None,
+            },),
+        )
+        .unwrap();
+    assert!(matches!(matched, SubmitMatchedTradeResult::Ok(_)));
+    env.pic.tick();
+
+    // Settle at $8.00: long gains ~100 * ($8 - $5) = +$300, short loses the mirror.
+    let res: SettleSeriesResult = env
+        .clearing
+        .update(
+            env.controller,
+            "settle_series",
+            (SettleSeriesParams {
+                series_id: s.clone(),
+                settlement: SettlementInput::Price(Price::new(8_000_000, 6)),
+            },),
+        )
+        .unwrap();
+    assert!(matches!(res, SettleSeriesResult::Ok));
+    env.pic.tick();
+
+    let get_cash = |user: Principal| -> i128 {
+        let resp: GetAccountStateResult = env
+            .clearing
+            .update(
+                user,
+                "get_account_state",
+                (GetAccountStateParams {
+                    refresh: None,
+                    domain: Some(BalanceDomain::Settlement),
+                },),
+            )
+            .unwrap();
+        match resp {
+            GetAccountStateResult::Ok(r) => r.state.get_cash_balance_usd(BalanceDomain::Settlement),
+            GetAccountStateResult::Err(e) => panic!("Account state error: {e:?}"),
+        }
+    };
+
+    let long_pnl = get_cash(long);
+    let short_pnl = get_cash(short);
+
+    // Delta-one payoff S_T - F: long profits, short takes the mirror loss.
+    assert!(long_pnl > 0, "long should profit, got {long_pnl}");
+    assert!(short_pnl < 0, "short should lose, got {short_pnl}");
+    // Magnitude ~ $300.00 (= 3_000_000 in 4-dp USD), within settlement fees.
+    assert!(
+        (long_pnl - 3_000_000).abs() < 30_000,
+        "long PnL should be ~ +$300, got {long_pnl}"
+    );
+    assert!(
+        (short_pnl + 3_000_000).abs() < 30_000,
+        "short PnL should be ~ -$300, got {short_pnl}"
+    );
+    // The two legs cancel except for fees paid out of the pool (zero-sum minus fees).
+    assert!(
+        long_pnl + short_pnl <= 0,
+        "net across counterparties must be -fees, got {}",
+        long_pnl + short_pnl
+    );
+}
