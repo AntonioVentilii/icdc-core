@@ -10,7 +10,7 @@ Today the clearing engine collateralizes every position up front by its maximum 
 
 - A short forward or a short call has no finite maximum loss, so it cannot be collateralized at all without inventing an artificial cap.
 - Capital efficiency is poor: a participant posts the worst case instead of a realistic close-out loss.
-- The short side of `Call` and `Put` is currently accounted with the wrong sign, both at settlement and in the per-trade re-mark (see section 13).
+- The short side of `Call` and `Put` is currently accounted with the wrong sign, both at settlement and in the per-trade re-mark (see section 14).
 
 This document defines a risk-based margin model in line with how listed-derivatives central counterparties and Deribit operate: participants post **initial margin** sized to the loss a position could suffer while it is being closed out, at a high confidence level; positions are **marked to market** continuously; accounts that fall below **maintenance margin** are **liquidated**; an **insurance fund** absorbs what liquidation cannot recover.
 
@@ -21,9 +21,9 @@ We do not invent a methodology. We adopt published, industry-standard methods an
 1. **Risk based, not loss based.** Margin covers a high-confidence loss over the close-out horizon, not the theoretical maximum.
 2. **One method for every instrument.** Positions are revalued under a set of scenarios and margin is taken from the resulting loss distribution. No per-instrument formulas.
 3. **Portfolio based.** Positions on the same underlying are revalued together, so offsetting positions (a covered call, a calendar spread) are recognized.
-4. **Transparent and reproducible.** Every parameter lives on chain and is queryable. Anyone can recompute any account's margin from public data.
+4. **Transparent and reproducible.** Every parameter and every historical series lives on chain and is queryable. Anyone can recompute any account's margin from public data.
 5. **Conservative and anti-procyclical.** Margins must not collapse in calm markets and then spike in a crisis. Volatility has a floor and stress scenarios always apply.
-6. **Published methods, our parameters.** Every choice below cites its source (section 15).
+6. **Published methods, our parameters.** Every choice below cites its source (section 16).
 
 ## 3. Concepts
 
@@ -41,7 +41,7 @@ Account rules:
 
 - A trade that increases risk is accepted only if `equity_after_trade >= IM_after_trade`.
 - A trade that only reduces risk is always accepted.
-- If `equity < MM`, the account enters liquidation (section 9.4).
+- If `equity < MM`, the account enters liquidation (section 10.4).
 
 ## 4. Instrument coverage
 
@@ -49,11 +49,13 @@ Account rules:
 | ------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Linear` (forward, NDF, dated future) | Yes                    | No settlement cap. Replaces the bounded design of PR #86.                                                                                                                             |
 | `Call`, `Put`                         | Yes                    | The buyer pays the premium at trade time and has no further margin. Sellers are margined.                                                                                             |
-| `Binary`, `Categorical`               | No, unchanged          | Loss is bounded by one unit per contract, so full collateralization stays correct and simple, as on prediction markets. May move into the scenario engine later (open question 14.1). |
+| `Binary`, `Categorical`               | No, unchanged          | Loss is bounded by one unit per contract, so full collateralization stays correct and simple, as on prediction markets. May move into the scenario engine later (open question 15.1). |
+
+Every contract on ICDC settles in cash in USD, so for us any currency forward is economically an NDF. Whether a currency is "NDF" in the wider market only matters for where its fixing comes from and for where offshore demand is concentrated.
 
 ## 5. Mark prices
 
-- **Index `S`**: the existing oracle price. If the price is older than `stale_after`, the underlying is frozen for risk-increasing trades and its margin is computed with `stale_multiplier`.
+- **Index `S`**: the oracle price. If it is older than `stale_after`, the underlying is frozen for risk-increasing trades and its margin is computed with `stale_multiplier`.
 - **`Linear`**: mark `F = S x (1 + basis)`, with `basis = 0` initially. Carry (the interest-rate differential that separates an FX forward from spot) is a later refinement, either as a configured rate pair or as a basis observed in the order book.
 - **`Call`, `Put`**: Black-76 on `F` with the model volatility of section 6 and time to expiry measured in **volatility time** (section 6.3). Implied volatility from the order book may replace the model volatility later.
 
@@ -67,7 +69,7 @@ On log returns `r` of the index, sampled at a fixed interval:
 sigma2_t = lambda x sigma2_(t-1) + (1 - lambda) x r_(t-1)^2
 ```
 
-Default `lambda = 0.94` for daily sampling (RiskMetrics). EWMA reacts within days to a change in regime while needing no fitting, which keeps it reproducible on chain.
+Default `lambda = 0.94` for daily sampling (RiskMetrics). Recent returns weigh more, with weights decaying exponentially. EWMA reacts within days to a change in regime while needing no fitting, which keeps it reproducible on chain. It is also the volatility used to rescale history in section 7.1.
 
 ### 6.2 Floor (anti-procyclicality)
 
@@ -82,7 +84,7 @@ sigma_used = max(sigma_ewma, floor_ratio x sigma_long_run)
 Foreign-exchange option desks do not treat every day as equal. Each future interval `i` carries a weight `w_i`:
 
 - normal trading interval: `w = 1`;
-- weekends and holidays: lower (for example `0.3` for FX; crypto trades continuously and keeps `1`);
+- weekends and holidays: `weekend_weight` (for example `0.3` for FX; crypto trades continuously and keeps `1`);
 - scheduled events: higher (for example `2` to `5` for a central-bank rate decision, a payrolls release or an election).
 
 Variance over a horizon is then
@@ -91,7 +93,7 @@ Variance over a horizon is then
 variance(horizon) = sigma_used^2 x sum(w_i x dt_i)   over the intervals i in the horizon
 ```
 
-Each underlying has an **event calendar**: a list of `{ time, weight, label }` entries maintained by the risk administrator and stored on chain. When an event enters the margin period of risk, the price scan range widens and margin rises **before** the event; it reverts once the event has passed. The same weights define the volatility time used to price options.
+Each underlying has an **event calendar**: a list of `{ time, weight, label }` entries maintained by the risk administrator and stored on chain. When an event enters the margin period of risk, margin rises **before** the event; it reverts once the event has passed. The same weights define the volatility time used to price options. For a currency pair, the calendar is the union of both currencies' calendars (an ECB decision moves EUR/USD and EUR/JPY alike).
 
 ### 6.4 Manual risk multiplier
 
@@ -105,7 +107,16 @@ A jump that no calendar announced cannot be forecast. It is covered in layers: s
 
 For an account, positions are grouped by underlying. Each group is revalued at mark under every scenario `s`, giving `loss_s = value_now - value_s`. Offsets inside a group are recognized; no offsets are recognized across underlyings at first.
 
-### 7.1 SPAN grid (always computed)
+### 7.1 Filtered historical simulation (primary measure)
+
+1. Take the last `hs_lookback` returns of the index over the MPOR horizon, including a stressed period.
+2. Rescale each return by `sigma_now / sigma_then` (both EWMA, section 6.1), so history is replayed at today's volatility. Event weights in the coming MPOR scale `sigma_now` up, as in section 6.3.
+3. Revalue the group under each rescaled return.
+4. Take the tail measure set by `risk_measure`: by default Expected Shortfall at 97.5%, the measure that replaced 99% VaR in the Basel market-risk framework because it measures the size of the tail and not only its threshold. VaR at 99% is the alternative setting.
+
+This requires at least `hs_min_observations` returns. The historical backfill of section 9.2 provides them from day one for every underlying in section 9.1.
+
+### 7.2 SPAN grid (floor)
 
 Price scan range and volatility scan range:
 
@@ -119,59 +130,102 @@ The 16 classic SPAN scenarios:
 - price moves of `0`, `+-1/3`, `+-2/3` and `+-1` times `PSR`, each combined with volatility up and down by `VSR` (14 scenarios);
 - two extreme moves of `+-3` times `PSR`, of which 35% of the loss counts (2 scenarios).
 
-`grid_risk = max(loss_s)` over the 16 scenarios.
+`grid_risk = max(loss_s)` over the 16 scenarios. The grid protects against a history that has been too calm, and it is the only measure for an underlying whose history is still shorter than `hs_min_observations`.
 
-A **short option minimum** applies per short option contract (`short_option_min x S`), because a deep out-of-the-money option can show no loss on the grid while still carrying tail risk.
-
-### 7.2 Filtered historical simulation (when history allows)
-
-Once an underlying has at least `hs_min_observations` returns:
-
-1. take the last `hs_lookback` returns over the MPOR horizon, including the stressed period;
-2. rescale each one by `sigma_now / sigma_then`, so history is replayed at today's volatility;
-3. revalue the group under each rescaled return;
-4. take Expected Shortfall at 97.5%, the measure that replaced 99% VaR in the Basel market-risk framework because it looks at the size of the tail and not only its threshold.
+A **short option minimum** applies per short option contract (`short_option_min x S`), because a deep out-of-the-money option can show no loss in any scenario while still carrying tail risk.
 
 ### 7.3 Stress scenarios
 
-A fixed list per underlying of historical extremes, for example EUR/CHF on 15 January 2015 or BTC on 12 March 2020, applied as price shocks with weight `stress_weight`.
+A fixed list per underlying of historical extremes applied as price shocks with weight `stress_weight`, for example:
+
+- EUR/CHF on 15 January 2015, when the Swiss National Bank removed the 1.20 floor;
+- BTC on 12 March 2020;
+- the official ARS rate in December 2023 (section 9.4).
 
 ### 7.4 Margin
 
 ```
-IM_group   = k x max(grid_risk, hs_risk, stress_weight x stress_risk, short_option_minimum)
+IM_group   = k x max(hs_risk, grid_risk, stress_weight x stress_risk, short_option_minimum)
 IM_account = sum(IM_group) over underlyings
 MM_account = mm_ratio x IM_account
 ```
 
-## 8. Why both SPAN and historical simulation
+## 8. Why historical simulation leads and SPAN is the floor
 
-|                                          | SPAN grid                                    | Filtered historical simulation     |
-| ---------------------------------------- | -------------------------------------------- | ---------------------------------- |
-| Source of scenarios                      | Stylized moves from volatility               | Real past moves, rescaled to today |
-| Data needed                              | Only a volatility estimate                   | A long, clean price history        |
-| Captures fat tails and real correlations | Partly, through extreme moves                | Yes                                |
-| Transparency                             | Very high, 16 scenarios                      | Lower, hundreds of scenarios       |
-| Compute per account                      | Low                                          | Higher                             |
-| Used by                                  | CME (historically), Deribit portfolio margin | CME SPAN 2, Eurex Prisma, LCH      |
+|                                          | Filtered historical simulation     | SPAN grid                                    |
+| ---------------------------------------- | ---------------------------------- | -------------------------------------------- |
+| Source of scenarios                      | Real past moves, rescaled to today | Stylized moves from volatility               |
+| Data needed                              | A long, clean price history        | Only a volatility estimate                   |
+| Captures fat tails and real correlations | Yes                                | Partly, through extreme moves                |
+| Transparency                             | Lower, hundreds of scenarios       | Very high, 16 scenarios                      |
+| Compute per account                      | Higher                             | Low                                          |
+| Used by                                  | CME SPAN 2, Eurex Prisma, LCH      | CME (historically), Deribit portfolio margin |
 
-Taking the maximum of the two, as Eurex Prisma does with its stress component, gives the accuracy of historical simulation where data exists and a transparent floor everywhere, including on day one for a new underlying.
+Historical simulation is the current standard of the large central counterparties and captures the real shape of the tails, so it is the primary measure. Taking the maximum with the SPAN grid, as Eurex Prisma does with its stress component, keeps a transparent floor that still holds when recent history has been unusually quiet.
 
-## 9. Lifecycle
+## 9. Underlyings and historical data
 
-### 9.1 Pre-trade
+### 9.1 Initial list
+
+Currencies are stored as one series each against USD. Any cross is derived from them, for example `GBP/JPY = GBP/USD x USD/JPY`, so the 28 crosses among the G10 currencies need no history of their own. Crosses are only consistent if both legs come from the same source and fixing time, which is why every FRED currency below uses the same daily fix.
+
+| Group         | Underlyings                                | History source                                                                            | Notes                                                                 |
+| ------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| Crypto        | BTC, ETH, SOL, ICP (vs USD)                | Coinbase Exchange public daily candles (USD pairs); Binance (USDT pairs) as a cross-check | Continuous calendar                                                   |
+| G10           | EUR, GBP, JPY, CHF, AUD, CAD, NZD (vs USD) | Federal Reserve H.10 daily rates via FRED; ECB reference rates as a cross-check           | All 28 crosses derived                                                |
+| Asia          | CNY, KRW, TWD, INR, SGD (vs USD)           | Federal Reserve H.10 via FRED                                                             | KRW, TWD, INR and CNY trade offshore as NDFs; see 9.3 for CNY and SGD |
+| Latin America | BRL, MXN (vs USD)                          | Federal Reserve H.10 via FRED                                                             | BRL trades offshore as an NDF                                         |
+| Latin America | CLP (vs USD)                               | Banco Central de Chile, "dólar observado" (also the NDF fixing)                           | Different fixing time; quoted against USD only                        |
+| Latin America | ARS (vs USD)                               | Banco Central de la República Argentina, official wholesale rate (Communication A 3500)   | Special regime, section 9.4                                           |
+
+FRED series identifiers: `DEXUSEU` (EUR), `DEXUSUK` (GBP), `DEXJPUS` (JPY), `DEXSZUS` (CHF), `DEXUSAL` (AUD), `DEXCAUS` (CAD), `DEXUSNZ` (NZD), `DEXCHUS` (CNY), `DEXKOUS` (KRW), `DEXTAUS` (TWD), `DEXINUS` (INR), `DEXSIUS` (SGD), `DEXBZUS` (BRL), `DEXMXUS` (MXN). Some are quoted as USD per unit and others as units per USD; the loader normalizes every series to USD per unit of currency. All identifiers, and the ARS and CLP sources, are confirmed against the providers before the backfill runs.
+
+Excluded for now:
+
+- **HKD**: hard peg to USD. Its volatility is near zero and its real risk is a break of the peg, which only a stress scenario can express. It can be added on that basis later.
+- **CNH** (offshore yuan): no free official history on the same fixing as the other currencies.
+
+### 9.2 Loading and provenance
+
+1. **Backfill, once.** An off-chain script downloads each series from its source, normalizes it and uploads it in chunks through a controller-only endpoint. Each upload records the source, the series identifier, the first and last date, and a SHA-256 hash of the canonical data, so anyone can re-download from the public source and check what the canister holds.
+2. **Then, on chain.** After the backfill the canister samples its own oracle once per `sampling_interval` and appends to the series.
+3. **Gaps.** FX holidays are not filled in. Returns are computed between consecutive observations and weighted by the volatility time that elapsed between them.
+4. **Later.** The Internet Computer's Exchange Rate Canister may become an on-chain source once its historical depth has been verified.
+
+Footprint: ten years of daily data is about 3,650 values per series.
+
+### 9.3 Calendars and managed regimes
+
+- **Crypto** trades continuously: every day has weight 1.
+- **FX** is closed from Friday evening to Sunday evening New York time: weekends and holidays carry `weekend_weight`.
+- **CHF** was held at a 1.20 floor against the euro from September 2011 to 15 January 2015. That period understates CHF volatility, so the floor and the January 2015 stress scenario dominate it.
+- **CNY** trades within a band around the People's Bank of China daily central parity, and **SGD** within the Monetary Authority of Singapore policy band. Both get a higher `floor_ratio` and mandatory stress scenarios, and their central-bank decisions go into the event calendar.
+
+### 9.4 ARS
+
+The Argentine peso needs its own treatment:
+
+- the official rate is administered and moves in small daily steps, so its historical volatility badly understates the risk;
+- it is devalued in steps: in December 2023 the official rate lost more than half its value in a single day;
+- several exchange rates coexist (official, "blue", CCL), so every ARS contract's resolution clause names the fixing exactly.
+
+Its margin is driven by stress scenarios rather than volatility: a step devaluation at least as large as December 2023 is a mandatory stress scenario, `stress_weight = 1`, and `k` starts at 2.
+
+## 10. Lifecycle
+
+### 10.1 Pre-trade
 
 Order placement and execution check `equity_after_trade >= IM_after_trade` at account level. This replaces the per-position `get_required_margin` reservation.
 
-### 9.2 Option premium
+### 10.2 Option premium
 
 The option buyer pays the premium to the seller at trade time. Today neither side pays and both lock collateral; this changes.
 
-### 9.3 Mark-to-market
+### 10.3 Mark-to-market
 
 On a heartbeat (the timer mechanism already used by settlement), every open position is revalued at mark. Unrealized PnL counts in equity immediately; a daily settlement moves it into cash as variation margin. On the Internet Computer the heartbeat processes accounts in bounded batches so each call stays within its instruction limit.
 
-### 9.4 Liquidation
+### 10.4 Liquidation
 
 When `equity < MM`:
 
@@ -180,62 +234,64 @@ When `equity < MM`:
 3. a liquidation fee goes to the insurance fund;
 4. liquidation stops as soon as `equity >= MM`.
 
-### 9.5 Insurance fund
+### 10.5 Insurance fund
 
-The existing `INSURANCE_FUND` (already funded by settlement fees) covers any negative equity left after liquidation. What happens when it is exhausted is open question 14.3.
+The existing `INSURANCE_FUND` (already funded by settlement fees) covers any negative equity left after liquidation. What happens when it is exhausted is open question 15.3.
 
-### 9.6 Expiry
+### 10.6 Expiry
 
 The existing settlement pipeline is kept: positions settle against the oracle fixing and their margin is released.
 
-## 10. Parameters
+## 11. Parameters
 
 Per underlying, all stored on chain and readable through a query endpoint:
 
-| Parameter             | Default                  | Meaning                                               |
-| --------------------- | ------------------------ | ----------------------------------------------------- |
-| `lambda`              | 0.94                     | EWMA decay                                            |
-| `sampling_interval`   | 1 day                    | Return sampling interval                              |
-| `floor_ratio`         | 0.75                     | Volatility floor as a fraction of long-run volatility |
-| `long_run_lookback`   | 10 years or full history | Includes a stressed period                            |
-| `mpor`                | 2 days                   | Margin period of risk                                 |
-| `confidence`          | 99% (`z = 2.33`)         | Grid confidence                                       |
-| `vsr_ratio`           | 0.25                     | Volatility scan range as a fraction of volatility     |
-| `short_option_min`    | 0.01                     | Per short option contract, as a fraction of `S`       |
-| `hs_lookback`         | 2 years                  | Historical simulation window                          |
-| `hs_min_observations` | 250                      | Below this, historical simulation is skipped          |
-| `stress_weight`       | 0.5                      | Weight of fixed stress scenarios                      |
-| `mm_ratio`            | 0.8                      | Maintenance as a fraction of initial                  |
-| `k`                   | 1.0                      | Manual risk multiplier                                |
-| `event_calendar`      | empty                    | Scheduled events with weights                         |
-| `stale_after`         | 15 minutes               | Oracle staleness bound                                |
-| `stale_multiplier`    | 1.5                      | Margin multiplier while the oracle is stale           |
-| `liquidation_fee`     | 0.5% of notional         | Paid to the insurance fund                            |
+| Parameter             | Default                         | Meaning                                               |
+| --------------------- | ------------------------------- | ----------------------------------------------------- |
+| `lambda`              | 0.94                            | EWMA decay                                            |
+| `sampling_interval`   | 1 day                           | Return sampling interval                              |
+| `weekend_weight`      | 0.3 for FX, 1 for crypto        | Volatility-time weight of closed days                 |
+| `floor_ratio`         | 0.75 (higher for CNY, SGD)      | Volatility floor as a fraction of long-run volatility |
+| `long_run_lookback`   | 10 years or full history        | Includes a stressed period                            |
+| `mpor`                | 2 days                          | Margin period of risk                                 |
+| `risk_measure`        | ES 97.5% (alternative: VaR 99%) | Tail measure of historical simulation                 |
+| `hs_lookback`         | 2 years                         | Historical simulation window                          |
+| `hs_min_observations` | 250                             | Below this, only the grid and stress apply            |
+| `confidence`          | 99% (`z = 2.33`)                | Grid confidence                                       |
+| `vsr_ratio`           | 0.25                            | Volatility scan range as a fraction of volatility     |
+| `short_option_min`    | 0.01                            | Per short option contract, as a fraction of `S`       |
+| `stress_weight`       | 0.5 (1 for ARS)                 | Weight of fixed stress scenarios                      |
+| `mm_ratio`            | 0.8                             | Maintenance as a fraction of initial                  |
+| `k`                   | 1.0 (2 for ARS)                 | Manual risk multiplier                                |
+| `event_calendar`      | empty                           | Scheduled events with weights                         |
+| `stale_after`         | 15 minutes                      | Oracle staleness bound                                |
+| `stale_multiplier`    | 1.5                             | Margin multiplier while the oracle is stale           |
+| `liquidation_fee`     | 0.5% of notional                | Paid to the insurance fund                            |
 
 Global: `heartbeat_interval`, `global_k`.
 
-Defaults are starting points to be calibrated per underlying (section 11). Only the risk administrator (a controller today) can change them, and every change emits an event.
+Defaults are starting points to be calibrated per underlying (section 12). Only the risk administrator (a controller today) can change them, and every change emits an event.
 
-## 11. Calibration and backtesting
+## 12. Calibration and backtesting
 
 - Daily backtest per underlying: count the days on which the realized loss over the MPOR exceeded IM. At 99% the expected breach rate is 1%; the Kupiec proportion-of-failures test decides whether the observed rate is acceptable.
 - Breaches beyond tolerance trigger a parameter review.
 - Margin levels are tracked over time to detect procyclical swings.
 
-## 12. Implementation phases
+## 13. Implementation phases
 
 Each phase is its own small, verifiable change.
 
-1. Oracle price history per underlying, EWMA volatility, floor, event calendar and manual multiplier, with storage and admin endpoints.
-2. Mark price service: index, `Linear` mark, Black-76 for options in volatility time.
+1. Price history per underlying: storage, the backfill endpoint with provenance, daily sampling of the oracle; EWMA volatility, floor, event calendar and manual multiplier.
+2. Mark price service: index (including a live FX source, open question 15.5), `Linear` mark, Black-76 for options in volatility time.
 3. Option premium flow, and the short side of `Call`/`Put` corrected.
-4. Scenario engine with the SPAN grid and short option minimum; the account-level pre-trade IM check replaces `get_required_margin` for `Linear`, `Call` and `Put`.
+4. Scenario engine: filtered historical simulation as the primary measure, the SPAN grid as the floor, the short option minimum; the account-level pre-trade IM check replaces `get_required_margin` for `Linear`, `Call` and `Put`.
 5. Heartbeat mark-to-market, MM check, liquidation and insurance fund.
-6. Filtered historical simulation and stress scenarios.
+6. Stress scenario library per underlying (CHF 2015, crypto 2020 and 2022, ARS 2023).
 7. `Linear` forwards and NDFs on top of the new engine, without `settlement_cap` (the reworked PR #86).
 8. Offsets across underlyings.
 
-## 13. Known defect this model removes
+## 14. Known defect this model removes
 
 In the current code the short side of `Call` and `Put` is accounted like the long side:
 
@@ -245,14 +301,15 @@ In the current code the short side of `Call` and `Put` is accounted like the lon
 
 No test exercises this path; the settlement tests set cashflows by hand. Phase 3 fixes it with tests that prove the corrected behavior.
 
-## 14. Open questions
+## 15. Open questions
 
 1. Should `Binary` and `Categorical` stay fully collateralized, or move into the scenario engine?
 2. Who governs the parameters long term: controllers, an SNS DAO, or a dedicated risk committee role?
 3. When the insurance fund is exhausted: socialized loss across profitable accounts, or auto-deleveraging of the most profitable opposite positions?
 4. Should carry (interest-rate differential) enter the `Linear` mark from day one for FX underlyings?
+5. The current live oracle (CoinGecko) covers crypto but not FX. Which live source provides FX index prices: the Exchange Rate Canister, or a market-data provider through HTTPS outcalls?
 
-## 15. References
+## 16. References
 
 - CME Group, _CME SPAN: Standard Portfolio Analysis of Risk_, methodology overview.
 - CME Group, _SPAN 2_ framework documentation.
@@ -265,4 +322,6 @@ No test exercises this path; the settlement tests set cashflows by hand. Phase 3
 - Kupiec, P. (1995), "Techniques for verifying the accuracy of risk measurement models", _Journal of Derivatives_.
 - Black, F. (1976), "The pricing of commodity contracts", _Journal of Financial Economics_.
 - Clark, I. J. (2011), _Foreign Exchange Option Pricing: A Practitioner's Guide_, Wiley: volatility time and event weights.
+- Board of Governors of the Federal Reserve System, _H.10 Foreign Exchange Rates_, via FRED (Federal Reserve Bank of St. Louis).
+- European Central Bank, _Euro foreign exchange reference rates_.
 - Deribit, _Standard Margin_ and _Portfolio Margin_ documentation.
