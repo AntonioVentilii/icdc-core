@@ -39,9 +39,9 @@ impl GroupId {
 /// Groups are the building blocks of restricted trading access.
 /// A group has three roles:
 ///
-/// - **Creator** — immutable, recorded at creation, always treated as an admin.
-/// - **Admins** — can manage other admins, manage members, update metadata, and delete the group.
-/// - **Members** — can trade on series restricted to this group, nothing else.
+/// - **Creator**: immutable, recorded at creation, always treated as an admin.
+/// - **Admins**: can manage other admins, manage members, update metadata, and delete the group.
+/// - **Members**: can trade on series restricted to this group, nothing else.
 ///
 /// The `admins` and `members` sets are independent: an admin is NOT automatically
 /// a member. If an admin should also trade, they must appear in both sets.
@@ -93,10 +93,10 @@ pub struct Group {
 /// # Combining policies
 ///
 /// A series may carry multiple policies simultaneously. For example:
-/// - `[Open]` — open to everyone (default).
-/// - `[Restricted { groups: [g1, g2] }]` — only members of g1 or g2.
-/// - `[Open, Restricted { groups: [g1] }]` — open to everyone *and* additionally tagged as
-///   belonging to g1 (useful for discovery/UI filtering).
+/// - `[Open]`: open to everyone (default).
+/// - `[Restricted { groups: [g1, g2] }]`: only members of g1 or g2.
+/// - `[Open, Restricted { groups: [g1] }]`: open to everyone *and* additionally tagged as belonging
+///   to g1 (useful for discovery/UI filtering).
 ///
 /// # Extensibility
 ///

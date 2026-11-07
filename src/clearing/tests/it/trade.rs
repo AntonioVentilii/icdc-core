@@ -847,11 +847,11 @@ fn expired_series_rejects_new_orders() {
 /// This is the load-bearing half of the `SeriesAccess` split: redemption is the
 /// only way to release reserved margin before settlement runs, and withdrawals
 /// are refused while equity sits below reserved margin. Settlement is
-/// oracle-triggered, so the post-expiry gap is unbounded — gating redemption
+/// oracle-triggered, so the post-expiry gap is unbounded; gating redemption
 /// would strand collateral for as long as it lasted.
 ///
-/// The call still fails — the fixture is a binary series and redemption is
-/// categorical-only — but it fails *inside* `redeem_complete_set_logic` rather
+/// The call still fails (the fixture is a binary series and redemption is
+/// categorical-only), but it fails *inside* `redeem_complete_set_logic` rather
 /// than at the window gate. Asserting the specific `InvalidInput` rather than
 /// merely "not `SeriesExpired`" is deliberate: it proves the request reached the
 /// redemption body, so the test would catch the path being closed earlier.

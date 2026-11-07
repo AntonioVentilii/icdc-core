@@ -28,7 +28,7 @@ fn trade(event_id: u64, series_id: &SeriesId, value: u128, decimals: u8, qty: i1
     }
 }
 
-/// Seeds `EVENTS` and rebuilds the per-series trade index from it — the same
+/// Seeds `EVENTS` and rebuilds the per-series trade index from it, the same
 /// projection `post_upgrade` performs.
 fn seed(events: Vec<Event>) {
     EVENTS.with(|e| {
@@ -121,7 +121,7 @@ fn incrementally_indexed_trades_accumulate() {
     let series = SeriesId::from("series".to_owned());
 
     // Start from a clean projection, then fold trades in via the live execution
-    // path (`index_executed_trade`) rather than a rebuild — the aggregate the
+    // path (`index_executed_trade`) rather than a rebuild: the aggregate the
     // query reads must match either route.
     seed(vec![]);
 

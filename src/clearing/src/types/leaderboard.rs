@@ -11,7 +11,7 @@ const NANOS_PER_DAY: u64 = 86_400_000_000_000;
 /// has a well-defined immediately-preceding period (the "prior window") for the
 /// ↑/↓ rank deltas the front end renders:
 ///
-/// - [`Week`](LeaderboardWindow::Week): an ISO week — Monday 00:00:00 UTC through the following
+/// - [`Week`](LeaderboardWindow::Week): an ISO week, Monday 00:00:00 UTC through the following
 ///   Sunday. (Unix epoch day 0, 1970-01-01, was a Thursday, hence the `+ 3` Monday alignment
 ///   below.)
 /// - [`Month`](LeaderboardWindow::Month): a calendar month in UTC.
@@ -84,12 +84,12 @@ impl LeaderboardWindow {
 
 /// Per-principal aggregate of realized settlement `PnL` within one
 /// `(window, period)` bucket. This is the maintained index value, not a Candid
-/// type — the query projects it into a [`LeaderboardEntry`].
+/// type; the query projects it into a [`LeaderboardEntry`].
 ///
 /// [`LeaderboardEntry`]: crate::api::leaderboard::results::LeaderboardEntry
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PnlAggregate {
-    /// Net realized `PnL` over the period, in internal USD (`vUSD`) base units —
+    /// Net realized `PnL` over the period, in internal USD (`vUSD`) base units:
     /// the signed sum of each settlement's `cashflow_usd`.
     pub realized_pnl: i128,
     /// Number of settled positions contributing to this aggregate.

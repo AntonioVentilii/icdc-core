@@ -175,7 +175,7 @@ pub fn get_positions() -> Vec<Position> {
 /// Aggregates, for a series, the long/short lean of a supplied set of
 /// principals, broken down per outcome.
 ///
-/// The clearing layer ascribes no meaning to the set — it is just a list of
+/// The clearing layer ascribes no meaning to the set: it is just a list of
 /// principals the caller passes in; how it is assembled is a concern of the
 /// consuming layer-2 / application, not of clearing.
 ///
@@ -219,7 +219,7 @@ fn aggregate_lean_impl(positions: &PositionsMap, params: AggregateLeanParams) ->
     // POSITIONS is keyed by `(User, SeriesId, Option<OutcomeId>)`, so one user's
     // entries for a given series form a contiguous run. Instead of scanning the
     // whole map and filtering, seek straight to each requested user's run with a
-    // range query and stop as soon as the key leaves that user/series — so
+    // range query and stop as soon as the key leaves that user/series, so
     // unrequested users and unrelated series are never visited, and each user is
     // settled in a single pass (no re-checking once counted).
     for &user in &requested {

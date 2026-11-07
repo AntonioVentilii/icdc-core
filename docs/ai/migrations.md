@@ -15,7 +15,7 @@ Every canister persists its heap state to stable memory with **candid**
 
 So if you add a compulsory (non-`opt`) field to a persisted type, the next
 upgrade decodes the _old_ bytes (which lack the field) against the _new_ type
-and **traps in `post_upgrade` — bricking the canister / losing state**. Adding
+and **traps in `post_upgrade`, bricking the canister / losing state**. Adding
 an `opt` field is safe (candid defaults it to `null`); adding a non-`opt` field,
 renaming, or changing a field type is **not** and requires a migration.
 
@@ -64,12 +64,12 @@ domain migrations are permanent product features.
 
 The compulsory `Series::resolution` field was added with:
 
-- `shared::migrations` — `LegacySeries` (pre-`resolution` shape),
+- `shared::migrations`: `LegacySeries` (pre-`resolution` shape),
   `resolution_from_description` (copies `description.plain`, else the
   `"no resolution data"` placeholder), and `upgrade_series`.
-- `registry::migrations` — `LegacyStableStateV{4,3,2}` + `upgrade_series_map`,
+- `registry::migrations`: `LegacyStableStateV{4,3,2}` + `upgrade_series_map`,
   wired into `registry::memory::restore_state` after the `StableStateV5` attempt.
-- `clearing::migrations` — `LegacyStableState` + `into_current`, wired into
+- `clearing::migrations`: `LegacyStableState` + `into_current`, wired into
   `clearing::memory::restore_state` as the fallback decode.
 
 These are one-shot and slated for deletion once all canisters are past the
@@ -77,7 +77,7 @@ introducing release.
 
 ## Checklist for a schema change
 
-- [ ] Is the new field `opt`? If yes, no migration needed — just add it.
+- [ ] Is the new field `opt`? If yes, no migration needed: just add it.
 - [ ] If non-`opt` / renamed / retyped: add a `Legacy*` shadow and a transform.
 - [ ] Put the rule in `shared/migrations` if more than one canister needs it.
 - [ ] Wire the fallback into each affected canister's `restore_state`.

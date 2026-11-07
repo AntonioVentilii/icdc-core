@@ -6,6 +6,7 @@ cd "$(dirname "$(realpath "$0")")/.."
 
 set -x
 time (
+  ./scripts/lint.no-em-dash.sh
   ./scripts/lint.cargo-workspace-dependencies.sh
   ./scripts/lint.did.sh
   ./scripts/lint.github.sh

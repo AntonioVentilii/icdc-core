@@ -27,7 +27,7 @@ pub struct BackfillSettlementEventsParams {
 ///
 /// Batches the per-series settlement check a resolution solver would otherwise
 /// make one call at a time. Callers pass the (bounded) set of series they care
-/// about — typically the "due" candidates from the registry — and receive one
+/// about (typically the "due" candidates from the registry) and receive one
 /// status per id in request order. Unknown or still-open series come back with a
 /// `None` status. The read looks each id up in `SETTLEMENT_PLANS`, so the work is
 /// `O(#series_ids)` regardless of how many plans exist. Mirrors
