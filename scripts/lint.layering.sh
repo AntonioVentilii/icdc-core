@@ -88,7 +88,7 @@ done <<<"$matches"
 # A baseline entry that no longer imports from api/ must be removed, so the
 # tolerated set can only shrink.
 for allowed in "${BASELINE[@]}"; do
-  grep -q "^$allowed:" <<<"$matches" || {
+  cut -d: -f1 <<<"$matches" | grep -Fxq -- "$allowed" || {
     echo "ERROR: $allowed no longer imports from api/: remove it from BASELINE in $0."
     exit 1
   }
