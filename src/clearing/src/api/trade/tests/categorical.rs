@@ -28,6 +28,7 @@ fn categorical_mint_redeem_complete_set() {
         start_ns: None,
         payoff_type: PayoffType::Categorical,
         strike: None,
+        settlement_cap: None,
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
         outcomes: Some(vec![
@@ -88,6 +89,7 @@ fn categorical_lifecycle_scenario() {
         start_ns: None,
         payoff_type: PayoffType::Categorical,
         strike: None,
+        settlement_cap: None,
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
         outcomes: Some(vec![
@@ -178,6 +180,7 @@ fn categorical_short_settlement() {
         start_ns: None,
         payoff_type: PayoffType::Categorical,
         strike: None,
+        settlement_cap: None,
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
         outcomes: Some(vec![
@@ -255,6 +258,7 @@ fn categorical_short_loss() {
         start_ns: None,
         payoff_type: PayoffType::Categorical,
         strike: None,
+        settlement_cap: None,
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
         outcomes: Some(vec![
