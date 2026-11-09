@@ -36,6 +36,19 @@ use crate::{
             results::{LeaderboardPage, SettlementAccuracyEntry},
         },
         migration::{params::MigrateDomainParams, results::MigrateDomainResult},
+        risk::{
+            params::{
+                AddCalendarEventsParams, AppendHistoryChunkParams, BeginHistoryUploadParams,
+                GetPriceHistoryParams, ListRiskAuditParams, RemoveCalendarEventParams,
+                RiskAdminParams, SealHistoryUploadParams, SetGlobalRiskMultiplierParams,
+                SetRiskMultiplierParams, SetTimelockDurationParams, SetUnderlyingRiskParamsParams,
+            },
+            results::{
+                CalendarEventView, HistoryUploadView, PendingActionView, PriceHistoryResult,
+                RiskChangeResult, RiskCountResult, RiskGovernanceView, RiskIdResult, RiskIdsResult,
+                RiskUnitResult, UnderlyingRiskParamsView, VolatilityResult,
+            },
+        },
         settlement::{
             params::{
                 BackfillSettlementEventsParams, ListSeriesSettlementStatusesParams,
@@ -61,6 +74,7 @@ use crate::{
         },
     },
     memory::CONFIG,
+    risk::state::RiskAuditEntry,
     types::{
         event::Event,
         http::{HttpRequest, HttpResponse},
@@ -79,6 +93,7 @@ pub mod guards;
 pub mod memory;
 pub mod migrations;
 pub mod payoffs;
+pub mod risk;
 pub mod trade;
 pub mod traits;
 pub mod types;
@@ -90,6 +105,7 @@ fn init(config: Config) {
         *c.borrow_mut() = config;
     });
     api::settlement::api::start_settlement_heartbeat();
+    risk::sampler::start_risk_sampler();
 }
 
 #[pre_upgrade]
@@ -107,6 +123,7 @@ fn post_upgrade() {
     // Interval timers also do not survive an upgrade, so re-arm the heartbeat
     // that recovers any settlement whose self-resumption chain later breaks.
     api::settlement::api::start_settlement_heartbeat();
+    risk::sampler::start_risk_sampler();
 }
 
 export_candid!();

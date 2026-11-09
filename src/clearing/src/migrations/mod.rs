@@ -100,6 +100,7 @@ pub fn into_current(legacy: LegacyStableState) -> StableState {
         domain_policies: legacy.domain_policies,
         migration_plans: legacy.migration_plans,
         reassignment_plans: None,
+        risk: None,
     }
 }
 
@@ -112,7 +113,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::memory::default_config;
+    use crate::{memory::default_config, risk::state::RiskState};
 
     fn legacy_series(id: &str, description: Description) -> LegacySeries {
         LegacySeries {
@@ -203,5 +204,21 @@ mod tests {
                 .clause,
             NO_RESOLUTION_PLACEHOLDER
         );
+    }
+
+    /// The risk state is an optional field: state written before the risk engine existed restores
+    /// the default `RiskState`, and a populated one survives a save and restore.
+    #[test]
+    fn risk_state_is_optional_and_round_trips() {
+        let mut state = into_current(legacy_state(BTreeMap::new()));
+        assert!(state.risk.is_none());
+        let decoded: StableState = decode_one(&encode_one(state.clone()).unwrap()).unwrap();
+        assert_eq!(decoded.risk.unwrap_or_default(), RiskState::default());
+
+        let mut risk = RiskState::default();
+        risk.risk_admins.insert(Principal::from_slice(&[7]));
+        state.risk = Some(risk.clone());
+        let decoded: StableState = decode_one(&encode_one(state).unwrap()).unwrap();
+        assert_eq!(decoded.risk, Some(risk));
     }
 }

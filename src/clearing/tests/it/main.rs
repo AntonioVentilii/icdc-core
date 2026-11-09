@@ -7,6 +7,7 @@ mod fork;
 mod migration;
 mod oracle_engine;
 mod reassign;
+mod risk;
 mod settlement;
 mod settlement_exhaustive;
 mod setup;
