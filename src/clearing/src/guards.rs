@@ -25,12 +25,15 @@ pub fn caller_is_controller() -> Result<(), String> {
 
 /// Guard function to ensure the caller holds the risk administrator role.
 ///
-/// Controllers are not risk administrators by default, and a controller can never be made one (see
-/// `docs/risk/margin-model.md`, section 12).
+/// A controller is never a risk administrator (`docs/risk/margin-model.md`, section 12): a
+/// principal that became a controller after being granted the role is rejected here, so the two
+/// roles never sit on the same key.
 pub fn caller_is_risk_admin() -> Result<(), String> {
     let caller = msg_caller();
 
-    if RISK_STATE.with(|state| state.borrow().risk_admins.contains(&caller)) {
+    if !is_controller(&caller)
+        && RISK_STATE.with(|state| state.borrow().risk_admins.contains(&caller))
+    {
         Ok(())
     } else {
         Err("Caller is not a risk administrator.".to_owned())

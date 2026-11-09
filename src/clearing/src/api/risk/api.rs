@@ -10,28 +10,28 @@ use super::{
     errors::RiskError,
     params::{
         AddCalendarEventsParams, AppendHistoryChunkParams, BeginHistoryUploadParams,
-        GetPriceHistoryParams, ListRiskAuditParams, RemoveCalendarEventParams, RiskAdminParams,
-        SealHistoryUploadParams, SetGlobalRiskMultiplierParams, SetRiskMultiplierParams,
-        SetTimelockDurationParams, SetUnderlyingRiskParamsParams,
+        GetHistoryUploadPointsParams, GetPriceHistoryParams, HistoryUploadParams,
+        ListRiskAuditParams, PendingActionParams, ProposeHistoryRemovalParams,
+        RemoveCalendarEventParams, RiskAdminParams, SealHistoryUploadParams,
+        SetGlobalRiskMultiplierParams, SetRiskMultiplierParams, SetTimelockDurationParams,
+        SetUnderlyingRiskParamsParams, UnderlyingParams,
     },
     results::{
-        CalendarEventView, HistoryUploadStatusView, HistoryUploadView, PendingActionKindView,
-        PendingActionView, PriceHistoryResult, PricePointView, RiskChangeResult, RiskCountResult,
-        RiskGovernanceView, RiskIdResult, RiskIdsResult, RiskUnitResult, UnderlyingRiskParamsView,
-        VolatilityResult, VolatilityView,
+        CalendarEventView, CalendarEventsResult, HistoryUploadStatusView, HistoryUploadView,
+        PendingActionKindView, PendingActionView, PendingActionsResult, PriceHistoryResult,
+        PricePointView, RiskAuditEntryView, RiskChangeResult, RiskChangeView, RiskCountResult,
+        RiskGovernanceResult, RiskGovernanceView, RiskIdResult, RiskIdsResult, RiskUnitResult,
+        UnderlyingRiskParamsResult, UnderlyingRiskParamsView, VolatilityResult, VolatilityView,
     },
 };
 use crate::{
-    guards::{
-        caller_is_controller, caller_is_not_anonymous, caller_is_risk_admin,
-        caller_is_risk_admin_or_controller,
-    },
+    guards::{caller_is_controller, caller_is_risk_admin, caller_is_risk_admin_or_controller},
     memory::RISK_STATE,
     risk::{
         fixed::Fixed,
         history::{PricePoint, UploadStatus},
         params::canonical_underlying,
-        state::{NewEvent, RiskAuditEntry, UnderlyingParamsInput},
+        state::{MultiplierCaller, NewEvent, RiskChangeOutcome, UnderlyingParamsInput},
         timelock::TimelockedAction,
     },
     utils::system::now_ns,
@@ -65,9 +65,53 @@ fn underlying_input(
     })
 }
 
-/// Risk figures are never negative; a negative value would mean a bug, and is reported as zero.
-fn decimal(value: Fixed) -> DecimalValue {
-    value.to_decimal().unwrap_or_default()
+/// Risk figures are never negative. A negative value would mean a bug, so it is reported as an
+/// error rather than shown as a plausible number.
+fn decimal(value: Fixed) -> Result<DecimalValue, RiskError> {
+    value
+        .to_decimal()
+        .map_err(|e| RiskError::ArithmeticError(format!("{value}: {e}")))
+}
+
+fn points_view(points: &[PricePoint], limit: usize) -> Result<Vec<PricePointView>, RiskError> {
+    points
+        .iter()
+        .take(limit)
+        .map(|p| {
+            Ok(PricePointView {
+                date: p.date,
+                price: decimal(p.price)?,
+            })
+        })
+        .collect()
+}
+
+fn page_limit(limit: Option<u32>) -> usize {
+    limit
+        .unwrap_or(DEFAULT_HISTORY_LIMIT)
+        .min(MAX_HISTORY_LIMIT) as usize
+}
+
+fn change_view(outcome: RiskChangeOutcome) -> RiskChangeView {
+    match outcome {
+        RiskChangeOutcome::Applied => RiskChangeView::Applied,
+        RiskChangeOutcome::Pending {
+            action_id,
+            executable_at_ns,
+        } => RiskChangeView::Pending {
+            action_id,
+            executable_at_ns,
+        },
+    }
+}
+
+/// The role of a caller that passed `caller_is_risk_admin_or_controller`.
+fn multiplier_caller() -> MultiplierCaller {
+    if caller_is_risk_admin().is_ok() {
+        MultiplierCaller::RiskAdmin
+    } else {
+        MultiplierCaller::Controller
+    }
 }
 
 // ----- Roles -----
@@ -135,29 +179,43 @@ pub fn set_underlying_risk_params(params: SetUnderlyingRiskParamsParams) -> Risk
     .into()
 }
 
-/// Raises an underlying's multiplier immediately, or proposes lowering it through the timelock.
-#[update(guard = "caller_is_risk_admin")]
+/// Raises an underlying's multiplier immediately, or proposes lowering it through the timelock. A
+/// raise withdraws any pending lowering of the same multiplier. Controllers may raise (an emergency
+/// brake) but only risk administrators may propose lowering.
+#[update(guard = "caller_is_risk_admin_or_controller")]
 #[must_use]
 pub fn set_risk_multiplier(params: SetRiskMultiplierParams) -> RiskChangeResult {
     let SetRiskMultiplierParams { underlying, k } = params;
+    let role = multiplier_caller();
     fixed("k", &k)
         .and_then(|k| {
-            RISK_STATE.with(|s| s.borrow_mut().set_k(&underlying, k, msg_caller(), now_ns()))
+            RISK_STATE.with(|s| {
+                s.borrow_mut()
+                    .set_k(&underlying, k, role, msg_caller(), now_ns())
+            })
         })
+        .map(change_view)
         .into()
 }
 
-/// Raises the global multiplier immediately, or proposes lowering it through the timelock.
-#[update(guard = "caller_is_risk_admin")]
+/// Raises the global multiplier immediately, or proposes lowering it through the timelock. Same
+/// roles as `set_risk_multiplier`.
+#[update(guard = "caller_is_risk_admin_or_controller")]
 #[must_use]
 pub fn set_global_risk_multiplier(params: SetGlobalRiskMultiplierParams) -> RiskChangeResult {
     let SetGlobalRiskMultiplierParams { k } = params;
+    let role = multiplier_caller();
     fixed("global_k", &k)
-        .and_then(|k| RISK_STATE.with(|s| s.borrow_mut().set_global_k(k, msg_caller(), now_ns())))
+        .and_then(|k| {
+            RISK_STATE.with(|s| s.borrow_mut().set_global_k(k, role, msg_caller(), now_ns()))
+        })
+        .map(change_view)
         .into()
 }
 
-/// Lengthens the timelock immediately, or proposes shortening it through the timelock itself.
+/// Lengthens the timelock immediately up to twice its current value, or proposes any other change
+/// (shortening, or lengthening beyond twice) through the timelock itself. Bounded to 24 hours to 7
+/// days.
 #[update(guard = "caller_is_risk_admin")]
 #[must_use]
 pub fn set_timelock_duration(params: SetTimelockDurationParams) -> RiskChangeResult {
@@ -167,6 +225,7 @@ pub fn set_timelock_duration(params: SetTimelockDurationParams) -> RiskChangeRes
             s.borrow_mut()
                 .set_timelock_duration(duration_ns, msg_caller(), now_ns())
         })
+        .map(change_view)
         .into()
 }
 
@@ -248,7 +307,9 @@ pub fn append_history_chunk(params: AppendHistoryChunkParams) -> RiskCountResult
         })
         .collect();
     points
-        .and_then(|points| RISK_STATE.with(|s| s.borrow_mut().append_chunk(upload_id, &points)))
+        .and_then(|points| {
+            RISK_STATE.with(|s| s.borrow_mut().append_chunk(upload_id, &points, now_ns()))
+        })
         .into()
 }
 
@@ -269,12 +330,50 @@ pub fn seal_history_upload(params: SealHistoryUploadParams) -> RiskIdResult {
         .into()
 }
 
+/// Abandons an open or sealed upload (and its pending activation), freeing its slot.
+#[update(guard = "caller_is_risk_admin_or_controller")]
+#[must_use]
+pub fn abandon_history_upload(params: HistoryUploadParams) -> RiskUnitResult {
+    let HistoryUploadParams { upload_id } = params;
+    RISK_STATE
+        .with(|s| {
+            s.borrow_mut()
+                .abandon_upload(upload_id, msg_caller(), now_ns())
+        })
+        .into()
+}
+
+/// Proposes removing the active history points of an underlying in `from_date..=to_date`, for
+/// example a bad print. Executes after the timelock, only if the range still holds the same points.
+/// Returns the pending action id.
+#[update(guard = "caller_is_risk_admin")]
+#[must_use]
+pub fn propose_history_removal(params: ProposeHistoryRemovalParams) -> RiskIdResult {
+    let ProposeHistoryRemovalParams {
+        underlying,
+        from_date,
+        to_date,
+    } = params;
+    RISK_STATE
+        .with(|s| {
+            s.borrow_mut().propose_history_removal(
+                &underlying,
+                from_date,
+                to_date,
+                msg_caller(),
+                now_ns(),
+            )
+        })
+        .into()
+}
+
 // ----- Timelock -----
 
 /// Cancels a pending action. Cancelling an upload activation also cancels the upload.
 #[update(guard = "caller_is_risk_admin_or_controller")]
 #[must_use]
-pub fn cancel_pending_action(action_id: u64) -> RiskUnitResult {
+pub fn cancel_pending_action(params: PendingActionParams) -> RiskUnitResult {
+    let PendingActionParams { action_id } = params;
     RISK_STATE
         .with(|s| {
             s.borrow_mut()
@@ -283,11 +382,13 @@ pub fn cancel_pending_action(action_id: u64) -> RiskUnitResult {
         .into()
 }
 
-/// Executes a pending action once its timelock has expired. Anyone can execute: the action was
-/// public for the whole delay, and it is re-validated against the current state.
-#[update(guard = "caller_is_not_anonymous")]
+/// Executes a pending action once its timelock has expired. Restricted to risk administrators and
+/// controllers, so execution happens when the people who can still cancel are watching. The action
+/// is re-validated against the current state.
+#[update(guard = "caller_is_risk_admin_or_controller")]
 #[must_use]
-pub fn execute_pending_action(action_id: u64) -> RiskUnitResult {
+pub fn execute_pending_action(params: PendingActionParams) -> RiskUnitResult {
+    let PendingActionParams { action_id } = params;
     RISK_STATE
         .with(|s| {
             s.borrow_mut()
@@ -301,113 +402,145 @@ pub fn execute_pending_action(action_id: u64) -> RiskUnitResult {
 /// Risk administrators and global parameters.
 #[query]
 #[must_use]
-pub fn get_risk_governance() -> RiskGovernanceView {
-    RISK_STATE.with(|s| {
-        let s = s.borrow();
-        RiskGovernanceView {
-            risk_admins: s.risk_admins.iter().copied().collect(),
-            global_k: decimal(s.global.global_k),
-            timelock_duration_ns: s.global.timelock_duration_ns,
-        }
-    })
+pub fn get_risk_governance() -> RiskGovernanceResult {
+    RISK_STATE
+        .with(|s| {
+            let s = s.borrow();
+            Ok(RiskGovernanceView {
+                risk_admins: s.risk_admins.iter().copied().collect(),
+                global_k: decimal(s.global.global_k)?,
+                timelock_duration_ns: s.global.timelock_duration_ns,
+            })
+        })
+        .into()
 }
 
 /// Parameters of every configured underlying.
 #[query]
 #[must_use]
-pub fn list_underlying_risk_params() -> Vec<UnderlyingRiskParamsView> {
-    RISK_STATE.with(|s| {
-        s.borrow()
-            .underlyings
-            .iter()
-            .map(|(underlying, p)| UnderlyingRiskParamsView {
-                underlying: underlying.clone(),
-                lambda: decimal(p.lambda),
-                weekend_weight: decimal(p.weekend_weight),
-                floor_ratio: decimal(p.floor_ratio),
-                mpor_days: p.mpor_days,
-                k: decimal(p.k),
-                oracle_asset_id: p.oracle_asset_id.clone(),
-            })
-            .collect()
-    })
+pub fn list_underlying_risk_params() -> UnderlyingRiskParamsResult {
+    RISK_STATE
+        .with(|s| {
+            s.borrow()
+                .underlyings
+                .iter()
+                .map(|(underlying, p)| {
+                    Ok(UnderlyingRiskParamsView {
+                        underlying: underlying.clone(),
+                        lambda: decimal(p.lambda)?,
+                        weekend_weight: decimal(p.weekend_weight)?,
+                        floor_ratio: decimal(p.floor_ratio)?,
+                        mpor_days: p.mpor_days,
+                        k: decimal(p.k)?,
+                        oracle_asset_id: p.oracle_asset_id.clone(),
+                    })
+                })
+                .collect::<Result<Vec<_>, RiskError>>()
+        })
+        .into()
 }
 
 /// Calendar events of an underlying, in chronological order.
 #[query]
 #[must_use]
-pub fn list_calendar_events(underlying: String) -> Vec<CalendarEventView> {
-    let raw = underlying;
-    let Ok(underlying) = canonical_underlying(&raw) else {
-        return vec![];
-    };
-    RISK_STATE.with(|s| {
-        s.borrow()
-            .calendars
-            .get(&underlying)
-            .map(|events| {
-                events
+pub fn list_calendar_events(params: UnderlyingParams) -> CalendarEventsResult {
+    let UnderlyingParams { underlying } = params;
+    canonical_underlying(&underlying)
+        .and_then(|underlying| {
+            RISK_STATE.with(|s| {
+                s.borrow()
+                    .calendars
+                    .get(&underlying)
+                    .map_or(&[][..], Vec::as_slice)
                     .iter()
-                    .map(|e| CalendarEventView {
-                        id: e.id,
-                        time_ns: e.time_ns,
-                        weight: decimal(e.weight),
-                        label: e.label.clone(),
+                    .map(|e| {
+                        Ok(CalendarEventView {
+                            id: e.id,
+                            time_ns: e.time_ns,
+                            weight: decimal(e.weight)?,
+                            label: e.label.clone(),
+                        })
                     })
                     .collect()
             })
-            .unwrap_or_default()
+        })
+        .into()
+}
+
+fn pending_kind_view(action: &TimelockedAction) -> Result<PendingActionKindView, RiskError> {
+    Ok(match action {
+        TimelockedAction::LowerRiskMultiplier {
+            underlying,
+            from,
+            to,
+        } => PendingActionKindView::LowerRiskMultiplier {
+            underlying: underlying.clone(),
+            from: decimal(*from)?,
+            to: decimal(*to)?,
+        },
+        TimelockedAction::LowerGlobalRiskMultiplier { from, to } => {
+            PendingActionKindView::LowerGlobalRiskMultiplier {
+                from: decimal(*from)?,
+                to: decimal(*to)?,
+            }
+        }
+        TimelockedAction::ChangeTimelockDuration { from_ns, to_ns } => {
+            PendingActionKindView::ChangeTimelockDuration {
+                from_ns: *from_ns,
+                to_ns: *to_ns,
+            }
+        }
+        TimelockedAction::ActivateHistoryUpload { upload_id } => {
+            PendingActionKindView::ActivateHistoryUpload {
+                upload_id: *upload_id,
+            }
+        }
+        TimelockedAction::RemoveHistoryPoints {
+            underlying,
+            from_date,
+            to_date,
+            expected_sha256,
+        } => PendingActionKindView::RemoveHistoryPoints {
+            underlying: underlying.clone(),
+            from_date: *from_date,
+            to_date: *to_date,
+            expected_sha256: expected_sha256.clone(),
+        },
+        TimelockedAction::AddRiskAdmin { principal } => PendingActionKindView::AddRiskAdmin {
+            principal: *principal,
+        },
     })
 }
 
 /// Every action waiting behind the timelock.
 #[query]
 #[must_use]
-pub fn list_pending_actions() -> Vec<PendingActionView> {
-    RISK_STATE.with(|s| {
-        s.borrow()
-            .pending
-            .values()
-            .map(|p| PendingActionView {
-                id: p.id,
-                action: match &p.action {
-                    TimelockedAction::LowerRiskMultiplier { underlying, k } => {
-                        PendingActionKindView::LowerRiskMultiplier {
-                            underlying: underlying.clone(),
-                            k: decimal(*k),
-                        }
-                    }
-                    TimelockedAction::LowerGlobalRiskMultiplier { k } => {
-                        PendingActionKindView::LowerGlobalRiskMultiplier { k: decimal(*k) }
-                    }
-                    TimelockedAction::ActivateHistoryUpload { upload_id } => {
-                        PendingActionKindView::ActivateHistoryUpload {
-                            upload_id: *upload_id,
-                        }
-                    }
-                    TimelockedAction::AddRiskAdmin { principal } => {
-                        PendingActionKindView::AddRiskAdmin {
-                            principal: *principal,
-                        }
-                    }
-                    TimelockedAction::LowerTimelockDuration { duration_ns } => {
-                        PendingActionKindView::LowerTimelockDuration {
-                            duration_ns: *duration_ns,
-                        }
-                    }
-                },
-                proposed_by: p.proposed_by,
-                proposed_at_ns: p.proposed_at_ns,
-                executable_at_ns: p.executable_at_ns,
-            })
-            .collect()
-    })
+pub fn list_pending_actions() -> PendingActionsResult {
+    RISK_STATE
+        .with(|s| {
+            s.borrow()
+                .pending
+                .values()
+                .map(|p| {
+                    Ok(PendingActionView {
+                        id: p.id,
+                        action: pending_kind_view(&p.action)?,
+                        proposed_by: p.proposed_by,
+                        proposed_at_ns: p.proposed_at_ns,
+                        executable_at_ns: p.executable_at_ns,
+                    })
+                })
+                .collect::<Result<Vec<_>, RiskError>>()
+        })
+        .into()
 }
 
-/// Metadata, provenance and hash of a history upload (not its points).
+/// Metadata, provenance and hash of a history upload. Its points are paged by
+/// `get_history_upload_points`.
 #[query]
 #[must_use]
-pub fn get_history_upload(upload_id: u64) -> Option<HistoryUploadView> {
+pub fn get_history_upload(params: HistoryUploadParams) -> Option<HistoryUploadView> {
+    let HistoryUploadParams { upload_id } = params;
     RISK_STATE.with(|s| {
         s.borrow()
             .uploads
@@ -437,6 +570,30 @@ pub fn get_history_upload(upload_id: u64) -> Option<HistoryUploadView> {
     })
 }
 
+/// A page of the points of an upload that is still open or sealed, so anyone can check the data
+/// against the public source during the timelock. Activated and cancelled uploads hold no points.
+#[query]
+#[must_use]
+pub fn get_history_upload_points(params: GetHistoryUploadPointsParams) -> PriceHistoryResult {
+    let GetHistoryUploadPointsParams {
+        upload_id,
+        from_date,
+        limit,
+    } = params;
+    RISK_STATE
+        .with(|s| {
+            let s = s.borrow();
+            let upload = s
+                .uploads
+                .get(&upload_id)
+                .ok_or(RiskError::UploadNotFound(upload_id))?;
+            let from = from_date.unwrap_or(0);
+            let start = upload.points.partition_point(|p| p.date < from);
+            points_view(&upload.points[start..], page_limit(limit))
+        })
+        .into()
+}
+
 /// A page of an underlying's active daily price history.
 #[query]
 #[must_use]
@@ -446,52 +603,41 @@ pub fn get_price_history(params: GetPriceHistoryParams) -> PriceHistoryResult {
         from_date,
         limit,
     } = params;
-    let limit = limit
-        .unwrap_or(DEFAULT_HISTORY_LIMIT)
-        .min(MAX_HISTORY_LIMIT) as usize;
-    let from = from_date.unwrap_or(0);
     canonical_underlying(&underlying)
-        .map(|underlying| {
+        .and_then(|underlying| {
             RISK_STATE.with(|s| {
-                s.borrow()
+                let s = s.borrow();
+                let points = s
                     .histories
                     .get(&underlying)
-                    .map(|h| {
-                        h.points
-                            .iter()
-                            .filter(|p| p.date >= from)
-                            .take(limit)
-                            .map(|p| PricePointView {
-                                date: p.date,
-                                price: decimal(p.price),
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default()
+                    .map_or(&[][..], |h| h.range(from_date.unwrap_or(0), u32::MAX));
+                points_view(points, page_limit(limit))
             })
         })
         .into()
 }
 
-/// Current volatility of an underlying: EWMA, long-run and floored, with the volatility time over
-/// its MPOR and its effective multiplier. Not yet an input to margin.
+/// Current volatility of an underlying: EWMA, and once 250 returns exist long-run and floored, with
+/// the volatility time over its MPOR and its effective multiplier. Not yet an input to margin.
 #[query]
 #[must_use]
-pub fn get_volatility(underlying: String) -> VolatilityResult {
-    let raw = underlying;
+pub fn get_volatility(params: UnderlyingParams) -> VolatilityResult {
+    let UnderlyingParams { underlying: raw } = params;
     RISK_STATE
         .with(|s| s.borrow().volatility(&raw, now_ns()))
         .and_then(|reading| {
+            let estimate = reading.estimate;
             Ok(VolatilityView {
                 underlying: canonical_underlying(&raw)?,
-                sigma_ewma: decimal(reading.estimate.sigma_ewma),
-                sigma_long_run: decimal(reading.estimate.sigma_long_run),
-                sigma_used: decimal(reading.estimate.sigma_used),
-                returns: u32::try_from(reading.estimate.returns).unwrap_or(u32::MAX),
+                sigma_ewma: decimal(estimate.sigma_ewma)?,
+                sigma_long_run: estimate.sigma_long_run.map(decimal).transpose()?,
+                sigma_used: estimate.sigma_used.map(decimal).transpose()?,
+                is_provisional: estimate.is_provisional,
+                returns: u32::try_from(estimate.returns).unwrap_or(u32::MAX),
                 last_date: reading.last_date,
                 mpor_days: reading.mpor_days,
-                mpor_volatility_time: decimal(reading.mpor_volatility_time),
-                k_effective: decimal(reading.k_effective),
+                mpor_volatility_time: decimal(reading.mpor_volatility_time)?,
+                k_effective: decimal(reading.k_effective)?,
             })
         })
         .into()
@@ -500,7 +646,7 @@ pub fn get_volatility(underlying: String) -> VolatilityResult {
 /// A page of the public risk audit log, oldest first.
 #[query]
 #[must_use]
-pub fn list_risk_audit(params: ListRiskAuditParams) -> Vec<RiskAuditEntry> {
+pub fn list_risk_audit(params: ListRiskAuditParams) -> Vec<RiskAuditEntryView> {
     let ListRiskAuditParams { from_seq, limit } = params;
     let limit = limit.unwrap_or(DEFAULT_AUDIT_LIMIT).min(MAX_AUDIT_LIMIT) as usize;
     let from = usize::try_from(from_seq.unwrap_or(0)).unwrap_or(usize::MAX);
@@ -510,7 +656,12 @@ pub fn list_risk_audit(params: ListRiskAuditParams) -> Vec<RiskAuditEntry> {
             .iter()
             .skip(from)
             .take(limit)
-            .cloned()
+            .map(|e| RiskAuditEntryView {
+                seq: e.seq,
+                time_ns: e.time_ns,
+                caller: e.caller,
+                description: e.description.clone(),
+            })
             .collect()
     })
 }

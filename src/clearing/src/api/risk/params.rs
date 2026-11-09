@@ -102,3 +102,39 @@ pub struct ListRiskAuditParams {
 pub struct RiskAdminParams {
     pub principal: Principal,
 }
+
+/// Identifies one pending action.
+#[derive(CandidType, Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct PendingActionParams {
+    pub action_id: u64,
+}
+
+/// Identifies one history upload.
+#[derive(CandidType, Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct HistoryUploadParams {
+    pub upload_id: u64,
+}
+
+/// Identifies one underlying.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct UnderlyingParams {
+    pub underlying: String,
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct ProposeHistoryRemovalParams {
+    pub underlying: String,
+    /// First date to remove (inclusive), in days since the Unix epoch.
+    pub from_date: u32,
+    /// Last date to remove (inclusive), in days since the Unix epoch.
+    pub to_date: u32,
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct GetHistoryUploadPointsParams {
+    pub upload_id: u64,
+    /// First date to return (inclusive). Defaults to the start of the upload.
+    pub from_date: Option<u32>,
+    /// Maximum number of points. Defaults to 1,000, capped at 5,000.
+    pub limit: Option<u32>,
+}

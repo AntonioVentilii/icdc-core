@@ -77,7 +77,33 @@ durable plans alone do not cover.
   amount from the ledger (never from internal accounting) is what makes a retry idempotent: a
   lost response or a duplicated call moves nothing the second time.
 
-## 7. Tooling & Quality Shortcuts
+## 7. App-Level Roles and the Timelock
+
+The risk engine (`src/clearing/src/risk/`) introduces the pattern to reuse for any privileged,
+parameter-changing API.
+
+- **Roles live in state, guards in `guards.rs`.** A role is a set of principals in the domain
+  state (`RiskState::risk_admins`) checked by a guard (`caller_is_risk_admin`). A controller is
+  never implicitly a role holder, and the guard rejects a controller even if its principal is in
+  the set, so the two powers never sit on the same key. When an endpoint accepts several roles
+  (`caller_is_risk_admin_or_controller`), resolve the caller's role in the API layer and pass it to
+  the state method, which decides what that role may do.
+- **Changes that can only make the system safer apply at once; the rest go through the generic
+  timelock** (`risk::timelock`). A `TimelockedAction` variant per kind of change, a
+  `PendingAction` with proposer and times, public listing, cancel by role holders.
+- **A pending action stores the value it changes from** (or a hash of what it changes) and
+  execution rejects it with `ActionNoLongerValid` if the current state differs. Never re-apply
+  a stale `to` value on top of a state nobody reviewed.
+- **One pending action per key** (`TimelockedAction::key`): a new proposal replaces the old one,
+  and an immediate change in the safe direction withdraws pending actions on the same key.
+- **Separate pending caps per proposing role**, so one role cannot fill the queue and block the
+  other.
+- **Every change appends to an audit log** with caller, time and a description of the old and new
+  values. Expose it through a view type in `api/<domain>/results.rs`, not the state type.
+- **Queries return a `Result` when a value can fail to convert** (for example a negative `Fixed`
+  to `DecimalValue`); never substitute a default that looks like a real figure.
+
+## 8. Tooling & Quality Shortcuts
 
 Use the following `npm` scripts to maintain repository standards:
 

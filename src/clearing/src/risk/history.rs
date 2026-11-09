@@ -37,13 +37,37 @@ pub struct PriceHistory {
 impl PriceHistory {
     /// Merges points into the history: a point replaces the existing point on the same date, new
     /// dates are inserted.
+    ///
+    /// Runs in `O((n + m) log(n + m))`: the incoming points are appended, the whole history is
+    /// stably sorted by date, and each run of equal dates collapses onto its last element, which is
+    /// the incoming point because the stable sort keeps existing points first.
     pub fn merge(&mut self, incoming: &[PricePoint]) {
-        for point in incoming {
-            match self.points.binary_search_by_key(&point.date, |p| p.date) {
-                Ok(index) => self.points[index] = *point,
-                Err(index) => self.points.insert(index, *point),
+        self.points.extend_from_slice(incoming);
+        self.points.sort_by_key(|p| p.date);
+        self.points.dedup_by(|later, earlier| {
+            if later.date == earlier.date {
+                *earlier = *later;
+                true
+            } else {
+                false
             }
-        }
+        });
+    }
+
+    /// The points dated `from_date..=to_date`.
+    #[must_use]
+    pub fn range(&self, from_date: u32, to_date: u32) -> &[PricePoint] {
+        let start = self.points.partition_point(|p| p.date < from_date);
+        let end = self.points.partition_point(|p| p.date <= to_date);
+        &self.points[start..end.max(start)]
+    }
+
+    /// Removes the points dated `from_date..=to_date`. Returns how many were removed.
+    pub fn remove_range(&mut self, from_date: u32, to_date: u32) -> usize {
+        let before = self.points.len();
+        self.points
+            .retain(|p| p.date < from_date || p.date > to_date);
+        before - self.points.len()
     }
 
     /// Appends today's point if the history has none for that date yet. Returns whether it
@@ -101,12 +125,14 @@ pub enum ChunkError {
     UploadFull,
     NotIncreasing { date: u32 },
     NonPositivePrice { date: u32 },
+    FutureDate { date: u32 },
 }
 
 impl HistoryUpload {
-    /// Validates and appends a chunk: dates strictly increasing across chunks, prices strictly
-    /// positive.
-    pub fn append(&mut self, chunk: &[PricePoint]) -> Result<(), ChunkError> {
+    /// Validates and appends a chunk: dates strictly increasing across chunks and not after
+    /// `today`, prices strictly positive. A future date would otherwise sit in the history and
+    /// block every later daily point.
+    pub fn append(&mut self, chunk: &[PricePoint], today: u32) -> Result<(), ChunkError> {
         if chunk.is_empty() {
             return Err(ChunkError::Empty);
         }
@@ -120,6 +146,9 @@ impl HistoryUpload {
         for point in chunk {
             if point.price <= Fixed::ZERO {
                 return Err(ChunkError::NonPositivePrice { date: point.date });
+            }
+            if point.date > today {
+                return Err(ChunkError::FutureDate { date: point.date });
             }
             if previous.is_some_and(|date| point.date <= date) {
                 return Err(ChunkError::NotIncreasing { date: point.date });
@@ -183,26 +212,41 @@ mod tests {
         }
     }
 
+    const TODAY: u32 = 100;
+
     #[test]
     fn chunks_must_increase_and_be_positive() {
         let mut upload = open_upload();
-        upload.append(&[point(1, 100), point(2, 101)]).unwrap();
-        upload.append(&[point(3, 102)]).unwrap();
+        upload
+            .append(&[point(1, 100), point(2, 101)], TODAY)
+            .unwrap();
+        upload.append(&[point(3, 102)], TODAY).unwrap();
         assert_eq!(upload.point_count, 3);
         assert_eq!(upload.first_date, Some(1));
         assert_eq!(upload.last_date, Some(3));
 
         assert_eq!(
-            upload.append(&[point(3, 103)]),
+            upload.append(&[point(3, 103)], TODAY),
             Err(ChunkError::NotIncreasing { date: 3 })
         );
         assert_eq!(
-            upload.append(&[point(4, 0)]),
+            upload.append(&[point(4, 0)], TODAY),
             Err(ChunkError::NonPositivePrice { date: 4 })
         );
-        assert_eq!(upload.append(&[]), Err(ChunkError::Empty));
+        assert_eq!(upload.append(&[], TODAY), Err(ChunkError::Empty));
         // A rejected chunk leaves the upload untouched.
         assert_eq!(upload.point_count, 3);
+    }
+
+    #[test]
+    fn chunks_cannot_carry_future_dates() {
+        let mut upload = open_upload();
+        upload.append(&[point(TODAY, 100)], TODAY).unwrap();
+        assert_eq!(
+            upload.append(&[point(TODAY + 1, 100)], TODAY),
+            Err(ChunkError::FutureDate { date: TODAY + 1 })
+        );
+        assert_eq!(upload.point_count, 1);
     }
 
     #[test]
@@ -215,6 +259,39 @@ mod tests {
             history.points,
             vec![point(1, 100), point(2, 102), point(3, 999), point(4, 104)]
         );
+    }
+
+    #[test]
+    fn large_merges_of_older_and_overlapping_data_stay_sorted() {
+        // 20,000 recent points, then 20,000 older points overlapping the first 1,000 recent dates:
+        // the case that made the insertion-based merge quadratic.
+        let recent: Vec<PricePoint> = (19_000..39_000).map(|d| point(d, 100)).collect();
+        let older: Vec<PricePoint> = (0..20_000).map(|d| point(d, 200)).collect();
+        let mut history = PriceHistory::default();
+        history.merge(&recent);
+        history.merge(&older);
+
+        assert_eq!(history.points.len(), 39_000);
+        assert!(history.points.windows(2).all(|w| w[0].date < w[1].date));
+        // Overlapping dates take the incoming (older upload's) value; the rest keep theirs.
+        assert_eq!(history.points[19_500], point(19_500, 200));
+        assert_eq!(history.points[25_000], point(25_000, 100));
+    }
+
+    #[test]
+    fn ranges_select_and_remove_inclusively() {
+        let mut history = PriceHistory {
+            points: (1..=10).map(|d| point(d, 100)).collect(),
+        };
+        assert_eq!(
+            history.range(3, 5),
+            &[point(3, 100), point(4, 100), point(5, 100)]
+        );
+        assert!(history.range(11, 20).is_empty());
+        assert!(history.range(5, 3).is_empty());
+        assert_eq!(history.remove_range(3, 5), 3);
+        assert_eq!(history.points.len(), 7);
+        assert!(history.range(3, 5).is_empty());
     }
 
     #[test]
