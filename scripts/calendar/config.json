@@ -1,0 +1,142 @@
+{
+	"comment": "Event calendar loader configuration. Weights are provisional until calibrated from realized variance (docs/risk/margin-model.md section 6.3) and must stay within the endpoint bounds [0, 10].",
+	"weights": {
+		"central_bank_decision": 3,
+		"us_cpi": 2,
+		"us_payrolls": 2
+	},
+	"underlyings": {
+		"fx": [
+			"EUR",
+			"GBP",
+			"JPY",
+			"CHF",
+			"AUD",
+			"CAD",
+			"NZD",
+			"CNY",
+			"KRW",
+			"TWD",
+			"INR",
+			"SGD",
+			"BRL",
+			"MXN",
+			"CLP"
+		],
+		"crypto": ["BTC", "ETH", "SOL", "ICP"]
+	},
+	"us_events_apply_to": ["fx", "crypto"],
+	"sources": {
+		"fomc": {
+			"name": "Federal Reserve FOMC",
+			"url": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+			"applies_to": ["fx", "crypto"],
+			"class": "central_bank_decision",
+			"time": "14:00",
+			"time_zone": "America/New_York",
+			"time_basis": "published: statement released at 2:00 p.m. ET on the last day of the meeting"
+		},
+		"ecb": {
+			"name": "European Central Bank",
+			"url": "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html",
+			"applies_to": ["EUR"],
+			"class": "central_bank_decision",
+			"time": "14:15",
+			"time_zone": "Europe/Berlin",
+			"time_basis": "published: decision released at 14:15 CET on day 2 of the meeting"
+		},
+		"boe": {
+			"name": "Bank of England",
+			"url": "https://www.bankofengland.co.uk/monetary-policy/upcoming-mpc-dates",
+			"applies_to": ["GBP"],
+			"class": "central_bank_decision",
+			"time": "12:00",
+			"time_zone": "Europe/London",
+			"time_basis": "published: announcement at 12:00 UK time"
+		},
+		"boj": {
+			"name": "Bank of Japan",
+			"url": "https://www.boj.or.jp/en/mopo/mpmsche_minu/index.htm",
+			"applies_to": ["JPY"],
+			"class": "central_bank_decision",
+			"time": "12:00",
+			"time_zone": "Asia/Tokyo",
+			"time_basis": "convention: the BoJ publishes no fixed release time; 12:00 JST on the last day of the meeting"
+		},
+		"rba": {
+			"name": "Reserve Bank of Australia",
+			"url": "https://www.rba.gov.au/schedules-events/board-meeting-schedules.html",
+			"applies_to": ["AUD"],
+			"class": "central_bank_decision",
+			"time": "14:30",
+			"time_zone": "Australia/Sydney",
+			"time_basis": "published: statement at 2:30 p.m. Sydney time on the second day of the meeting"
+		},
+		"snb": {
+			"name": "Swiss National Bank",
+			"url": "https://www.snb.ch/en/services-events/digital-services/event-schedule",
+			"applies_to": ["CHF"],
+			"class": "central_bank_decision",
+			"time": "from_source",
+			"time_zone": "Europe/Zurich",
+			"time_basis": "published: press release time listed in the SNB event schedule"
+		},
+		"boc": {
+			"name": "Bank of Canada",
+			"url": "https://www.bankofcanada.ca/press/upcoming-events/",
+			"applies_to": ["CAD"],
+			"class": "central_bank_decision",
+			"time": "09:45",
+			"time_zone": "America/Toronto",
+			"time_basis": "published: interest rate announcements at 9:45 a.m. ET"
+		},
+		"rbi": {
+			"name": "Reserve Bank of India",
+			"url": "https://www.rbi.org.in/Scripts/AnnualPolicy.aspx",
+			"applies_to": ["INR"],
+			"class": "central_bank_decision",
+			"time": "10:00",
+			"time_zone": "Asia/Kolkata",
+			"time_basis": "convention: resolution announced around 10:00 IST on the last day of the meeting"
+		},
+		"bok": {
+			"name": "Bank of Korea",
+			"url": "https://www.bok.or.kr/eng/main/contents.do?menuNo=400020",
+			"applies_to": ["KRW"],
+			"class": "central_bank_decision",
+			"time": "10:00",
+			"time_zone": "Asia/Seoul",
+			"time_basis": "convention: decision announced in the morning of the meeting day; 10:00 KST"
+		},
+		"us_cpi": {
+			"name": "US CPI release (BLS schedule, via FRED)",
+			"url": "https://api.stlouisfed.org/fred/release/dates?release_id=10",
+			"applies_to": ["fx", "crypto"],
+			"class": "us_cpi",
+			"time": "08:30",
+			"time_zone": "America/New_York",
+			"time_basis": "published: BLS releases at 8:30 a.m. ET",
+			"requires": "FRED_API_KEY"
+		},
+		"us_payrolls": {
+			"name": "US Employment Situation (BLS schedule, via FRED)",
+			"url": "https://api.stlouisfed.org/fred/release/dates?release_id=50",
+			"applies_to": ["fx", "crypto"],
+			"class": "us_payrolls",
+			"time": "08:30",
+			"time_zone": "America/New_York",
+			"time_basis": "published: BLS releases at 8:30 a.m. ET",
+			"requires": "FRED_API_KEY"
+		}
+	},
+	"unsupported": {
+		"rbnz": "Reserve Bank of New Zealand: the official schedule page answers 403 to automated clients",
+		"banxico": "Banco de Mexico: the official calendar is filled in by browser-side script, no static schedule to read",
+		"bcb": "Banco Central do Brasil: no machine-readable official Copom schedule found; the site is a browser application",
+		"bcch": "Banco Central de Chile: the site serves a bot challenge to automated clients",
+		"mas": "Monetary Authority of Singapore: the advance release calendar gives only 'no later than' dates, not exact days",
+		"cbc": "Central Bank of the Republic of China (Taiwan): no official English schedule of board meetings found",
+		"pboc": "People's Bank of China: no fixed monetary policy decision schedule is published",
+		"bls": "Bureau of Labor Statistics: answers 403 to automated clients; its schedule is read through FRED instead"
+	}
+}
