@@ -121,6 +121,10 @@ pub fn get_unit_payoff(
                     ))
                 }
 
+                #[expect(
+                    clippy::unreachable,
+                    reason = "baseline of the quality gate: return an error instead, see docs/ai/patterns.md"
+                )]
                 PayoffType::Categorical | PayoffType::Linear => unreachable!(),
             }
         }

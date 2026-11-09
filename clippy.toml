@@ -7,3 +7,12 @@ disallowed-macros = [
 
 absolute-paths-max-segments = 1
 absolute-paths-allowed-crates = []
+
+# Ratchets set at the baseline measured when the quality gate was added
+# (docs/ai/pr-and-ci.md, "Ratchets"). Lower them as the code improves; never raise them.
+too-many-lines-threshold = 238
+cognitive-complexity-threshold = 21
+
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

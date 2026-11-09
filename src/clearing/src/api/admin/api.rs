@@ -204,7 +204,12 @@ pub async fn withdraw_fund(params: WithdrawFundParams) -> WithdrawFundResult {
                 FUND_WITHDRAWAL_PLANS.with(|m| m.borrow_mut().insert(request_id, plan.clone()));
             }
 
-            Ok(plan.receipt.unwrap().block_index())
+            #[expect(
+                clippy::unwrap_used,
+                reason = "baseline of the quality gate: return an error instead, see docs/ai/patterns.md"
+            )]
+            let receipt = plan.receipt.unwrap();
+            Ok(receipt.block_index())
         })
         .await;
 
