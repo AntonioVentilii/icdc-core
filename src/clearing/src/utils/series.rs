@@ -229,6 +229,7 @@ mod tests {
             start_ns,
             payoff_type: PayoffType::Binary,
             strike: None,
+            settlement_cap: None,
             price_precision: 8,
             payout_unit: PayoutUnit::usd(),
             outcomes: None,
