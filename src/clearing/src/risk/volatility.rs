@@ -14,17 +14,25 @@ pub const EWMA_SEED_RETURNS: usize = 20;
 /// Minimum number of normalized returns needed for an estimate.
 pub const MIN_RETURNS: usize = EWMA_SEED_RETURNS + 1;
 
+/// Minimum number of normalized daily returns before the long-run volatility and the floor are
+/// published (`hs_min_observations` of the design, section 13). Below it the estimate is
+/// provisional: a "long run" over a few weeks of data would mislead anyone backtesting against it.
+pub const LONG_RUN_MIN_RETURNS: usize = 250;
+
 /// A volatility estimate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VolatilityEstimate {
     /// Square root of the EWMA variance.
     pub sigma_ewma: Fixed,
-    /// Square root of the mean normalized squared return over the whole history.
-    pub sigma_long_run: Fixed,
-    /// `max(sigma_ewma, floor_ratio x sigma_long_run)`.
-    pub sigma_used: Fixed,
+    /// Square root of the mean normalized squared return over the whole history. `None` while the
+    /// estimate is provisional.
+    pub sigma_long_run: Option<Fixed>,
+    /// `max(sigma_ewma, floor_ratio x sigma_long_run)`. `None` while the estimate is provisional.
+    pub sigma_used: Option<Fixed>,
     /// Number of normalized returns used.
     pub returns: usize,
+    /// Fewer than [`LONG_RUN_MIN_RETURNS`] returns: only the EWMA is published.
+    pub is_provisional: bool,
 }
 
 /// Squared log returns between consecutive points, each divided by the volatility time elapsed
@@ -79,22 +87,37 @@ pub fn estimate(
     }
 
     let sigma_ewma = variance.sqrt()?;
+    if returns.len() < LONG_RUN_MIN_RETURNS {
+        return Ok(Some(VolatilityEstimate {
+            sigma_ewma,
+            sigma_long_run: None,
+            sigma_used: None,
+            returns: returns.len(),
+            is_provisional: true,
+        }));
+    }
     let sigma_long_run = mean(returns)?.sqrt()?;
     let floor = floor_ratio.checked_mul(sigma_long_run)?;
     Ok(Some(VolatilityEstimate {
         sigma_ewma,
-        sigma_long_run,
-        sigma_used: sigma_ewma.max(floor),
+        sigma_long_run: Some(sigma_long_run),
+        sigma_used: Some(sigma_ewma.max(floor)),
         returns: returns.len(),
+        is_provisional: false,
     }))
 }
 
-/// Volatility time over the next `horizon_days` days starting with today's date (section 6.3).
+/// Volatility time over the next `horizon_days` UTC days, starting with today (section 6.3).
 ///
-/// Each day contributes its day weight. Each calendar event inside `[now, now + horizon)` adds
-/// `(weight - 1) x day_weight x ramp`, with `ramp = 1 - (event_time - now) / horizon`: an event at
-/// the edge of the horizon contributes nothing and reaches its full weight as it arrives, so margin
-/// never jumps when an event enters the horizon. The result is never negative.
+/// The horizon is the days `today ..= today + horizon_days - 1`. Each day contributes its day
+/// weight. Each calendar event at or after `now` and on one of those days adds
+/// `(weight - 1) x day_weight x ramp` to its own day, with
+/// `ramp = 1 - (event_time - now) / (horizon_days x 1 day)`: an event far in the horizon
+/// contributes almost nothing and reaches its full weight as it arrives, so margin never jumps when
+/// an event enters the horizon. An event of weight below 1 (a market holiday) lowers its day.
+///
+/// Each day's total is clamped at zero before summing, so overlapping holidays can at most remove
+/// their own day, never another one.
 pub fn volatility_time(
     now_ns: u64,
     horizon_days: u32,
@@ -102,29 +125,29 @@ pub fn volatility_time(
     events: &[CalendarEvent],
 ) -> Result<Fixed, FixedError> {
     let today = day_of(now_ns);
+    let horizon_ns = u64::from(horizon_days).saturating_mul(NS_PER_DAY);
     let mut total = Fixed::ZERO;
     for offset in 0..horizon_days {
-        total = total.checked_add(day_weight(today.saturating_add(offset), weekend_weight))?;
-    }
-
-    let horizon_ns = u64::from(horizon_days).saturating_mul(NS_PER_DAY);
-    let horizon_end = now_ns.saturating_add(horizon_ns);
-    for event in events {
-        if event.time_ns < now_ns || event.time_ns >= horizon_end {
-            continue;
+        let day = today.saturating_add(offset);
+        let base = day_weight(day, weekend_weight);
+        let mut day_total = base;
+        for event in events {
+            if event.time_ns < now_ns || day_of(event.time_ns) != day {
+                continue;
+            }
+            let remaining =
+                Fixed::from_ratio(i128::from(event.time_ns - now_ns), i128::from(horizon_ns))?;
+            let ramp = Fixed::ONE.checked_sub(remaining)?.max(Fixed::ZERO);
+            let extra = event
+                .weight
+                .checked_sub(Fixed::ONE)?
+                .checked_mul(base)?
+                .checked_mul(ramp)?;
+            day_total = day_total.checked_add(extra)?;
         }
-        let remaining =
-            Fixed::from_ratio(i128::from(event.time_ns - now_ns), i128::from(horizon_ns))?;
-        let ramp = Fixed::ONE.checked_sub(remaining)?;
-        let extra = event
-            .weight
-            .checked_sub(Fixed::ONE)?
-            .checked_mul(day_weight(day_of(event.time_ns), weekend_weight))?
-            .checked_mul(ramp)?;
-        total = total.checked_add(extra)?;
+        total = total.checked_add(day_total.max(Fixed::ZERO))?;
     }
-
-    Ok(total.max(Fixed::ZERO))
+    Ok(total)
 }
 
 /// `k_eff = k x global_k`. The staleness factor of section 3 joins in phase 2.
@@ -147,7 +170,7 @@ mod tests {
 
     use super::{
         effective_multiplier, estimate, normalized_squared_returns, volatility_time,
-        EWMA_SEED_RETURNS,
+        EWMA_SEED_RETURNS, LONG_RUN_MIN_RETURNS,
     };
     use crate::risk::{
         calendar::{CalendarEvent, NS_PER_DAY},
@@ -204,26 +227,47 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(estimate.sigma_ewma, fx(118_000_000).sqrt().unwrap());
-        // Long-run mean = (20 x 0.0001 + 0.0004) / 21 = 0.000114285714...
-        let long_run_variance = fx(24 * SCALE / 10_000).checked_div_int(21).unwrap();
-        assert_eq!(estimate.sigma_long_run, long_run_variance.sqrt().unwrap());
-        // EWMA above 0.75 x long run: the floor does not bind.
-        assert_eq!(estimate.sigma_used, estimate.sigma_ewma);
         assert_eq!(estimate.returns, 21);
+        // 21 returns are far below LONG_RUN_MIN_RETURNS: no long run, no floor.
+        assert!(estimate.is_provisional);
+        assert_eq!(estimate.sigma_long_run, None);
+        assert_eq!(estimate.sigma_used, None);
+    }
+
+    #[test]
+    fn long_run_and_floor_are_published_with_enough_history() {
+        // 249 returns of 0.0001 and a last one of 0.0004: the EWMA ends at
+        // 0.94 x 0.0001 + 0.06 x 0.0004 = 0.000118, the long-run mean is 0.0253 / 250.
+        let mut returns = vec![fx(SCALE / 10_000); LONG_RUN_MIN_RETURNS - 1];
+        returns.push(fx(4 * SCALE / 10_000));
+        let estimate = estimate(&returns, fx(940_000_000_000), fx(750_000_000_000))
+            .unwrap()
+            .unwrap();
+        assert!(!estimate.is_provisional);
+        assert_eq!(estimate.sigma_ewma, fx(118_000_000).sqrt().unwrap());
+        let long_run_variance = fx(253 * SCALE / 10_000).checked_div_int(250).unwrap();
+        assert_eq!(
+            estimate.sigma_long_run,
+            Some(long_run_variance.sqrt().unwrap())
+        );
+        // EWMA above 0.75 x long run: the floor does not bind.
+        assert_eq!(estimate.sigma_used, Some(estimate.sigma_ewma));
     }
 
     #[test]
     fn floor_binds_after_a_calm_period() {
         // A volatile seed followed by a long calm stretch pulls EWMA well below the long-run level.
         let mut returns = vec![fx(SCALE / 100); EWMA_SEED_RETURNS];
-        returns.extend(vec![fx(SCALE / 1_000_000); 200]);
+        returns.extend(vec![fx(SCALE / 1_000_000); 300]);
         let floor_ratio = fx(750_000_000_000);
         let estimate = estimate(&returns, fx(940_000_000_000), floor_ratio)
             .unwrap()
             .unwrap();
-        let floor = floor_ratio.checked_mul(estimate.sigma_long_run).unwrap();
+        let floor = floor_ratio
+            .checked_mul(estimate.sigma_long_run.unwrap())
+            .unwrap();
         assert!(estimate.sigma_ewma < floor);
-        assert_eq!(estimate.sigma_used, floor);
+        assert_eq!(estimate.sigma_used, Some(floor));
     }
 
     #[test]
@@ -281,6 +325,35 @@ mod tests {
             "an event now adds its full extra weight"
         );
         assert_eq!(vt(&past), base, "a past event adds nothing");
+    }
+
+    #[test]
+    fn holidays_lower_their_own_day_and_never_below_zero() {
+        let monday_ns = u64::from(MONDAY) * NS_PER_DAY;
+        let three_days =
+            |events: &[CalendarEvent]| volatility_time(monday_ns, 3, Fixed::ONE, events).unwrap();
+        assert_eq!(three_days(&[]), Fixed::from_int(3));
+
+        // One holiday (weight 0) today at full ramp removes today.
+        assert_eq!(three_days(&[event(monday_ns, 0)]), Fixed::from_int(2));
+        // Two holidays on the same day still remove only that day: each day clamps at zero.
+        assert_eq!(
+            three_days(&[event(monday_ns, 0), event(monday_ns, 0)]),
+            Fixed::from_int(2)
+        );
+    }
+
+    #[test]
+    fn events_only_count_on_days_inside_the_horizon() {
+        // Now is Monday 23:59; a 3-day horizon covers Monday, Tuesday and Wednesday. An event early
+        // on Thursday falls within 72 hours of now but outside the counted days, so it adds
+        // nothing.
+        let now = u64::from(MONDAY) * NS_PER_DAY + NS_PER_DAY - 60 * 1_000_000_000;
+        let thursday_early = u64::from(MONDAY + 3) * NS_PER_DAY + 30 * 60 * 1_000_000_000;
+        assert_eq!(
+            volatility_time(now, 3, Fixed::ONE, &[event(thursday_early, 5)]).unwrap(),
+            Fixed::from_int(3)
+        );
     }
 
     #[test]

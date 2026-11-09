@@ -26,8 +26,10 @@ pub enum RiskError {
     UploadNotOpen(u64),
     /// A history chunk was rejected.
     InvalidHistoryChunk(String),
-    /// The declared SHA-256 differs from the hash of the uploaded points.
-    HashMismatch { computed: String },
+    /// The declared SHA-256 differs from the hash of the uploaded points. The computed hash is not
+    /// returned: the declared hash must come from an independent off-chain computation on the
+    /// public source, not be copied from the canister.
+    HashMismatch,
     /// No pending action with this id.
     PendingActionNotFound(u64),
     /// The action cannot run before this time.
@@ -42,4 +44,7 @@ pub enum RiskError {
     InvalidPrincipal(String),
     /// No calendar event with this id for the underlying.
     CalendarEventNotFound(u64),
+    /// The caller's role does not allow this change (for example, a controller may raise a
+    /// multiplier but only a risk administrator may propose lowering it).
+    Unauthorized(String),
 }

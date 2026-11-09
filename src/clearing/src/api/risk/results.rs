@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use shared::types::{AssetId, DecimalValue};
 
 use super::errors::RiskError;
-use crate::risk::state::RiskChangeOutcome;
 
 macro_rules! risk_result {
     ($name:ident, $ok:ty) => {
@@ -40,9 +39,32 @@ impl From<Result<(), RiskError>> for RiskUnitResult {
 risk_result!(RiskIdResult, u64);
 risk_result!(RiskIdsResult, Vec<u64>);
 risk_result!(RiskCountResult, u32);
-risk_result!(RiskChangeResult, RiskChangeOutcome);
+risk_result!(RiskChangeResult, RiskChangeView);
 risk_result!(VolatilityResult, VolatilityView);
 risk_result!(PriceHistoryResult, Vec<PricePointView>);
+risk_result!(RiskGovernanceResult, RiskGovernanceView);
+risk_result!(UnderlyingRiskParamsResult, Vec<UnderlyingRiskParamsView>);
+risk_result!(CalendarEventsResult, Vec<CalendarEventView>);
+risk_result!(PendingActionsResult, Vec<PendingActionView>);
+
+/// Whether a requested change took effect or waits behind the timelock.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub enum RiskChangeView {
+    Applied,
+    Pending {
+        action_id: u64,
+        executable_at_ns: u64,
+    },
+}
+
+/// One entry of the public risk audit log.
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct RiskAuditEntryView {
+    pub seq: u64,
+    pub time_ns: u64,
+    pub caller: Principal,
+    pub description: String,
+}
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct RiskGovernanceView {
@@ -72,11 +94,31 @@ pub struct CalendarEventView {
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum PendingActionKindView {
-    LowerRiskMultiplier { underlying: String, k: DecimalValue },
-    LowerGlobalRiskMultiplier { k: DecimalValue },
-    ActivateHistoryUpload { upload_id: u64 },
-    AddRiskAdmin { principal: Principal },
-    LowerTimelockDuration { duration_ns: u64 },
+    LowerRiskMultiplier {
+        underlying: String,
+        from: DecimalValue,
+        to: DecimalValue,
+    },
+    LowerGlobalRiskMultiplier {
+        from: DecimalValue,
+        to: DecimalValue,
+    },
+    ChangeTimelockDuration {
+        from_ns: u64,
+        to_ns: u64,
+    },
+    ActivateHistoryUpload {
+        upload_id: u64,
+    },
+    RemoveHistoryPoints {
+        underlying: String,
+        from_date: u32,
+        to_date: u32,
+        expected_sha256: String,
+    },
+    AddRiskAdmin {
+        principal: Principal,
+    },
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -122,9 +164,13 @@ pub struct PricePointView {
 pub struct VolatilityView {
     pub underlying: String,
     pub sigma_ewma: DecimalValue,
-    pub sigma_long_run: DecimalValue,
-    /// `max(sigma_ewma, floor_ratio x sigma_long_run)`.
-    pub sigma_used: DecimalValue,
+    /// Long-run volatility over the whole history. Absent while the estimate is provisional.
+    pub sigma_long_run: Option<DecimalValue>,
+    /// `max(sigma_ewma, floor_ratio x sigma_long_run)`. Absent while the estimate is provisional.
+    pub sigma_used: Option<DecimalValue>,
+    /// True while the history holds fewer than 250 returns: the EWMA is published, but there is no
+    /// long-run volatility and no floor yet.
+    pub is_provisional: bool,
     pub returns: u32,
     pub last_date: u32,
     pub mpor_days: u32,

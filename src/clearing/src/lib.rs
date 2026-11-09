@@ -39,14 +39,17 @@ use crate::{
         risk::{
             params::{
                 AddCalendarEventsParams, AppendHistoryChunkParams, BeginHistoryUploadParams,
-                GetPriceHistoryParams, ListRiskAuditParams, RemoveCalendarEventParams,
-                RiskAdminParams, SealHistoryUploadParams, SetGlobalRiskMultiplierParams,
-                SetRiskMultiplierParams, SetTimelockDurationParams, SetUnderlyingRiskParamsParams,
+                GetHistoryUploadPointsParams, GetPriceHistoryParams, HistoryUploadParams,
+                ListRiskAuditParams, PendingActionParams, ProposeHistoryRemovalParams,
+                RemoveCalendarEventParams, RiskAdminParams, SealHistoryUploadParams,
+                SetGlobalRiskMultiplierParams, SetRiskMultiplierParams, SetTimelockDurationParams,
+                SetUnderlyingRiskParamsParams, UnderlyingParams,
             },
             results::{
-                CalendarEventView, HistoryUploadView, PendingActionView, PriceHistoryResult,
-                RiskChangeResult, RiskCountResult, RiskGovernanceView, RiskIdResult, RiskIdsResult,
-                RiskUnitResult, UnderlyingRiskParamsView, VolatilityResult,
+                CalendarEventsResult, HistoryUploadView, PendingActionsResult, PriceHistoryResult,
+                RiskAuditEntryView, RiskChangeResult, RiskCountResult, RiskGovernanceResult,
+                RiskIdResult, RiskIdsResult, RiskUnitResult, UnderlyingRiskParamsResult,
+                VolatilityResult,
             },
         },
         settlement::{
@@ -74,7 +77,6 @@ use crate::{
         },
     },
     memory::CONFIG,
-    risk::state::RiskAuditEntry,
     types::{
         event::Event,
         http::{HttpRequest, HttpResponse},

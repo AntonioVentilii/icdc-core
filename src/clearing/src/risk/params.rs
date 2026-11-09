@@ -59,7 +59,9 @@ pub const MPOR_DAYS_MAX: u32 = 10;
 
 const HOUR_NS: u64 = 3_600 * 1_000_000_000;
 pub const TIMELOCK_DURATION_MIN_NS: u64 = 24 * HOUR_NS;
-pub const TIMELOCK_DURATION_MAX_NS: u64 = 30 * 24 * HOUR_NS;
+/// Seven days: a compromised or departing risk administrator can delay the appointment of a
+/// replacement by at most this long.
+pub const TIMELOCK_DURATION_MAX_NS: u64 = 7 * 24 * HOUR_NS;
 pub const DEFAULT_TIMELOCK_DURATION_NS: u64 = 48 * HOUR_NS;
 
 /// Maximum length of an underlying identifier.
