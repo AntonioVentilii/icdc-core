@@ -1450,6 +1450,9 @@ type WithdrawCollateralResult = variant {
 };
 type WithdrawFundError = variant {
 	TransferFailed : text;
+	// The insurance fund backs the default waterfall and is never withdrawn
+	// through an administrative path; only the waterfall draws on it.
+	InsuranceFundLocked;
 	InsufficientFunds;
 	Common : CommonError
 };
@@ -1846,7 +1849,11 @@ service : (Config) -> {
 	withdraw_collateral : (WithdrawCollateralParams) -> (
 		WithdrawCollateralResult
 	);
-	// Withdraws assets from the Insurance Fund or Treasury to an external wallet.
+	// Withdraws assets from the Treasury to an external wallet.
+	//
+	// The Insurance Fund backs the default waterfall and cannot be withdrawn:
+	// requests for it are rejected before any plan is created, and a plan left
+	// over from before this rule can only be cancelled (which refunds the fund).
 	//
 	// This method is gated to canister controllers.
 	withdraw_fund : (WithdrawFundParams) -> (WithdrawFundResult)

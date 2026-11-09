@@ -109,7 +109,11 @@ pub fn get_funds() -> GetFundsResult {
     }
 }
 
-/// Withdraws assets from the Insurance Fund or Treasury to an external wallet.
+/// Withdraws assets from the Treasury to an external wallet.
+///
+/// The Insurance Fund backs the default waterfall and cannot be withdrawn:
+/// requests for it are rejected before any plan is created, and a plan left
+/// over from before this rule can only be cancelled (which refunds the fund).
 ///
 /// This method is gated to canister controllers.
 #[update(guard = "caller_is_controller")]
@@ -123,6 +127,8 @@ pub async fn withdraw_fund(params: WithdrawFundParams) -> WithdrawFundResult {
                 amount,
                 to,
             } = params;
+
+            ensure_fund_withdrawable(fund_type)?;
 
             let config =
                 COLLATERAL_ASSETS.with(|assets| {
@@ -141,6 +147,13 @@ pub async fn withdraw_fund(params: WithdrawFundParams) -> WithdrawFundResult {
                 amount,
                 to,
             });
+
+            // The stored plan, not the incoming request, decides what may be
+            // withdrawn: a pre-upgrade insurance plan cannot be resumed under a
+            // different fund type, and a retry cannot change asset, amount or
+            // recipient of the plan it resumes.
+            ensure_fund_withdrawable(plan.fund_type)?;
+            ensure_retry_matches_plan(&plan, fund_type, &asset_id, amount, to)?;
 
             if plan.status == PlanStatus::Finalised {
                 return plan.receipt.map(|r| r.block_index()).ok_or(
@@ -208,6 +221,14 @@ pub fn cancel_fund_withdrawal(params: CancelFundWithdrawalParams) -> CancelFundW
     let Some(plan) = old_plan else {
         return Err(CancelFundWithdrawalError::PlanNotFound).into();
     };
+
+    // A `Planned` plan never deducted anything (deduction and the move to
+    // `Executing` happen together), so it is dropped without a refund. This is
+    // the only way to clear a pre-upgrade insurance plan stuck in `Planned`,
+    // which `withdraw_fund` now refuses to resume.
+    if plan.status == PlanStatus::Planned && plan.receipt.is_none() {
+        return Ok(()).into();
+    }
 
     if plan.status != PlanStatus::Executing || plan.receipt.is_some() {
         // Put it back
@@ -537,11 +558,43 @@ pub async fn admin_reassign_account(params: ReassignAccountParams) -> ReassignAc
         .into()
 }
 
+/// Only the Treasury can be withdrawn; the Insurance Fund is drawn exclusively
+/// by the default waterfall.
+pub(crate) fn ensure_fund_withdrawable(fund_type: FundType) -> Result<(), WithdrawFundError> {
+    match fund_type {
+        FundType::Treasury => Ok(()),
+        FundType::Insurance => Err(WithdrawFundError::InsuranceFundLocked),
+    }
+}
+
+pub(crate) fn ensure_retry_matches_plan(
+    plan: &FundWithdrawalPlan,
+    fund_type: FundType,
+    asset_id: &AssetId,
+    amount: u128,
+    to: Principal,
+) -> Result<(), WithdrawFundError> {
+    if plan.fund_type == fund_type
+        && &plan.asset_id == asset_id
+        && plan.amount == amount
+        && plan.to == to
+    {
+        Ok(())
+    } else {
+        Err(WithdrawFundError::TransferFailed(format!(
+            "request_id {} is already used by a plan with different parameters",
+            plan.request_id
+        )))
+    }
+}
+
 pub(crate) fn deduct_fund_balance_impl(
     asset_id: &AssetId,
     amount: u128,
     fund_type: FundType,
 ) -> Result<(), WithdrawFundError> {
+    ensure_fund_withdrawable(fund_type)?;
+
     let store = match fund_type {
         FundType::Insurance => &INSURANCE_FUND,
         FundType::Treasury => &TREASURY,
@@ -559,39 +612,163 @@ pub(crate) fn deduct_fund_balance_impl(
 
 #[cfg(test)]
 mod tests {
+    use candid::Principal;
     use shared::types::AssetId;
 
     use crate::{
-        api::admin::{api::deduct_fund_balance_impl, errors::WithdrawFundError, params::FundType},
-        memory::{INSURANCE_FUND, TREASURY},
+        api::admin::{
+            api::{
+                cancel_fund_withdrawal, deduct_fund_balance_impl, ensure_fund_withdrawable,
+                ensure_retry_matches_plan,
+            },
+            errors::WithdrawFundError,
+            params::{CancelFundWithdrawalParams, FundType},
+            results::CancelFundWithdrawalResult,
+        },
+        memory::{FUND_WITHDRAWAL_PLANS, INSURANCE_FUND, TREASURY},
+        types::plans::{FundWithdrawalPlan, PlanStatus},
     };
+
+    fn plan(request_id: &str, fund_type: FundType, status: PlanStatus) -> FundWithdrawalPlan {
+        FundWithdrawalPlan {
+            request_id: request_id.to_owned(),
+            fund_type,
+            asset_id: AssetId::from("vUSD".to_owned()),
+            amount: 10_000,
+            to: Principal::from_slice(&[7]),
+            status,
+            idempotency_ns: 0_u64.into(),
+            receipt: None,
+        }
+    }
+
+    #[test]
+    fn stored_insurance_plan_cannot_be_resumed_under_another_fund_type() {
+        // A pre-upgrade insurance plan left `Executing`: a retry sent as
+        // Treasury with the same request_id must not resume it.
+        let stored = plan("legacy", FundType::Insurance, PlanStatus::Executing);
+
+        assert!(matches!(
+            ensure_fund_withdrawable(stored.fund_type),
+            Err(WithdrawFundError::InsuranceFundLocked)
+        ));
+        assert!(ensure_retry_matches_plan(
+            &stored,
+            FundType::Treasury,
+            &stored.asset_id,
+            stored.amount,
+            stored.to
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn retry_cannot_change_amount_or_recipient() {
+        let stored = plan("t1", FundType::Treasury, PlanStatus::Executing);
+        let asset = stored.asset_id.clone();
+
+        assert!(
+            ensure_retry_matches_plan(&stored, FundType::Treasury, &asset, 10_000, stored.to)
+                .is_ok()
+        );
+        assert!(
+            ensure_retry_matches_plan(&stored, FundType::Treasury, &asset, 99_000, stored.to)
+                .is_err()
+        );
+        assert!(ensure_retry_matches_plan(
+            &stored,
+            FundType::Treasury,
+            &asset,
+            10_000,
+            Principal::from_slice(&[8])
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn cancel_drops_stale_planned_insurance_plan_without_refund() {
+        let asset_id = AssetId::from("vUSD".to_owned());
+        INSURANCE_FUND.with(|f| {
+            let mut f = f.borrow_mut();
+            f.clear();
+            f.insert(asset_id.clone(), 100_000);
+        });
+        FUND_WITHDRAWAL_PLANS.with(|m| {
+            m.borrow_mut().insert(
+                "stale".to_owned(),
+                plan("stale", FundType::Insurance, PlanStatus::Planned),
+            );
+        });
+
+        let res = cancel_fund_withdrawal(CancelFundWithdrawalParams {
+            request_id: "stale".to_owned(),
+        });
+
+        assert!(matches!(res, CancelFundWithdrawalResult::Ok));
+        assert!(FUND_WITHDRAWAL_PLANS.with(|m| !m.borrow().contains_key("stale")));
+        // Nothing was deducted when the plan was created, so nothing is refunded.
+        INSURANCE_FUND.with(|f| {
+            assert_eq!(f.borrow().get(&asset_id).copied().unwrap(), 100_000);
+        });
+    }
 
     #[test]
     fn withdraw_fund_resilience_on_transfer_failure() {
         let asset_id = AssetId::from("vUSD".to_owned());
         let amount = 10_000; // $1
 
-        // Initialize insurance fund with $10
-        INSURANCE_FUND.with(|f| {
+        // Initialize treasury with $10
+        TREASURY.with(|f| {
             let mut f = f.borrow_mut();
             f.clear();
             f.insert(asset_id.clone(), 100_000);
         });
 
         // Step 1: Deduct
-        let deduct_res = deduct_fund_balance_impl(&asset_id, amount, FundType::Insurance);
+        let deduct_res = deduct_fund_balance_impl(&asset_id, amount, FundType::Treasury);
         assert!(deduct_res.is_ok());
 
-        INSURANCE_FUND.with(|f| {
+        TREASURY.with(|f| {
             assert_eq!(f.borrow().get(&asset_id).copied().unwrap(), 90_000);
         });
 
         // Step 2: In the new implementation we deliberately DO NOT rollback
         // upon transfer error. The internal fund deduction stands and Phase B
         // is not retried.
-        INSURANCE_FUND.with(|f| {
+        TREASURY.with(|f| {
             assert_eq!(f.borrow().get(&asset_id).copied().unwrap(), 90_000);
         });
+    }
+
+    #[test]
+    fn insurance_fund_cannot_be_withdrawn() {
+        let asset_id = AssetId::from("vUSD".to_owned());
+
+        INSURANCE_FUND.with(|f| {
+            let mut f = f.borrow_mut();
+            f.clear();
+            f.insert(asset_id.clone(), 100_000);
+        });
+
+        assert!(matches!(
+            ensure_fund_withdrawable(FundType::Insurance),
+            Err(WithdrawFundError::InsuranceFundLocked)
+        ));
+
+        // The internal deduction path rejects it too, even for an amount the
+        // fund could cover, and leaves the balance untouched.
+        assert!(matches!(
+            deduct_fund_balance_impl(&asset_id, 10_000, FundType::Insurance),
+            Err(WithdrawFundError::InsuranceFundLocked)
+        ));
+        INSURANCE_FUND.with(|f| {
+            assert_eq!(f.borrow().get(&asset_id).copied().unwrap(), 100_000);
+        });
+    }
+
+    #[test]
+    fn treasury_remains_withdrawable() {
+        assert!(ensure_fund_withdrawable(FundType::Treasury).is_ok());
     }
 
     #[test]
