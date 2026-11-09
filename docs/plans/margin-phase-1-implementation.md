@@ -14,6 +14,7 @@ The fund-withdrawal block of section 12 ships separately (it is a one-line secur
 - Risk endpoints require `caller_is_risk_admin`. Controllers are **not** implicitly risk administrators.
 - Only controllers can add or remove a risk administrator. Adding goes through the timelock; removing is immediate (it can only reduce powers). A controller principal cannot be made a risk administrator, so the two roles never sit on the same key.
 - Treasury operations (`withdraw_fund` and the rest of `admin`) stay controller-only, so a risk administrator can never move funds.
+- **First risk administrator: to be decided.** The canister ships with no risk administrator, so every risk endpoint stays unusable until a controller proposes one and the timelock expires. Which principal that is (and whether it is a person, a multisig or a DAO-controlled canister) is not decided yet.
 
 Limit, stated plainly: canister controllers can still upgrade the code. App-level roles bound what an admin key can do **through the API**; they do not and cannot bound what a code upgrade can do. Long-term governance of upgrades is open question 17.2 of the design.
 
