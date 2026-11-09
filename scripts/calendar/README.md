@@ -8,6 +8,7 @@ No date is invented. Every event is read at run time from its publisher and carr
 
 ```bash
 # 1. Build: fetch every official source and write a reviewable calendar.json.
+#    FRED_API_KEY is optional: without it US CPI and payrolls are skipped with a warning.
 FRED_API_KEY=... node scripts/calendar/build.mjs --out calendar.json
 
 # 2. Review calendar.json, then dry run against the canister (writes nothing).
@@ -17,10 +18,11 @@ scripts/calendar/load.sh --file calendar.json --network ic --identity risk-admin
 scripts/calendar/load.sh --file calendar.json --network ic --identity risk-admin --apply
 ```
 
-- `build.mjs` exits non-zero if any source fails. `--allow-partial` accepts a partial calendar; `--sources fomc,ecb` limits the run to some sources.
-- `load.sh` is idempotent: an event already on the canister (same time and label) is skipped, so it can be rerun after every refresh. It keeps at most 512 events per underlying, as the canister enforces.
+- `build.mjs` exits non-zero if any source fails. `--allow-partial` accepts a partial calendar; `--sources fomc,ecb` limits the run to some sources. A source whose key is missing (`FRED_API_KEY`) is reported as `skipped`, not failed, and the rest still builds.
+- `load.sh` is idempotent: an event already on the canister (same time and label) is skipped, so it can be rerun after every refresh. To change an existing event's weight, remove it first with `remove_calendar_event`. It keeps at most 512 live events per underlying, as the canister enforces; events that ended more than a day ago are pruned by the canister and do not count.
 - The identity must hold the risk administrator role, and every underlying must already be configured with `set_underlying_risk_params`.
-- Past events are dropped at build time.
+- Past events are dropped at build time, and again at load time for anything less than 10 minutes away, because the canister rejects a whole batch if one event is already in the past. If a batch is still rejected for a past or duplicate event, `load.sh` re-reads the canister and retries once.
+- Holidays can be loaded as events with a weight below 1 (the canister clamps each day at 0).
 
 ## Configuration
 
@@ -48,6 +50,6 @@ Times are converted to UTC with the official time-zone database built into Node,
 | Bank of Korea MPB meeting dates                                                   | KRW         | 10:00 Seoul, convention                         |
 | US CPI and Employment Situation release dates, from the BLS schedule through FRED | all         | 08:30 New York, published                       |
 
-The FRED sources need a free API key in `FRED_API_KEY` (<https://fred.stlouisfed.org/docs/api/api_key.html>): the BLS site itself refuses automated clients.
+The FRED sources need a free API key in `FRED_API_KEY` (<https://fred.stlouisfed.org/docs/api/api_key.html>): the BLS site itself refuses automated clients. Without the key they are skipped and the US events other than FOMC are missing from every calendar.
 
 Not covered automatically (see `unsupported` in `config.json`): RBNZ, Banxico, Banco Central do Brasil, Banco Central de Chile, MAS, the Central Bank of the Republic of China (Taiwan) and the People's Bank of China. Their events can be added by hand with `add_calendar_events`, citing the official page.

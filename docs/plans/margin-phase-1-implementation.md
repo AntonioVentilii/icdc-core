@@ -90,6 +90,18 @@ Consumers in this phase:
 - `ln` reduces the argument to `[1, 2)` by powers of two, then sums the series `2 x atanh(y)` with `y = (m - 1) / (m + 1)`, to an absolute error below `10^-10` on the history's price ratios (the worst case measured in the tests is about `1.6 x 10^-11`).
 - At the API boundary values travel as `DecimalValue` (`value`, `decimals`): inputs are converted with truncation, outputs are returned with 12 decimals.
 
+### 1.6 Event calendar loader (doc section 6.3)
+
+The calendar is filled by an operator script, `scripts/calendar/`, never by dates written in code.
+
+- `build.mjs` (Node, no dependencies) fetches each publisher's official schedule, parses its future events and writes a reviewable `calendar.json` with the source URL of every event. It never contacts the canister. No date is invented: a parser that no longer recognizes its page fails loudly, and the run exits non-zero unless `--allow-partial` is given. Times are converted to UTC with the time-zone database built into Node.
+- `load.sh` loads that file through `add_calendar_events`. Dry run is the default; `--apply` is the only write path. It reads `list_calendar_events` first and skips events already present, drops anything less than 10 minutes away, respects the 512-event cap net of what the canister prunes, and on a rejection for a past or duplicate event re-reads the canister and retries once. An underlying without risk parameters is reported and skipped.
+- `config.json` holds everything tunable: the provisional weights (central-bank decision 3, US CPI 2, US payrolls 2, to be recalibrated from realized variance), release times and time zones, the mapping of sources to underlyings (each FX underlying gets its central bank plus the US events, crypto gets the US events), and the publishers that cannot be read.
+- Sources read automatically today: Federal Reserve (FOMC), ECB, Bank of England, Bank of Japan, RBA, SNB, Bank of Canada, RBI and Bank of Korea. Release times are published by the source except for the Bank of Japan, RBI and Bank of Korea, where a documented convention is used.
+- US CPI and payrolls come from the BLS release schedule through FRED, because the BLS site refuses automated clients. They need a free `FRED_API_KEY`; without it they are skipped with a warning and every other source still builds.
+- Not read automatically: RBNZ (403), Banxico (dates filled in by the browser), Banco Central do Brasil (no machine-readable schedule), Banco Central de Chile (bot challenge), MAS (only "no later than" dates), the Central Bank of the Republic of China (no English schedule) and the People's Bank of China (no fixed schedule). For NZD, MXN, BRL, CLP, SGD, TWD and CNY only the US events load until they are added by hand from the official pages.
+- The first real load waits for a risk administrator, which is still to be decided (section 1.1). It was exercised against a locally deployed canister up to the role guard.
+
 ## 2. Files
 
 | File                                                                                                  | Content                                                              |
@@ -109,6 +121,7 @@ Consumers in this phase:
 | `src/clearing/src/lib.rs`                                                                             | Module, endpoint imports, sampler timer on `init` and `post_upgrade` |
 | `src/clearing/Cargo.toml`                                                                             | `sha2` (already a workspace dependency)                              |
 | `src/clearing/tests/it/risk.rs`                                                                       | Integration tests                                                    |
+| `scripts/calendar/{build.mjs,load.sh,config.json,README.md}`                                          | Event calendar loader (section 1.6)                                  |
 
 ## 3. Endpoints
 
@@ -175,4 +188,4 @@ Integration (PocketIC): adding a risk administrator through the timelock by adva
 - **Holidays are calendar events with weight below 1** rather than a separate holiday calendar (section 1.4).
 - **The `ln` error bound is below `10^-10`**, measured about `1.6 x 10^-11` (section 1.5).
 - **MPOR defaults are unchanged** (3 days for every underlying). Whether FX and crypto need different defaults is left to a separate decision.
-- **No pre-filled calendar in code.** The design asks for a calendar pre-filled with central-bank meetings and data releases. Those dates must come from the publishers' official schedules, so they are loaded through `add_calendar_events` by an operator script, not hard-coded here.
+- **No pre-filled calendar in code.** The design asks for a calendar pre-filled with central-bank meetings and data releases. Those dates must come from the publishers' official schedules, so they are loaded through `add_calendar_events` by the operator script of section 1.6, not hard-coded here.

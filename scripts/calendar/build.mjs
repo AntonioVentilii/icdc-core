@@ -11,7 +11,8 @@
 //
 // Usage: node scripts/calendar/build.mjs [--out FILE] [--sources a,b,c] [--allow-partial]
 //
-// The FRED sources (US CPI and payrolls) need a free API key in FRED_API_KEY.
+// The FRED sources (US CPI and payrolls) need a free API key in FRED_API_KEY. Without it they
+// are skipped with a warning and every other source still builds.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -415,6 +416,17 @@ async function main() {
 		if (!(weight >= 0 && weight <= WEIGHT_MAX)) {
 			throw new Error(`weight for ${source.class} must be within [0, ${WEIGHT_MAX}]`);
 		}
+		if (source.requires && !process.env[source.requires]) {
+			// A missing key skips the source instead of failing the run: every other source still
+			// produces its calendar, and the report says exactly what was left out.
+			report[id] = {
+				status: 'skipped',
+				url: source.url,
+				reason: `${source.requires} is not set`
+			};
+			console.error(`WARNING: ${id} skipped because ${source.requires} is not set`);
+			continue;
+		}
 		try {
 			const raw =
 				source.requires === 'FRED_API_KEY'
@@ -476,7 +488,8 @@ async function main() {
 	writeFileSync(args.out, `${JSON.stringify(output, null, '\t')}\n`);
 
 	for (const [id, r] of Object.entries(report)) {
-		const detail = r.status === 'ok' ? `${r.future} future of ${r.parsed}` : (r.error ?? '');
+		const detail =
+			r.status === 'ok' ? `${r.future} future of ${r.parsed}` : (r.error ?? r.reason ?? '');
 		console.error(`${r.status.padEnd(9)} ${id.padEnd(12)} ${detail}`);
 	}
 	console.error(`wrote ${args.out}`);
