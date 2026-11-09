@@ -4,13 +4,13 @@ What an agent may touch in `icdc-core`, what it must ask about first, and which 
 
 ## Generated paths: never edit by hand
 
-| Path                                                                              | Produced by                                                                   |
-| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `src/clearing/clearing.did`, `src/registry/registry.did`, `src/minter/minter.did` | `npm run did` (`scripts/did.sh`); `scripts/lint.did.sh` fails CI on any drift |
-| `CHANGELOG.md`, `.release-please-manifest.json`                                   | release-please, on the `chore(release): vX.Y.Z` PR                            |
-| The `version` in `Cargo.toml`, `Cargo.lock`, `package.json`, `package-lock.json`  | the release workflow, on the same PR                                          |
-| `Cargo.lock` (otherwise), `package-lock.json` (otherwise)                         | `cargo` and `npm` when a dependency changes                                   |
-| `**/declarations/`, `target/`, `.dfx/`                                            | the build (git-ignored)                                                       |
+| Path                                                                              | Produced by                                                                                             |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `src/clearing/clearing.did`, `src/registry/registry.did`, `src/minter/minter.did` | `npm run did` (`scripts/did.sh`); the `did` job in `checks.yml` regenerates them and fails on any drift |
+| `CHANGELOG.md`, `.release-please-manifest.json`                                   | release-please, on the `chore(release): vX.Y.Z` PR                                                      |
+| The `version` in `Cargo.toml`, `Cargo.lock`, `package.json`, `package-lock.json`  | the release workflow, on the same PR                                                                    |
+| `Cargo.lock` (otherwise), `package-lock.json` (otherwise)                         | `cargo` and `npm` when a dependency changes                                                             |
+| `**/declarations/`, `target/`, `.dfx/`                                            | the build (git-ignored)                                                                                 |
 
 ## Protected paths: ask before changing
 
@@ -66,7 +66,7 @@ Never:
 
 ## Security rules
 
-- Every endpoint has a guard: `caller_is_not_anonymous` at least, `caller_is_controller` or a role check for anything administrative (see [`patterns.md`](patterns.md#guards)).
+- Every update, and every query that returns caller-specific or restricted data, has a guard: `caller_is_not_anonymous` at least, `caller_is_controller` or a role check for anything administrative (see [`patterns.md`](patterns.md#guards)). Public discovery queries (`list_series` in the clearing, `get_series`, `list_series_with`, `is_trading_authorized` in the registry) are deliberately unguarded; a new query is public only when everything it returns is public.
 - Validate every principal and every amount at the boundary, and follow the Internet Computer canister security practices (reentrancy across `await`, bounded inter-canister calls, trap-safe callbacks).
 - Value moves only through the Plan, Execute, Finalise flow, never by a direct transfer from an endpoint.
 

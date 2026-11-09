@@ -31,7 +31,7 @@ Never perform an `await` between validation and mutation if that can leave the s
 - **Not collateral.** Users do not deposit `vUSD`; they deposit supported collateral (ICP, BTC, USDC).
 - **Realised PnL and cash.** `vUSD` is the user's realised PnL and cash claim. The cash balance does not decrease when a position opens or a limit order rests: the collateral is locked in `reserved_margin_usd`, and available margin is `equity - reserved`.
 - **Realisation.** A trade realises PnL into the `vUSD` balance by comparing the previous cost basis to the value at the trade price.
-- **Withdrawal.** When a user withdraws realised value, the clearing burns the matching `vUSD` and transfers the same value in vault assets.
+- **Withdrawal.** `withdraw_collateral` debits the user's balance of the requested collateral asset, after checking that equity stays above reserved margin, and transfers that asset (`src/clearing/src/api/collateral/api.rs:171`). The internal asset itself can be neither deposited nor withdrawn (`:58`, `:188`). Burning `vUSD` against vault assets is the design in [`NEW_ARCHITECTURE.md`](../../NEW_ARCHITECTURE.md), not what the code does today.
 - The clearing canister must be a controller of the `vUSD` ledger (`scripts/init.clearing.sh` adds it). Verified properties: [`internal_ledger_verification.md`](internal_ledger_verification.md).
 
 ## 5. Positions stay inside the clearing

@@ -22,7 +22,7 @@ A result is a Candid-friendly `Ok`/`Err` enum built from a Rust `Result` through
 
 ### Guards
 
-Authorization is declared on the endpoint, never checked ad hoc inside it: `#[update(guard = "caller_is_not_anonymous")]` (`src/clearing/src/api/trade/api.rs:160`) or `guard = "caller_is_controller"` (`:365`). The guards live in each canister's `guards.rs` (`src/clearing/src/guards.rs:5`). Role checks that need arguments (engine roles, group membership) are functions such as `has_engine_role_on` in the registry's `guards.rs`, called first thing in the endpoint.
+Authorization is declared on the endpoint, never checked ad hoc inside it (public discovery queries such as `list_series`, `src/clearing/src/api/general/api.rs:9`, carry no guard on purpose): `#[update(guard = "caller_is_not_anonymous")]` (`src/clearing/src/api/trade/api.rs:160`) or `guard = "caller_is_controller"` (`:365`). The guards live in each canister's `guards.rs` (`src/clearing/src/guards.rs:5`). Role checks that need arguments (engine roles, group membership) are functions such as `has_engine_role_on` in the registry's `guards.rs`, called first thing in the endpoint.
 
 ## Errors
 

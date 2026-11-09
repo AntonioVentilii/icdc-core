@@ -20,7 +20,7 @@ Integration tests live in [`src/clearing/tests/it/`](src/clearing/tests/it/) and
 ## Commands
 
 ```bash
-npm run quality            # format + lint everything (prettier, rustfmt, clippy, shfmt, did, em dashes)
+npm run quality            # format + lint everything (prettier, rustfmt, clippy, shfmt, em dashes)
 npm run test:unit          # cargo test --lib --bins with -D warnings
 scripts/pic-install        # once per machine, before the integration tests
 npm run build              # build the canister wasms the integration tests load

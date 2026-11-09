@@ -12,7 +12,7 @@ The most common change in the history (`feat(clearing): add list_series_traded_v
    - Every type derives `CandidType, Serialize, Deserialize, Clone, Debug` and has doc comments. Before adding a type, check [`../reusability.md`](../reusability.md) (pagination, ids, prices, domains already exist).
 3. **Write the pure core** as `<action>_impl` next to the endpoint, or in the domain module (`trade/`, `account/`, `payoffs/`) if another endpoint needs it. It takes the state, the caller and `now` as arguments, validates everything first, then mutates. Unit tests go in the file's `#[cfg(test)] mod tests` (for trade, in `api/trade/tests/`), covering every error variant.
 4. **Write the endpoint** in `api.rs`:
-   - `#[update(guard = "...")]` or `#[query(guard = "...")]`, with `caller_is_not_anonymous` at least and `caller_is_controller` for administration. A read is a `query`; a batch read takes a list and a cap, as `list_series_traded_volumes` does.
+   - `#[update(guard = "...")]` or `#[query(guard = "...")]`: every update, and every query that returns caller-specific or restricted data, takes `caller_is_not_anonymous` at least and `caller_is_controller` for administration. Only a query whose whole result is public (as `list_series`, `get_series`, `is_trading_authorized`) goes without a guard. A read is a `query`; a batch read takes a list and a cap, as `list_series_traded_volumes` does.
    - Do every await first (`ensure_series_registered`, `check_trading_access`); if the endpoint mutates a user's state after an await, acquire a `ReassignmentGuard` before the first await and `revalidate()` right before the core.
    - A ledger interaction goes through a durable plan (Plan, Execute, Finalise), never a direct transfer.
    - End with `result.into()`.
