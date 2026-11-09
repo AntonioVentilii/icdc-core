@@ -979,7 +979,8 @@ type RiskError = variant {
 	HashMismatch : record { computed : text };
 	// The action cannot run before this time.
 	TimelockNotExpired : record { executable_at_ns : nat64 };
-	// A fixed-point computation failed (overflow, division by zero, logarithm of a non-positive value).
+	// A fixed-point computation failed (overflow, division by zero, logarithm of a non-positive
+	// value).
 	ArithmeticError : text;
 	// A history chunk was rejected.
 	InvalidHistoryChunk : text;
@@ -997,7 +998,8 @@ type RiskIdResult = variant { Ok : nat64; Err : RiskError };
 type RiskIdsResult = variant { Ok : vec nat64; Err : RiskError };
 type RiskUnitResult = variant { Ok; Err : RiskError };
 type SealHistoryUploadParams = record {
-	// Hex SHA-256 of the canonical encoding (see `docs/plans/margin-phase-1-implementation.md`, section 1.3).
+	// Hex SHA-256 of the canonical encoding (see `docs/plans/margin-phase-1-implementation.md`,
+	// section 1.3).
 	sha256_hex : text;
 	upload_id : nat64
 };
@@ -1635,8 +1637,8 @@ service : (Config) -> {
 	accept_position_transfer : (PositionProof) -> (AcceptPositionTransferResult);
 	// Adds scheduled events to an underlying's calendar. Returns their ids.
 	add_calendar_events : (AddCalendarEventsParams) -> (RiskIdsResult);
-	// Proposes granting the risk administrator role. Takes effect after the timelock. A canister controller cannot be
-	// made a risk administrator.
+	// Proposes granting the risk administrator role. Takes effect after the timelock. A canister
+	// controller cannot be made a risk administrator.
 	add_risk_admin : (RiskAdminParams) -> (RiskIdResult);
 	// Reassigns the entire clearing account of `old_owner` to `new_owner`.
 	//
@@ -1715,7 +1717,8 @@ service : (Config) -> {
 	backfill_settlement_events : (BackfillSettlementEventsParams) -> (
 		BackfillSettlementEventsResult
 	);
-	// Opens a history upload for an underlying, recording where the data comes from. Returns the upload id.
+	// Opens a history upload for an underlying, recording where the data comes from. Returns the
+	// upload id.
 	begin_history_upload : (BeginHistoryUploadParams) -> (RiskIdResult);
 	// Cancels a stuck fund withdrawal and refunds the internal ledger balance.
 	//
@@ -1738,8 +1741,8 @@ service : (Config) -> {
 	// 2. Executing the asynchronous ledger transfer (`transfer_from`).
 	// 3. Finalising the internal collateral balances.
 	deposit_collateral : (DepositCollateralParams) -> (DepositCollateralResult);
-	// Executes a pending action once its timelock has expired. Anyone can execute: the action was public for the whole
-	// delay, and it is re-validated against the current state.
+	// Executes a pending action once its timelock has expired. Anyone can execute: the action was
+	// public for the whole delay, and it is re-validated against the current state.
 	execute_pending_action : (nat64) -> (RiskUnitResult);
 	// Freezes a user's position to prepare it for transfer to another clearing canister.
 	//
@@ -1819,8 +1822,8 @@ service : (Config) -> {
 	get_trade_history : () -> (vec Event) query;
 	// Returns the official number of decimals for USD accounting.
 	get_usd_decimals : () -> (nat8) query;
-	// Current volatility of an underlying: EWMA, long-run and floored, with the volatility time over its MPOR and its
-	// effective multiplier. Not yet an input to margin.
+	// Current volatility of an underlying: EWMA, long-run and floored, with the volatility time over
+	// its MPOR and its effective multiplier. Not yet an input to margin.
 	get_volatility : (text) -> (VolatilityResult) query;
 	// Handles incoming HTTP requests for Prometheus metrics.
 	//
@@ -1968,8 +1971,8 @@ service : (Config) -> {
 	// Admin function to manually resume a stuck settlement plan, e.g., if the timer was dropped during
 	// upgrade.
 	resume_settlement : (text) -> (SettleSeriesResult);
-	// Verifies the declared SHA-256 of an upload and proposes its activation through the timelock. Returns the
-	// pending action id.
+	// Verifies the declared SHA-256 of an upload and proposes its activation through the timelock.
+	// Returns the pending action id.
 	seal_history_upload : (SealHistoryUploadParams) -> (RiskIdResult);
 	// Raises the global multiplier immediately, or proposes lowering it through the timelock.
 	set_global_risk_multiplier : (SetGlobalRiskMultiplierParams) -> (
@@ -1984,8 +1987,8 @@ service : (Config) -> {
 	set_risk_multiplier : (SetRiskMultiplierParams) -> (RiskChangeResult);
 	// Lengthens the timelock immediately, or proposes shortening it through the timelock itself.
 	set_timelock_duration : (SetTimelockDurationParams) -> (RiskChangeResult);
-	// Sets the parameters of an underlying other than its multiplier, within hard bounds. Creates the underlying with
-	// `k = 1` if it does not exist.
+	// Sets the parameters of an underlying other than its multiplier, within hard bounds. Creates the
+	// underlying with `k = 1` if it does not exist.
 	set_underlying_risk_params : (SetUnderlyingRiskParamsParams) -> (
 		RiskUnitResult
 	);
