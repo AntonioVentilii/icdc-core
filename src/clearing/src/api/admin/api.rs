@@ -109,7 +109,11 @@ pub fn get_funds() -> GetFundsResult {
     }
 }
 
-/// Withdraws assets from the Insurance Fund or Treasury to an external wallet.
+/// Withdraws assets from the Treasury to an external wallet.
+///
+/// The Insurance Fund backs the default waterfall and cannot be withdrawn:
+/// requests for it are rejected before any plan is created, and a plan left
+/// over from before this rule can only be cancelled (which refunds the fund).
 ///
 /// This method is gated to canister controllers.
 #[update(guard = "caller_is_controller")]
@@ -123,6 +127,8 @@ pub async fn withdraw_fund(params: WithdrawFundParams) -> WithdrawFundResult {
                 amount,
                 to,
             } = params;
+
+            ensure_fund_withdrawable(fund_type)?;
 
             let config =
                 COLLATERAL_ASSETS.with(|assets| {
@@ -537,11 +543,22 @@ pub async fn admin_reassign_account(params: ReassignAccountParams) -> ReassignAc
         .into()
 }
 
+/// Only the Treasury can be withdrawn; the Insurance Fund is drawn exclusively
+/// by the default waterfall.
+pub(crate) fn ensure_fund_withdrawable(fund_type: FundType) -> Result<(), WithdrawFundError> {
+    match fund_type {
+        FundType::Treasury => Ok(()),
+        FundType::Insurance => Err(WithdrawFundError::InsuranceFundLocked),
+    }
+}
+
 pub(crate) fn deduct_fund_balance_impl(
     asset_id: &AssetId,
     amount: u128,
     fund_type: FundType,
 ) -> Result<(), WithdrawFundError> {
+    ensure_fund_withdrawable(fund_type)?;
+
     let store = match fund_type {
         FundType::Insurance => &INSURANCE_FUND,
         FundType::Treasury => &TREASURY,
@@ -562,7 +579,11 @@ mod tests {
     use shared::types::AssetId;
 
     use crate::{
-        api::admin::{api::deduct_fund_balance_impl, errors::WithdrawFundError, params::FundType},
+        api::admin::{
+            api::{deduct_fund_balance_impl, ensure_fund_withdrawable},
+            errors::WithdrawFundError,
+            params::FundType,
+        },
         memory::{INSURANCE_FUND, TREASURY},
     };
 
@@ -571,27 +592,58 @@ mod tests {
         let asset_id = AssetId::from("vUSD".to_owned());
         let amount = 10_000; // $1
 
-        // Initialize insurance fund with $10
-        INSURANCE_FUND.with(|f| {
+        // Initialize treasury with $10
+        TREASURY.with(|f| {
             let mut f = f.borrow_mut();
             f.clear();
             f.insert(asset_id.clone(), 100_000);
         });
 
         // Step 1: Deduct
-        let deduct_res = deduct_fund_balance_impl(&asset_id, amount, FundType::Insurance);
+        let deduct_res = deduct_fund_balance_impl(&asset_id, amount, FundType::Treasury);
         assert!(deduct_res.is_ok());
 
-        INSURANCE_FUND.with(|f| {
+        TREASURY.with(|f| {
             assert_eq!(f.borrow().get(&asset_id).copied().unwrap(), 90_000);
         });
 
         // Step 2: In the new implementation we deliberately DO NOT rollback
         // upon transfer error. The internal fund deduction stands and Phase B
         // is not retried.
-        INSURANCE_FUND.with(|f| {
+        TREASURY.with(|f| {
             assert_eq!(f.borrow().get(&asset_id).copied().unwrap(), 90_000);
         });
+    }
+
+    #[test]
+    fn insurance_fund_cannot_be_withdrawn() {
+        let asset_id = AssetId::from("vUSD".to_owned());
+
+        INSURANCE_FUND.with(|f| {
+            let mut f = f.borrow_mut();
+            f.clear();
+            f.insert(asset_id.clone(), 100_000);
+        });
+
+        assert!(matches!(
+            ensure_fund_withdrawable(FundType::Insurance),
+            Err(WithdrawFundError::InsuranceFundLocked)
+        ));
+
+        // The internal deduction path rejects it too, even for an amount the
+        // fund could cover, and leaves the balance untouched.
+        assert!(matches!(
+            deduct_fund_balance_impl(&asset_id, 10_000, FundType::Insurance),
+            Err(WithdrawFundError::InsuranceFundLocked)
+        ));
+        INSURANCE_FUND.with(|f| {
+            assert_eq!(f.borrow().get(&asset_id).copied().unwrap(), 100_000);
+        });
+    }
+
+    #[test]
+    fn treasury_remains_withdrawable() {
+        assert!(ensure_fund_withdrawable(FundType::Treasury).is_ok());
     }
 
     #[test]
