@@ -1,22 +1,8 @@
 ---
-description: Architectural alignment and system structure guidance.
+description: Where code goes and the economic rules it must keep.
 globs: ["src/**/*", "Cargo.toml"]
 ---
 
-# 10-Architecture: System Alignment
+# Architecture
 
-Align all changes with the established ICDC architecture.
-
-## Architecture Documentation
-- [AI Architecture](file:///Users/antonio.ventilii/projects/icdc-core/docs/ai/architecture.md): Technical orchestration details.
-- [Project Architecture](file:///Users/antonio.ventilii/projects/icdc-core/.agents/architecture.md): Sharding and canister structure.
-
-## Core Components
-- **Series Registry**: Global directory for instruments.
-- **Clearing Engine**: CCP risk and margin engine.
-- **Shared Library**: Common types and constants.
-
-## Principles
-- **CCP Model**: Positions are internal, not tokenized.
-- **Async Safety**: Use the `Plan-Execute-Finalise` idempotency pattern.
-- **Economic Safety**: Strict adherence to margin and liquidation logic.
+Before adding or moving code, read [docs/ai/structure.md](../../docs/ai/structure.md). Before touching balances, margin, settlement, vUSD or withdrawals, read [docs/ai/domain.md](../../docs/ai/domain.md).

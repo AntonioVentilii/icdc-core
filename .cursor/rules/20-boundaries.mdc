@@ -1,18 +1,8 @@
 ---
-description: Governance, boundaries, and security constraints.
-globs: ["src/**/*", ".policies/**/*", ".boundaries/**/*"]
+description: Protected paths, sensitive code and what needs approval.
+globs: ["src/**/*", ".github/**/*", "scripts/**/*", "dfx.json", "Cargo.toml", "package.json"]
 ---
 
-# 20-Boundaries: Governance & Safety
+# Governance
 
-Respect all repository boundaries and security policies.
-
-## Governance Layer
-- [Policies](file:///Users/antonio.ventilii/projects/icdc-core/.policies/): Mandatory rules (e.g., [Code Modification](file:///Users/antonio.ventilii/projects/icdc-core/.policies/code-modification.md)).
-- [Boundaries](file:///Users/antonio.ventilii/projects/icdc-core/.boundaries/): Sensitive zones (e.g., [Security](file:///Users/antonio.ventilii/projects/icdc-core/.boundaries/security.md), [Infrastructure](file:///Users/antonio.ventilii/projects/icdc-core/.boundaries/infrastructure.md)).
-- [Capabilities](file:///Users/antonio.ventilii/projects/icdc-core/.capabilities/): Explicit agent permissions.
-
-## Critical Rules
-- **No Direct Modification**: Do not modify files in `.boundaries/` without explicit permission.
-- **Plan First**: Any change affecting economic safety REQUIRES an approved implementation plan.
-- **Meta-Updates**: Fundamental changes to AI guidance must follow [.policies/ai-meta-updates.md](file:///Users/antonio.ventilii/projects/icdc-core/.policies/ai-meta-updates.md).
+Read [docs/ai/governance.md](../../docs/ai/governance.md): generated and protected paths, sensitive modules, what an agent may do without asking, and the meta-update map.
