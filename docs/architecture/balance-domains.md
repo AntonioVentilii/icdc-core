@@ -9,7 +9,7 @@ The clearing canister partitions collateral, margin, and per-series trading into
 | **`Settlement`** | Production collateral (e.g. mainnet ICP, ckUSDC).            |
 | **`Playground`** | Testnet / sandbox collateral (e.g. TESTICP, Sepolia assets). |
 
-**Defaults** — including `AllowedBalanceDomains::default()` and the placeholder `internal_ledger` entry in clearing config — include **only** these two. New collateral assets inherit that unless an admin sets `allowed_balance_domains` explicitly.
+**Defaults** (including `AllowedBalanceDomains::default()` and the placeholder `internal_ledger` entry in clearing config) include **only** these two. New collateral assets inherit that unless an admin sets `allowed_balance_domains` explicitly.
 
 ## App-specific / branded domains
 
@@ -25,7 +25,7 @@ Consumer apps stay out of the protocol: the clearing only sees domains and asset
 
 ## Related code
 
-- `src/shared/src/types/domain.rs` — `BalanceDomain`, `AllowedBalanceDomains`, `DomainPolicy`
-- `src/clearing/src/api/admin/api.rs` — `register_icrc_asset`, `update_collateral_allowed_domains`, `update_domain_policy`
-- `scripts/init.common.sh` — domain Candid snippets (`CLEARING_DOMAINS_*`) and default ledger IDs / prices for init
-- `scripts/init.clearing.sh` — `update_domain_policy` for each domain and `register_icrc_asset` (e.g. ICP → Settlement, VXP → `ViciXp`)
+- `src/shared/src/types/domain.rs`: `BalanceDomain`, `AllowedBalanceDomains`, `DomainPolicy`
+- `src/clearing/src/api/admin/api.rs`: `register_icrc_asset`, `update_collateral_allowed_domains`, `update_domain_policy`
+- `scripts/init.common.sh`: domain Candid snippets (`CLEARING_DOMAINS_*`) and default ledger IDs / prices for init
+- `scripts/init.clearing.sh`: `update_domain_policy` for each domain and `register_icrc_asset` (e.g. ICP → Settlement, VXP → `ViciXp`)

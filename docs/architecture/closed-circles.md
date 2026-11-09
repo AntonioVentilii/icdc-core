@@ -1,6 +1,6 @@
 # Closed Circles: Restricted Trading Groups
 
-This document describes the architecture for "closed circles" — a system that allows prediction markets to be restricted to specific groups of traders rather than being open to everyone.
+This document describes the architecture for "closed circles": a system that allows prediction markets to be restricted to specific groups of traders rather than being open to everyone.
 
 ## Overview
 
@@ -54,7 +54,7 @@ enum TradingAccess {
 }
 ```
 
-A `Series` holds `trading_access: Vec<TradingAccess>`. **This list must never be empty** — every series carries at least one policy (default: `[Open]`). Authorization is evaluated as an OR across all policies: if any policy grants access, the caller can trade. The invariant is enforced by `add_series` (fills `[Open]` if empty) and `update_trading_access` (rejects empty with `EmptyTradingAccess`).
+A `Series` holds `trading_access: Vec<TradingAccess>`. **This list must never be empty**: every series carries at least one policy (default: `[Open]`). Authorization is evaluated as an OR across all policies: if any policy grants access, the caller can trade. The invariant is enforced by `add_series` (fills `[Open]` if empty) and `update_trading_access` (rejects empty with `EmptyTradingAccess`).
 
 ### Group
 
@@ -75,9 +75,9 @@ struct Group {
 
 Groups are stored in the registry's `GROUPS_STORE`. A group has three roles:
 
-- **Creator** — recorded at creation, immutable, always treated as an admin.
-- **Admins** — can manage other admins, manage members, update metadata, and delete the group. The creator is implicitly an admin even if not in the `admins` set.
-- **Members** — can trade on series restricted to this group, nothing else.
+- **Creator**: recorded at creation, immutable, always treated as an admin.
+- **Admins**: can manage other admins, manage members, update metadata, and delete the group. The creator is implicitly an admin even if not in the `admins` set.
+- **Members**: can trade on series restricted to this group, nothing else.
 
 The `admins` and `members` sets are independent: an admin is NOT automatically a member. If an admin should also trade, they must appear in both sets.
 
@@ -163,14 +163,14 @@ Group creation itself is open to every authenticated user (mirrors the canister 
 | Role                   | Permissions                                             |
 | ---------------------- | ------------------------------------------------------- |
 | `CONTROLLER` / `ADMIN` | All permissions including `MANAGE_TRADING_ACCESS`       |
-| `ENGINE_CREATOR`       | `CREATE_MARKET`, `FORK_MARKET` — via Engine role grants |
+| `ENGINE_CREATOR`       | `CREATE_MARKET`, `FORK_MARKET` (via Engine role grants) |
 
 ## Future Extensions
 
 The `TradingAccess` enum is designed for extensibility. Potential future variants:
 
-- `TokenGated { token: Principal, min_balance: u128 }` — require holding a minimum token balance
-- `ReputationBased { min_score: u64 }` — require a minimum reputation score
-- `TimeLimited { open_from_ns: u64, open_until_ns: u64 }` — time-windowed access
+- `TokenGated { token: Principal, min_balance: u128 }`: require holding a minimum token balance
+- `ReputationBased { min_score: u64 }`: require a minimum reputation score
+- `TimeLimited { open_from_ns: u64, open_until_ns: u64 }`: time-windowed access
 
 Each new variant only requires adding the enum case in shared types, the authorization logic in `is_trading_authorized`, and UI support in the app.

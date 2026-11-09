@@ -36,7 +36,7 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          # Scope is REQUIRED: type(scope): description — or type(scope)!: … for a breaking change.
+          # Scope is REQUIRED: type(scope): description, or type(scope)!: … for a breaking change.
           pattern='^(feat|fix|perf|deps|revert|docs|style|chore|refactor|test|build|ci)\([-a-zA-Z0-9,._/]+\)!?: .+$'
 
           if [[ "$PR_TITLE" =~ $pattern ]]; then

@@ -42,14 +42,14 @@ type AddSeriesParams = record {
 	// A detailed description of the series.
 	description : Description;
 	// The settlement terms describing how this market resolves.
-	// Compulsory — every new series must state how it settles.
+	// Compulsory: every new series must state how it settles.
 	resolution : Resolution;
 	// The defined outcomes for categorical markets (ordered).
 	outcomes : opt vec Outcome;
 	// An optional icon URL for the market.
 	icon_url : opt text;
 	// Initial trading access policies for the new series.
-	// **Must not be empty** — pass at least `[Open]`.
+	// **Must not be empty**: pass at least `[Open]`.
 	//
 	// Controls who may submit orders on this market once it is registered.
 	// Pass `[Restricted { groups: [g1, g2, ...] }]` to limit trading to
@@ -83,11 +83,11 @@ type Asset = variant {
 };
 // Represents a distinct domain for balances and trading logic.
 type BalanceDomain = variant {
-	// VICI XP (loyalty points) — segregated from Playground test assets.
+	// VICI XP (loyalty points), segregated from Playground test assets.
 	ViciXp;
 	// Non-monetary social bets (e.g., betting a pizza).
 	Social;
-	// Testnet / sandbox collateral (e.g. TESTICP, Sepolia) — not real funds.
+	// Testnet / sandbox collateral (e.g. TESTICP, Sepolia), not real funds.
 	Playground;
 	// Real collateralized trading (e.g., using ckUSDC, ICP).
 	Settlement
@@ -258,9 +258,9 @@ type GrantEngineRoleParams = record {
 // Groups are the building blocks of restricted trading access.
 // A group has three roles:
 //
-// - **Creator** — immutable, recorded at creation, always treated as an admin.
-// - **Admins** — can manage other admins, manage members, update metadata, and delete the group.
-// - **Members** — can trade on series restricted to this group, nothing else.
+// - **Creator**: immutable, recorded at creation, always treated as an admin.
+// - **Admins**: can manage other admins, manage members, update metadata, and delete the group.
+// - **Members**: can trade on series restricted to this group, nothing else.
 //
 // The `admins` and `members` sets are independent: an admin is NOT automatically
 // a member. If an admin should also trade, they must appear in both sets.
@@ -349,7 +349,7 @@ type ListSeriesParams = record {
 	// Filter by the payout unit.
 	payout_unit : opt PayoutUnit;
 	// When `Some(true)`, return only series that are inside their trading
-	// window right now — at or past `start_ns` (when set) *and* strictly before
+	// window right now: at or past `start_ns` (when set) *and* strictly before
 	// `expiry_ns`. `Some(false)` and `None` apply no filtering.
 	//
 	// This is strictly narrower than [`Self::only_unexpired`], which admits
@@ -366,7 +366,7 @@ type ListSeriesParams = record {
 	// Filter by the underlying asset ticker (case-insensitive).
 	underlying : opt text;
 	// When `Some(true)`, exclude series whose `expiry_ns` is at or before the
-	// registry's current time — i.e. return only series that are still open
+	// registry's current time, i.e. return only series that are still open
 	// for trading. `Some(false)` and `None` are equivalent and apply no expiry
 	// filtering (the historical behavior).
 	//
@@ -499,8 +499,8 @@ type RegisterEngineResult = variant { Ok : text; Err : EngineError };
 // Settlement terms for a series. Compulsory on every market.
 //
 // Modeled as a struct (not a bare `String`) so it can grow without a breaking
-// candid change: future fields — e.g. structured `rules` (named source +
-// settle date + day-count, see issue #64) — are added as `opt` fields, which
+// candid change: future fields (for example structured `rules`: named source +
+// settle date + day-count, see issue #64) are added as `opt` fields, which
 // candid can decode against records persisted before the field existed.
 // Variants were considered and rejected: adding an enum variant risks decode
 // failures in already-deployed consumers, whereas appending `opt` record
@@ -541,7 +541,7 @@ type Series = record {
 	banner_url : opt text;
 	// Optional timestamp in nanoseconds since UNIX epoch at which trading opens.
 	//
-	// `None` means the series is tradeable from the moment it is registered —
+	// `None` means the series is tradeable from the moment it is registered:
 	// the historical behavior, and the canonical way to express "live now".
 	// `Some(t)` schedules the series: it is listed and discoverable immediately
 	// but trading is rejected until `t`. The window is inclusive at the open
@@ -552,7 +552,7 @@ type Series = record {
 	// series that differ only in their trading window are distinct contracts,
 	// so a scheduled series can never silently collide with an already-live one
 	// and inherit a start date its creator did not ask for. To keep that
-	// guarantee meaningful `None` is the only encoding of "already live" —
+	// guarantee meaningful, `None` is the only encoding of "already live":
 	// `add_series` rejects a `start_ns` at or before the current time, so the
 	// same market cannot exist under two ids.
 	start_ns : opt nat64;
@@ -572,7 +572,7 @@ type Series = record {
 	// localized clones of the same market).
 	//
 	// When `None`, consumers should assume the default locale `"en"` and are
-	// responsible for translating into the user's preferred locale — the
+	// responsible for translating into the user's preferred locale; the
 	// canister never stores translations on-chain.
 	locale : opt text;
 	// A detailed description of the series.
@@ -591,7 +591,7 @@ type Series = record {
 	// An optional icon URL for the market.
 	icon_url : opt text;
 	// The set of trading access policies governing who may trade this series.
-	// **Must never be empty** — every series carries at least one policy.
+	// **Must never be empty**: every series carries at least one policy.
 	//
 	// Evaluated as a logical OR: a caller is authorized if **any** policy
 	// in the list grants them access.
@@ -681,7 +681,7 @@ type SeriesStatus = variant {
 	Live;
 	// At or past `expiry_ns`.
 	Expired;
-	// `start_ns` is set and still in the future — listed, but not yet tradeable.
+	// `start_ns` is set and still in the future: listed, but not yet tradeable.
 	Upcoming
 };
 // Configurable rate limits for social (non-monetary) market creation.
@@ -716,10 +716,10 @@ type SocialReward = record {
 // # Combining policies
 //
 // A series may carry multiple policies simultaneously. For example:
-// - `[Open]` — open to everyone (default).
-// - `[Restricted { groups: [g1, g2] }]` — only members of g1 or g2.
-// - `[Open, Restricted { groups: [g1] }]` — open to everyone *and* additionally tagged as
-// belonging to g1 (useful for discovery/UI filtering).
+// - `[Open]`: open to everyone (default).
+// - `[Restricted { groups: [g1, g2] }]`: only members of g1 or g2.
+// - `[Open, Restricted { groups: [g1] }]`: open to everyone *and* additionally tagged as belonging
+// to g1 (useful for discovery/UI filtering).
 //
 // # Extensibility
 //
@@ -860,8 +860,8 @@ service : {
 	//
 	// # Errors
 	//
-	// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
-	// * [`GroupError::Unauthorized`] — the caller is not a group admin.
+	// * [`GroupError::GroupNotFound`]: the `group_id` does not exist.
+	// * [`GroupError::Unauthorized`]: the caller is not a group admin.
 	//
 	// # Access
 	//
@@ -873,8 +873,8 @@ service : {
 	//
 	// # Errors
 	//
-	// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
-	// * [`GroupError::Unauthorized`] — the caller is not a group admin.
+	// * [`GroupError::GroupNotFound`]: the `group_id` does not exist.
+	// * [`GroupError::Unauthorized`]: the caller is not a group admin.
 	//
 	// # Access
 	//
@@ -903,7 +903,7 @@ service : {
 	//
 	// # Errors
 	//
-	// * [`GroupError::NameTooLong`] — if `params.name` exceeds [`MAX_GROUP_NAME_LEN`] chars.
+	// * [`GroupError::NameTooLong`]: if `params.name` exceeds [`MAX_GROUP_NAME_LEN`] chars.
 	//
 	// # Access
 	//
@@ -918,8 +918,8 @@ service : {
 	//
 	// # Errors
 	//
-	// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
-	// * [`GroupError::Unauthorized`] — the caller is not a group admin.
+	// * [`GroupError::GroupNotFound`]: the `group_id` does not exist.
+	// * [`GroupError::Unauthorized`]: the caller is not a group admin.
 	//
 	// # Access
 	//
@@ -938,7 +938,7 @@ service : {
 	// `NonMonetary` payout) into their own closed circle, subject to the same per-user rate limits
 	// as social market creation. This is the "Challenge your friends" flow.
 	//
-	// In all cases the fork's `trading_access` must be fully `Restricted` — a fork
+	// In all cases the fork's `trading_access` must be fully `Restricted`: a fork
 	// never widens access.
 	fork_series : (ForkSeriesParams) -> (AddSeriesResult);
 	// Retrieves an Engine by its ID.
@@ -947,7 +947,7 @@ service : {
 	//
 	// # Access
 	//
-	// Public query — any caller.
+	// Public query, open to any caller.
 	get_group : (text) -> (opt Group) query;
 	// Retrieves the details of a specific oracle by its ID.
 	get_oracle : (text) -> (opt Oracle) query;
@@ -958,7 +958,7 @@ service : {
 	//
 	// Clients could derive this from `start_ns`/`expiry_ns` themselves, but only
 	// against their own clock. This evaluates the window with the canister's
-	// `time()`, which is the same clock the trading gate uses — so a countdown built
+	// `time()`, which is the same clock the trading gate uses, so a countdown built
 	// on it cannot disagree with whether an order will actually be accepted.
 	//
 	// Settlement state is not folded in: it lives in the clearing canister. A series
@@ -977,7 +977,7 @@ service : {
 	//
 	// # Access
 	//
-	// Public query — any caller.
+	// Public query, open to any caller.
 	is_group_member : (text, principal) -> (bool) query;
 	// Checks if a principal is authorized to push settlement data for a given oracle.
 	is_oracle_authorized : (text, principal) -> (bool) query;
@@ -996,11 +996,11 @@ service : {
 	// the referenced groups.
 	// 4. If no policy grants access, returns `false`.
 	//
-	// **Note:** `trading_access` must never be empty — the API layer enforces this.
+	// **Note:** `trading_access` must never be empty; the API layer enforces this.
 	//
 	// # Access
 	//
-	// Public query — any caller. Called by the clearing canister during
+	// Public query, open to any caller. Called by the clearing canister during
 	// `submit_limit_order` / `submit_market_order` for restricted series.
 	is_trading_authorized : (principal, text) -> (bool) query;
 	// Lists all registered Engines.
@@ -1009,12 +1009,12 @@ service : {
 	//
 	// # Arguments
 	//
-	// * `creator` — if `Some`, only groups created by this principal are returned. If `None`, all
+	// * `creator`: if `Some`, only groups created by this principal are returned. If `None`, all
 	// groups are returned.
 	//
 	// # Access
 	//
-	// Public query — any caller.
+	// Public query, open to any caller.
 	list_groups : (opt principal) -> (vec Group) query;
 	// Returns a paginated page of all registered derivative series visible to the caller.
 	list_series : (PaginationParams) -> (SeriesPage) query;
@@ -1045,8 +1045,8 @@ service : {
 	//
 	// # Errors
 	//
-	// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
-	// * [`GroupError::Unauthorized`] — the caller is not a group admin.
+	// * [`GroupError::GroupNotFound`]: the `group_id` does not exist.
+	// * [`GroupError::Unauthorized`]: the caller is not a group admin.
 	//
 	// # Access
 	//
@@ -1058,8 +1058,8 @@ service : {
 	//
 	// # Errors
 	//
-	// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
-	// * [`GroupError::Unauthorized`] — the caller is not a group admin.
+	// * [`GroupError::GroupNotFound`]: the `group_id` does not exist.
+	// * [`GroupError::Unauthorized`]: the caller is not a group admin.
 	//
 	// # Access
 	//
@@ -1086,9 +1086,9 @@ service : {
 	//
 	// # Errors
 	//
-	// * [`GroupError::GroupNotFound`] — the `group_id` does not exist.
-	// * [`GroupError::Unauthorized`] — the caller is not a group admin.
-	// * [`GroupError::NameTooLong`] — if a new name exceeds [`MAX_GROUP_NAME_LEN`] chars.
+	// * [`GroupError::GroupNotFound`]: the `group_id` does not exist.
+	// * [`GroupError::Unauthorized`]: the caller is not a group admin.
+	// * [`GroupError::NameTooLong`]: if a new name exceeds [`MAX_GROUP_NAME_LEN`] chars.
 	//
 	// # Access
 	//
@@ -1102,7 +1102,7 @@ service : {
 	//
 	// Only `description`, `icon_url`, `banner_url`, and `locale` can be changed.
 	// The series' identity-bearing economic fields, `title`, and `resolution` are
-	// immutable here by design — see [`UpdateSeriesMetadataParams`].
+	// immutable here by design (see [`UpdateSeriesMetadataParams`]).
 	//
 	// # Authorization
 	//
@@ -1120,9 +1120,9 @@ service : {
 	//
 	// # Errors
 	//
-	// * [`GroupError::EmptyTradingAccess`] — the provided list is empty.
-	// * [`GroupError::Unauthorized`] — the caller is not a canister controller.
-	// * [`GroupError::SeriesNotFound`] — the series ID does not exist.
+	// * [`GroupError::EmptyTradingAccess`]: the provided list is empty.
+	// * [`GroupError::Unauthorized`]: the caller is not a canister controller.
+	// * [`GroupError::SeriesNotFound`]: the series ID does not exist.
 	//
 	// # Access
 	//

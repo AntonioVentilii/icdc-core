@@ -20,9 +20,9 @@ The Clearing Engine acts as a Central Counterparty (CCP) for derivative trades. 
 
 The canister follows a strict **Plan-Execute-Finalise** pattern for all sensitive operations (deposits, withdrawals, and settlements):
 
-1. **Phase A — Plan**: Deterministic validation, no `await` calls, state stored in stable memory.
-2. **Phase B — Execute**: Asynchronous ledger interactions using idempotency keys (`created_at_time`).
-3. **Phase C — Finalise**: Atomic update of internal accounts once ledger confirmations are received.
+1. **Phase A (Plan)**: Deterministic validation, no `await` calls, state stored in stable memory.
+2. **Phase B (Execute)**: Asynchronous ledger interactions using idempotency keys (`created_at_time`).
+3. **Phase C (Finalise)**: Atomic update of internal accounts once ledger confirmations are received.
 
 ## API Overview
 

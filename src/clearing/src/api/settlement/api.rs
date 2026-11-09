@@ -123,7 +123,7 @@ pub fn get_settlement_status(series_id: SeriesId) -> Option<SettlementStatusView
     SETTLEMENT_PLANS.with(move |m| m.borrow().get(&series_id).map(SettlementStatusView::from))
 }
 
-/// Returns each requested series' settlement status in one call — the batch form
+/// Returns each requested series' settlement status in one call: the batch form
 /// of [`get_settlement_status`].
 ///
 /// A resolution solver checks "is this market already settled?" for every due
@@ -135,8 +135,8 @@ pub fn get_settlement_status(series_id: SeriesId) -> Option<SettlementStatusView
 /// back against its input; the `series_id` is echoed on each entry so a `None`
 /// status is still attributable.
 ///
-/// The work is `O(#series_ids)` map lookups — bounded by the request, not by the
-/// number of plans — so callers should pass the (already bounded) set they care
+/// The work is `O(#series_ids)` map lookups, bounded by the request rather than by the
+/// number of plans, so callers should pass the (already bounded) set they care
 /// about, e.g. the registry's "due" candidates. Reads the same
 /// `SETTLEMENT_PLANS` map as [`get_settlement_status`] and mirrors the
 /// aggregate-read shape of
@@ -166,8 +166,8 @@ pub fn list_series_settlement_statuses(
 /// Lists the ids of series that have been settled (resolved), with stable
 /// cursor pagination.
 ///
-/// A series appears here as soon as a [`SettlementPlan`] is opened for it — in
-/// any [`PlanStatus`] — which is precisely when it stops being tradeable. This
+/// A series appears here as soon as a [`SettlementPlan`] is opened for it (in
+/// any [`PlanStatus`]), which is precisely when it stops being tradeable. This
 /// is the authoritative resolution set: the clearing canister owns settlement
 /// state, the registry does not. Front ends that build a "currently-tradeable"
 /// candidate set call the registry's `list_series_with` with `only_unexpired`
@@ -270,8 +270,8 @@ pub(crate) fn pending_settlement_params() -> Vec<SettleSeriesParams> {
 /// Re-drives every settlement plan that is still in flight.
 ///
 /// IC timers do not survive a canister upgrade, so a plan left in
-/// `Planned`/`Executing` when the canister is upgraded keeps a consistent —
-/// but no longer advancing — state. Calling this from `post_upgrade`
+/// `Planned`/`Executing` when the canister is upgraded keeps a consistent
+/// (but no longer advancing) state. Calling this from `post_upgrade`
 /// re-schedules background processing for each such plan so it catches up on
 /// its own instead of waiting for a manual [`resume_settlement`].
 ///
@@ -308,7 +308,7 @@ const SETTLEMENT_HEARTBEAT_INTERVAL: Duration = Duration::from_mins(5);
 /// chunk when the current chunk succeeds; if a chunk traps, that scheduling is
 /// rolled back with it and the chain stops, leaving the plan consistent but
 /// not advancing. This heartbeat is the safety net that picks such plans back
-/// up. Re-driving is idempotent — see [`resume_pending_settlements`].
+/// up. Re-driving is idempotent (see [`resume_pending_settlements`]).
 ///
 /// Must be armed from both `init` and `post_upgrade`, since interval timers do
 /// not survive an upgrade.
@@ -318,7 +318,7 @@ pub(crate) fn start_settlement_heartbeat() {
     });
 }
 
-/// Internal settlement logic — caller has already been authorized.
+/// Internal settlement logic; the caller has already been authorized.
 ///
 /// This function is also used by the timer-based self-resumption so that
 /// background processing does not re-enter the IC update guard.
@@ -499,7 +499,7 @@ pub(crate) fn prepare_settlement_impl(
     )?;
 
     // Perform solvency check before any state modifications.
-    // Uses the aggregate net payoff (post-fee) — fees stay in the system
+    // Uses the aggregate net payoff (post-fee): fees stay in the system
     // (TREASURY + INSURANCE_FUND) so they don't reduce system equity.
     // We pass the settlement positions so that the check can compute
     // expected post-settlement equity (accounting for max(0,...) clamping).
@@ -585,7 +585,7 @@ fn cancel_open_limit_orders(series_id: &SeriesId) {
 /// Computes the **expected post-settlement** system equity by simulating the
 /// cashflows on each account and clamping to zero.  This is more conservative
 /// than using pre-settlement equity because `calculate_equity_usd` returns
-/// `max(0, cash + collateral)` — a loser whose equity would go negative
+/// `max(0, cash + collateral)`: a loser whose equity would go negative
 /// contributes 0 post-settlement, but their full positive equity would have
 /// been counted in a pre-settlement snapshot, inflating the apparent resources.
 ///
@@ -641,7 +641,7 @@ pub(crate) fn apply_settlement_accounting_logic(plan: &mut SettlementPlan) -> bo
 
     // Price field on a Settled event records what the series resolved to.
     // For Price settlements we surface the actual settlement price; for
-    // Outcome settlements there's no scalar — encode 1.0 as a neutral
+    // Outcome settlements there's no scalar, so encode 1.0 as a neutral
     // placeholder so consumers can still read `decimal` without special-casing.
     let settlement_price: Price = match &plan.settlement {
         SettlementInput::Price(p) => p.clone(),
@@ -746,7 +746,7 @@ pub fn backfill_settlement_events(
     // Settled event in EVENTS is treated as already backfilled. A plan
     // is backfilled atomically (all positions or none), so this single
     // marker is sufficient and matches the live-emission contract,
-    // which emits one event per `SettlementPosition` — including
+    // which emits one event per `SettlementPosition`, including
     // multiple positions per user on the same series (e.g. hedged
     // YES + NO).
     let mut series_already_backfilled: HashSet<SeriesId> = EVENTS.with(|events| {
@@ -777,7 +777,7 @@ pub fn backfill_settlement_events(
                 result.plans_scanned += 1;
 
                 if series_already_backfilled.contains(series_id) {
-                    // Skip the whole plan — at least one position has already
+                    // Skip the whole plan: at least one position has already
                     // produced a Settled event for this series.
                     result.events_skipped += plan.positions.len() as u64;
                 } else {
@@ -818,8 +818,8 @@ pub fn backfill_settlement_events(
                 }
             }
 
-            // Cooperative yield after every visited plan — including
-            // non-finalized and already-backfilled ones — so the per-call
+            // Cooperative yield after every visited plan (including
+            // non-finalized and already-backfilled ones) so the per-call
             // instruction budget remains bounded even when the cursor
             // encounters long runs of plans that produce no events.
             // `instruction_counter()` panics when called outside a canister,
@@ -1089,7 +1089,7 @@ mod tests {
 
     /// The batch settlement-status read returns one entry per requested id, in
     /// request order: `Some(status)` for series with a plan, `None` for series
-    /// that are still open or unknown — collapsing N `get_settlement_status`
+    /// that are still open or unknown, collapsing N `get_settlement_status`
     /// calls into one.
     #[test]
     fn list_series_settlement_statuses_batches_lookups() {
@@ -1321,7 +1321,7 @@ mod tests {
             balance_domain: BalanceDomain::Settlement,
         });
 
-        // Plan is returned unchanged — the original price (100) is preserved
+        // Plan is returned unchanged: the original price (100) is preserved
         if let SettlementInput::Price(p) = plan2.settlement {
             assert_eq!(p, Price::new(100, 0));
         } else {
@@ -1718,13 +1718,13 @@ mod tests {
                 net_qty: 1,
                 reserved_margin_usd: 1_000,
                 // Mix of winners and losers so the test exercises the signed
-                // qty semantic — first two positive, last one negative.
+                // qty semantic: first two positive, last one negative.
                 cashflow_usd: if i < 2 { 5_000 } else { -3_000 },
             })
             .collect();
 
         // Two plans: one Finalised (should be backfilled), one Executing
-        // (should be skipped — its events will be emitted naturally when
+        // (should be skipped: its events will be emitted naturally when
         // accounting completes).
         let finalised_plan = SettlementPlan {
             series_id: series_finalised.clone(),
@@ -1783,7 +1783,7 @@ mod tests {
         assert!(emitted
             .iter()
             .all(|e| e.timestamp == 1_700_000_000_000_000_000));
-        // Two winners, one loser — qty carries signed cashflow.
+        // Two winners, one loser; qty carries signed cashflow.
         let winners = emitted.iter().filter(|e| e.qty > 0).count();
         let losers = emitted.iter().filter(|e| e.qty < 0).count();
         assert_eq!(winners, 2);

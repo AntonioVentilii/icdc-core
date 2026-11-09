@@ -53,7 +53,7 @@ impl From<Result<AccountStateResponse, AccountStateError>> for GetAccountStateRe
 /// Aggregate lean of the supplied principal set on a single outcome of a
 /// series.
 ///
-/// Carries **counts only** — no principal identities, sides, quantities, or
+/// Carries **counts only**: no principal identities, sides, quantities, or
 /// P&L. Long is the number of net-long holders, short the number of net-short
 /// holders; flat (zero net) positions are excluded from both.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

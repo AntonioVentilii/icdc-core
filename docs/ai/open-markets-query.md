@@ -5,8 +5,8 @@ Status: implemented (icdc-core). Front-end (vici-app) wiring is a follow-up PR.
 ## Problem
 
 The Vici flow (swipe deck) built its candidate set by calling the registry's
-`list_series` with no limit — fetching **every** series ever created across all
-domains and payoff types — then filtering client-side to: open (binary payoff),
+`list_series` with no limit, fetching **every** series ever created across all
+domains and payoff types, then filtering client-side to: open (binary payoff),
 in the user's balance domain, not yet expired (`expiry_ns > now`), and **not
 resolved**. "Not resolved" was reverse-engineered on the client by downloading
 the global activity log and scanning for settlement events.
@@ -20,7 +20,7 @@ Two fast `query` (non-replicated) reads now let the front end fetch only the
 currently-tradeable set, filterable by `balance_domain` and `payoff_type`, with
 stable cursor pagination. No update calls, no activity-log scan.
 
-### Registry — expiry filter (self-contained)
+### Registry: expiry filter (self-contained)
 
 `ListSeriesParams` gains one optional field:
 
@@ -34,7 +34,7 @@ type ListSeriesParams = record {
 - `Some(true)` excludes series whose `expiry_ns <= now`, where `now` is the
   registry canister's own `time()` evaluated **server-side** (the caller cannot
   widen the window with a stale/forged clock).
-- `Some(false)` / `None` apply no expiry filtering — i.e. the existing
+- `Some(false)` / `None` apply no expiry filtering, i.e. the existing
   `list_series` / `list_series_with` behavior is preserved for all current
   callers. The field is additive and optional.
 
@@ -44,7 +44,7 @@ unchanged (cursor over the `SeriesId`-ordered `BTreeMap`).
 
 The registry owns `expiry_ns`, so this half is entirely self-contained.
 
-### Clearing — resolution set (new query)
+### Clearing: resolution set (new query)
 
 ```candid
 type ListSettledSeriesParams = record {
@@ -81,7 +81,7 @@ The registry is the catalog source of truth; it has **no** notion of resolution
 registry crate has zero references to settlement). Settlement/resolution state
 lives authoritatively in the **clearing** canister's `SETTLEMENT_PLANS`. On
 finalization clearing removes the series from its own `SERIES` mirror, but the
-registry retains the catalog entry — so the registry's list still includes
+registry retains the catalog entry, so the registry's list still includes
 resolved markets.
 
 Two options were considered:
@@ -99,11 +99,11 @@ Two options were considered:
   multi-call settlement hot path. That settlement flow is governed by strict
   atomicity/economic-safety rules; making it depend on a registry notify that
   must succeed/retry complicates failure reasoning for no functional gain.
-- Option (a) is two independent **query** calls — both fast and non-replicated,
+- Option (a) is two independent **query** calls, both fast and non-replicated,
   with no new coupling and no new settlement failure mode.
 
 Cost of (a): the FE intersects two paginated sources (subtract the settled set
-from the open/unexpired page). For a flow deck this is acceptable — a page may
+from the open/unexpired page). For a flow deck this is acceptable: a page may
 yield slightly fewer than `limit` tradeable candidates after subtraction, which
 is strictly better than the previous "fetch everything + scan the log" path.
 

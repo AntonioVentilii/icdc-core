@@ -11,7 +11,7 @@ const NANOS_PER_DAY: u64 = 86_400_000_000_000;
 ///
 /// Buckets are **fixed-width and epoch-aligned** (each bucket is `[k * width,
 /// (k + 1) * width)` ns since the Unix epoch), not rolling spans, so the same
-/// instant always falls in the same bucket regardless of when the query runs —
+/// instant always falls in the same bucket regardless of when the query runs:
 /// two calls over an overlapping range return byte-identical candles for the
 /// shared buckets. Hourly resolution backs the short windows the front end
 /// renders (1d / 7d) and daily resolution the long ones (30d / all) without the

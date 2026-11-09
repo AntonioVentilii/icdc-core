@@ -212,7 +212,7 @@ fn migrate_domain_idempotent() {
         .unwrap();
     assert!(matches!(r1, MigrateDomainResult::Ok));
 
-    // Second call — same id
+    // Second call, same id
     let r2: MigrateDomainResult = env
         .clearing
         .update(user_a, "migrate_domain", (params,))

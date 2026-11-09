@@ -11,13 +11,13 @@ pub struct ListLeaderboardParams {
     pub window: LeaderboardWindow,
     /// When set, rank **only** within this set of principals (a league /
     /// affiliation member set) instead of the whole population, and include
-    /// every listed member — even those with no settlements in the window —
+    /// every listed member (even those with no settlements in the window)
     /// with a zeroed aggregate, so the result covers the full league. When
     /// `None`, the global standings are returned and only principals that
     /// settled at least one position in the window appear.
     ///
     /// The set is caller-controlled and ranked in full, so it is capped at
-    /// 10,000 principals — any realistic league is well under this; a longer
+    /// 10,000 principals. Any realistic league is well under this; a longer
     /// list is truncated to the first 10,000.
     pub members: Option<Vec<Principal>>,
     /// Exclusive pagination cursor: the number of leading entries already
@@ -36,8 +36,8 @@ pub struct ListLeaderboardParams {
 ///
 /// Aggregates each supplied principal's settled-position win/total counts over
 /// an arbitrary half-open time window `[from_ts, to_ts)`. Unlike
-/// [`ListLeaderboardParams`] — which ranks over fixed calendar windows backed
-/// by the maintained `SETTLEMENT_LEADERBOARD` index — this scans the raw event
+/// [`ListLeaderboardParams`], which ranks over fixed calendar windows backed
+/// by the maintained `SETTLEMENT_LEADERBOARD` index, this scans the raw event
 /// log so a consumer can score a cohort over a bespoke window (e.g. a league
 /// "battle" running an arbitrary 7-day span that does not align to a calendar
 /// week). The clearing layer ascribes no meaning to the set or the window; how
@@ -45,8 +45,8 @@ pub struct ListLeaderboardParams {
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct AggregateSettlementAccuracyParams {
     /// The principals to aggregate over (e.g. a league's member set). The set
-    /// is caller-controlled and scanned in full, so it is capped at 10,000 —
-    /// any realistic cohort is well under this; a longer list is truncated to
+    /// is caller-controlled and scanned in full, so it is capped at 10,000.
+    /// Any realistic cohort is well under this; a longer list is truncated to
     /// the first 10,000. Duplicate principals are de-duplicated and never
     /// double-count.
     pub members: Vec<Principal>,

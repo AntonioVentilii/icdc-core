@@ -136,9 +136,9 @@ dfx canister call clearing update_asset_price "(record {
     price = record { decimal = record { value = $TICRC1_PRICE_E6 : nat; decimals = $USD_DECIMALS : nat8 }; oracle_id = null; timestamp = null };
 })" --network "$NETWORK"
 
-# 6. vUSD — internal ledger only (Config.internal_ledger in clearing install args).
+# 6. vUSD: internal ledger only (Config.internal_ledger in clearing install args).
 #    Not collateral; no register_icrc_asset. Equity uses cash_balances_usd (USD), not vUSD metrics,
-#    and user vUSD token balances are not in the collateral map — so seeding ASSET_METRICS for vUSD
+#    and user vUSD token balances are not in the collateral map, so seeding ASSET_METRICS for vUSD
 #    here is unnecessary. Call update_asset_metrics yourself only if ops tooling wants a row.
 if [[ -n "$VUSD_LEDGER" ]]; then
   # 7. Add Clearing as controller of vUSD Ledger

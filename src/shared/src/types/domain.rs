@@ -19,12 +19,12 @@ use serde::{Deserialize, Serialize};
     Default,
 )]
 pub enum BalanceDomain {
-    /// Testnet / sandbox collateral (e.g. TESTICP, Sepolia) — not real funds.
+    /// Testnet / sandbox collateral (e.g. TESTICP, Sepolia), not real funds.
     Playground,
     /// Real collateralized trading (e.g., using ckUSDC, ICP).
     #[default]
     Settlement,
-    /// VICI XP (loyalty points) — segregated from Playground test assets.
+    /// VICI XP (loyalty points), segregated from Playground test assets.
     ViciXp,
     /// Non-monetary social bets (e.g., betting a pizza).
     Social,

@@ -105,7 +105,7 @@ pub struct Series {
     pub expiry_ns: u64,
     /// Optional timestamp in nanoseconds since UNIX epoch at which trading opens.
     ///
-    /// `None` means the series is tradeable from the moment it is registered —
+    /// `None` means the series is tradeable from the moment it is registered:
     /// the historical behavior, and the canonical way to express "live now".
     /// `Some(t)` schedules the series: it is listed and discoverable immediately
     /// but trading is rejected until `t`. The window is inclusive at the open
@@ -116,7 +116,7 @@ pub struct Series {
     /// series that differ only in their trading window are distinct contracts,
     /// so a scheduled series can never silently collide with an already-live one
     /// and inherit a start date its creator did not ask for. To keep that
-    /// guarantee meaningful `None` is the only encoding of "already live" —
+    /// guarantee meaningful, `None` is the only encoding of "already live":
     /// `add_series` rejects a `start_ns` at or before the current time, so the
     /// same market cannot exist under two ids.
     pub start_ns: Option<u64>,
@@ -154,7 +154,7 @@ pub struct Series {
     /// The domain this market belongs to (e.g. Playground, Settlement).
     pub balance_domain: BalanceDomain,
     /// The set of trading access policies governing who may trade this series.
-    /// **Must never be empty** — every series carries at least one policy.
+    /// **Must never be empty**: every series carries at least one policy.
     ///
     /// Evaluated as a logical OR: a caller is authorized if **any** policy
     /// in the list grants them access.
@@ -180,7 +180,7 @@ pub struct Series {
     /// localized clones of the same market).
     ///
     /// When `None`, consumers should assume the default locale `"en"` and are
-    /// responsible for translating into the user's preferred locale — the
+    /// responsible for translating into the user's preferred locale; the
     /// canister never stores translations on-chain.
     pub locale: Option<String>,
 }
@@ -280,7 +280,7 @@ impl Series {
 
     /// Returns where `now` falls in this series' trading window.
     ///
-    /// The window is `[start_ns, expiry_ns)` — inclusive at the open so the
+    /// The window is `[start_ns, expiry_ns)`: inclusive at the open so the
     /// series is live at exactly the announced instant, exclusive at the close
     /// to match the pre-existing expiry semantics (a series expires *at*
     /// `expiry_ns`, see [`ListSeriesParams::matches_expiry`]).
@@ -302,7 +302,7 @@ impl Series {
     /// Returns true when `now` falls inside this series' trading window.
     ///
     /// This is the registry's half of the "currently tradeable" predicate. It is
-    /// purely a function of the clock and the series' own window — settlement
+    /// purely a function of the clock and the series' own window. Settlement
     /// state and trading access are owned elsewhere and checked separately.
     #[must_use]
     pub fn is_tradeable_at(&self, now: u64) -> bool {
@@ -313,15 +313,15 @@ impl Series {
     /// payoff model needs to be resolved.
     ///
     /// A market can be past expiry yet not meaningfully resolvable: a `Call`/`Put`
-    /// with no `strike` has no reference to settle against — the clearing
-    /// canister's `get_unit_payoff` returns `MissingStrike` for it — and a
+    /// with no `strike` has no reference to settle against (the clearing
+    /// canister's `get_unit_payoff` returns `MissingStrike` for it), and a
     /// `Categorical` with no declared `outcomes` has nothing to resolve to. A
     /// resolution solver should skip such a market rather than treat it as due
     /// work. `Binary` needs only the settlement price the oracle supplies at
     /// resolution, so it is always structurally resolvable.
     ///
-    /// This is a pure function of the series — the settlement price itself is
-    /// provided by the oracle at resolution time, not stored here — so it reports
+    /// This is a pure function of the series (the settlement price itself is
+    /// provided by the oracle at resolution time, not stored here), so it reports
     /// only whether the *contract* is resolvable, not whether an oracle value is
     /// available yet.
     #[must_use]
@@ -342,7 +342,7 @@ impl Series {
 /// make the registry's answer depend on state it does not hold.
 #[derive(CandidType, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SeriesStatus {
-    /// `start_ns` is set and still in the future — listed, but not yet tradeable.
+    /// `start_ns` is set and still in the future: listed, but not yet tradeable.
     Upcoming,
     /// Inside the trading window: at or past `start_ns`, strictly before `expiry_ns`.
     Live,
@@ -499,7 +499,7 @@ pub struct AddSeriesParams {
     /// A detailed description of the series.
     pub description: Description,
     /// The settlement terms describing how this market resolves.
-    /// Compulsory — every new series must state how it settles.
+    /// Compulsory: every new series must state how it settles.
     pub resolution: Resolution,
     /// The defined outcomes for categorical markets (ordered).
     pub outcomes: Option<Vec<Outcome>>,
@@ -508,7 +508,7 @@ pub struct AddSeriesParams {
     /// An optional banner URL for the market.
     pub banner_url: Option<String>,
     /// Initial trading access policies for the new series.
-    /// **Must not be empty** — pass at least `[Open]`.
+    /// **Must not be empty**: pass at least `[Open]`.
     ///
     /// Controls who may submit orders on this market once it is registered.
     /// Pass `[Restricted { groups: [g1, g2, ...] }]` to limit trading to
@@ -575,8 +575,8 @@ impl PaginationParams {
     ///
     /// The returned cursor is the [`SeriesId`] of the **last item returned** in
     /// this page, not the first un-returned one. Every resume path treats the
-    /// cursor as exclusive — the registry ranges with `Bound::Excluded(cursor)`
-    /// and the fallback below skips `id <= cursor` — so handing back the
+    /// cursor as exclusive (the registry ranges with `Bound::Excluded(cursor)`
+    /// and the fallback below skips `id <= cursor`), so handing back the
     /// last-returned id resumes exactly after it, dropping and repeating
     /// nothing. (Returning the first un-returned id here would skip it on the
     /// next call, losing one item per page boundary.) This matches the cursor
@@ -601,7 +601,7 @@ impl PaginationParams {
         // Pre-allocate the vector with a sensible cap (100) to prevent
         // massive allocations if the requested limit is extremely high.
         let mut items = Vec::with_capacity(min(limit, 100));
-        // Id of the last item pushed this page — becomes the exclusive cursor.
+        // Id of the last item pushed this page; it becomes the exclusive cursor.
         let mut last_id: Option<&SeriesId> = None;
 
         // Fallback: Skip items up to the cursor if the caller didn't use a range optimization.
@@ -646,7 +646,7 @@ pub struct ListSeriesParams {
     /// Filter by a search term in the title or description (case-insensitive, partial match).
     pub search_term: Option<String>,
     /// When `Some(true)`, exclude series whose `expiry_ns` is at or before the
-    /// registry's current time — i.e. return only series that are still open
+    /// registry's current time, i.e. return only series that are still open
     /// for trading. `Some(false)` and `None` are equivalent and apply no expiry
     /// filtering (the historical behavior).
     ///
@@ -657,7 +657,7 @@ pub struct ListSeriesParams {
     /// caller (see `clearing.list_settled_series`).
     pub only_unexpired: Option<bool>,
     /// When `Some(true)`, return only series that are inside their trading
-    /// window right now — at or past `start_ns` (when set) *and* strictly before
+    /// window right now: at or past `start_ns` (when set) *and* strictly before
     /// `expiry_ns`. `Some(false)` and `None` apply no filtering.
     ///
     /// This is strictly narrower than [`Self::only_unexpired`], which admits
@@ -765,8 +765,8 @@ impl ListSeriesParams {
     /// Returns true if `series` satisfies the `only_unexpired` filter relative to
     /// `now` (nanoseconds since the UNIX epoch).
     ///
-    /// Kept separate from [`Self::matches`] — which is a pure function of the
-    /// filter and the series — because the expiry cutoff depends on the caller's
+    /// Kept separate from [`Self::matches`] (which is a pure function of the
+    /// filter and the series) because the expiry cutoff depends on the caller's
     /// notion of "now". The registry passes its own `time()` so the cutoff is
     /// server-authoritative.
     ///
@@ -803,7 +803,7 @@ impl ListSeriesParams {
     /// (nanoseconds since the UNIX epoch).
     ///
     /// A series is due when it is at or past `expiry_ns` (the same
-    /// [`SeriesStatus::Expired`] boundary the rest of the system uses — expiry is
+    /// [`SeriesStatus::Expired`] boundary the rest of the system uses; expiry is
     /// inclusive), carries a non-empty resolution clause, and has a resolvable
     /// payoff (see [`Series::has_resolvable_payoff`]). Kept separate from
     /// [`Self::matches`] because the expiry half depends on the caller's notion of
@@ -972,7 +972,7 @@ mod tests {
     }
 
     /// Walking every page with a fixed `limit` must reproduce the full ordered
-    /// set exactly — no item dropped at a page boundary, none repeated. This is
+    /// set exactly: no item dropped at a page boundary, none repeated. This is
     /// a regression test for an off-by-one where `next_cursor` pointed at the
     /// first *un-returned* item while the resume path treats the cursor as
     /// exclusive, silently skipping that item.
@@ -1020,7 +1020,7 @@ mod tests {
 
     /// Mirrors how the registry actually resumes: it pre-ranges the store with
     /// `Bound::Excluded(cursor)` before handing the iterator to `apply`. The
-    /// returned cursor must be exclusive-resume-safe through that path too —
+    /// returned cursor must be exclusive-resume-safe through that path too:
     /// every item returned exactly once, in order.
     #[test]
     fn pagination_through_excluded_range_resume_has_no_drops() {
@@ -1595,7 +1595,7 @@ mod tests {
     ///
     /// `start_ns: None` must hash byte-identically to how it did before the field
     /// existed, otherwise every already-registered series would change id on
-    /// upgrade. This golden value predates `start_ns` — if a change to
+    /// upgrade. This golden value predates `start_ns`: if a change to
     /// `generate_id` breaks it, that change is not backward compatible.
     #[test]
     fn unscheduled_series_id_is_unchanged_by_start_ns() {
@@ -1789,7 +1789,7 @@ mod tests {
         assert!(params.matches_due(&series, 250), "still due after expiry");
     }
 
-    /// An expired market whose payoff cannot be settled — a call with no strike —
+    /// An expired market whose payoff cannot be settled (a call with no strike)
     /// is not due work: the solver would only hit a payoff error on it.
     #[test]
     fn due_filter_excludes_unresolvable_expired_series() {
@@ -1844,7 +1844,7 @@ mod tests {
 
     /// Stable state written before `start_ns` existed must still decode, with the
     /// field defaulting to `None`. Candid treats an absent `opt` record field as
-    /// null, which is why this needs no migration — but the guarantee is load
+    /// null, which is why this needs no migration, but the guarantee is load
     /// bearing enough to pin with a test.
     #[test]
     fn legacy_blob_without_start_ns_decodes_as_none() {

@@ -33,7 +33,7 @@ Conventional Commit PR titles (which feed the changelog) are enforced by the
 
 ### Versioning
 
-`release-type: simple` — the release version lives in `.release-please-manifest.json`
+`release-type: simple`: the release version lives in `.release-please-manifest.json`
 and `CHANGELOG.md`, and is mirrored into `package.json` via `extra-files`.
 
 The Rust workspace version in `Cargo.toml` is **intentionally not bumped**:
@@ -118,7 +118,7 @@ release PR (`GITHUB_TOKEN`-authored PRs don't trigger workflows).
 ### 2. Deploy identity (controller PEM)
 
 A single, dedicated, revocable CI identity serves both environments. Add it as
-an additional controller on both the `staging` and `ic` canisters — do not put
+an additional controller on both the `staging` and `ic` canisters; do not put
 your personal identity in CI.
 
 ```bash
