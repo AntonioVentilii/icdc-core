@@ -29,6 +29,10 @@ What already exists in `icdc-core`. Search here and in the code before writing a
 - `minter.rs`: minter `Config`, `MinterArg`, `UpgradeArg`, `MintParams`, `MintResult`, `ConfigResult`.
 - `status.rs`: `CanisterStatus`.
 
+### Guards (`guards.rs`)
+
+- `caller_is_not_anonymous`, `caller_is_controller`: the endpoint guards every canister uses. Each canister's `guards.rs` re-exports them.
+
 ### Migrations (`migrations/mod.rs`)
 
 - `LegacySeries`, `upgrade_series`, `resolution_from_description`, `NO_RESOLUTION_PLACEHOLDER`: the shared series backfill both canisters apply in `restore_state`.
@@ -71,18 +75,18 @@ What already exists in `icdc-core`. Search here and in the code before writing a
 
 ### Guards (`guards.rs`)
 
-- `caller_is_not_anonymous`, `caller_is_controller`.
+- Re-exports the two shared guards; the clearing has none of its own.
 
 ## Registry (`src/registry/src/`)
 
-- `guards.rs`: `caller_is_not_anonymous`, `caller_is_controller`, `has_engine_role`, `has_engine_role_on`, `is_engine_creator`, `is_engine_oracle_admin`.
+- `guards.rs`: the two shared guards (re-exported), `has_engine_role`, `has_engine_role_on`, `is_engine_creator`, `is_engine_oracle_admin`.
 - `api/groups.rs`: `is_trading_authorized` (the query the clearing calls before a trade); `api/oracles.rs`: `is_oracle_authorized`; `api/access.rs`: `set_social_limits`, `get_social_limits`.
 - `utils.rs`: `canonical_id_part` (normalise an identifier part).
 - `memory.rs`: `SERIES_STORE`, `ORACLE_STORE`, `GROUPS_STORE`, `ENGINE_STORE`, `SOCIAL_CREATION_LOG`, `SOCIAL_LIMITS`, the id counters, `save_state`, `restore_state`.
 
 ## Minter (`src/minter/src/`)
 
-- `state/mod.rs`: `read_config`, `set_config`, `apply_upgrade`. `utils.rs`: `to_account`. `guards.rs`: `caller_is_authorized` plus the two common guards.
+- `state/mod.rs`: `read_config`, `set_config`, `apply_upgrade`. `utils.rs`: `to_account`. `guards.rs`: `caller_is_authorized`, and the two shared guards (re-exported).
 
 ## Test fixtures
 

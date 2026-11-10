@@ -1,28 +1,9 @@
 use candid::Principal;
-use ic_cdk::api::{is_controller, msg_caller};
+use ic_cdk::api::is_controller;
+pub use shared::guards::{caller_is_controller, caller_is_not_anonymous};
 use shared::types::{EngineId, EngineRole};
 
 use crate::memory::ENGINE_STORE;
-
-/// Guard function to ensure the caller is not anonymous.
-pub fn caller_is_not_anonymous() -> Result<(), String> {
-    if msg_caller() == Principal::anonymous() {
-        return Err("Update call error. RejectionCode: CanisterReject, Error: Anonymous caller not authorised.".to_owned());
-    }
-
-    Ok(())
-}
-
-/// Guard function to ensure the caller is one of the canister controllers.
-pub fn caller_is_controller() -> Result<(), String> {
-    let caller = msg_caller();
-
-    if is_controller(&caller) {
-        Ok(())
-    } else {
-        Err("Caller is not a controller.".to_owned())
-    }
-}
 
 /// Returns `true` if the principal holds the given role in **any** registered Engine
 /// whose `allowed_roles` still includes that role.

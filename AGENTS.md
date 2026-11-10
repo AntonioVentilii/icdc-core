@@ -13,7 +13,7 @@ A Rust workspace ([`Cargo.toml`](Cargo.toml)) of four crates, three of them cani
 | [`src/clearing`](src/clearing/) | The economic core: balances, positions, margin, trading, settlement, collateral custody, leaderboard |
 | [`src/registry`](src/registry/) | Series definitions, oracles, groups (closed circles), engines and their roles                        |
 | [`src/minter`](src/minter/)     | Mints `vUSD` on its ledger for authorised callers (the clearing)                                     |
-| [`src/shared`](src/shared/)     | Types, constants and migration rules used by more than one canister                                  |
+| [`src/shared`](src/shared/)     | Types, constants, guards and migration rules used by more than one canister                          |
 
 Integration tests live in [`src/clearing/tests/it/`](src/clearing/tests/it/) and run on PocketIC. Shell automation (build, deploy, init, lint) lives in [`scripts/`](scripts/) behind the npm scripts in [`package.json`](package.json).
 
