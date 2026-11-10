@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 
-use crate::types::description::Description;
+use crate::{impl_from_result, types::description::Description};
 
 /// Metadata about a price oracle entity.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -80,11 +80,4 @@ pub enum OracleResult {
     Err(OracleError),
 }
 
-impl From<Result<(), OracleError>> for OracleResult {
-    fn from(value: Result<(), OracleError>) -> Self {
-        match value {
-            Ok(()) => OracleResult::Ok,
-            Err(e) => OracleResult::Err(e),
-        }
-    }
-}
+impl_from_result!(OracleResult, (), OracleError);
