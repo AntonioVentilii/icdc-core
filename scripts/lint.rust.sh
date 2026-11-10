@@ -12,7 +12,7 @@ DISALLOWED_MACROS_ALLOW=(-- -A clippy::disallowed_macros)
 [[ "${1:-}" != "--help" ]] || {
   cat <<-EOF
 
-  Runs Clippy lint checks for the Rust canister crates.
+  Runs Clippy lint checks for every crate of the Cargo workspace.
 
 	Usage: $0 [--fix]
 
@@ -28,21 +28,24 @@ if [[ "${1:-}" == "--fix" ]]; then
   FIX_ARGS+=(--fix --allow-dirty --allow-staged)
 fi
 
-CANISTERS=()
-while IFS= read -r canister; do
-  [[ -n "$canister" ]] && CANISTERS+=("$canister")
-done < <(jq -r '.canisters | keys[]' dfx.json)
+# Every member of the Cargo workspace is linted: the canisters and the crates
+# they share. Listing only the canisters in dfx.json left the tests of a
+# library crate such as `shared` unchecked.
+MANIFESTS=()
+while IFS= read -r member; do
+  [[ -n "$member" ]] && MANIFESTS+=("$member/Cargo.toml")
+done < <(yq -oy '.workspace.members[]' Cargo.toml)
 
-((${#CANISTERS[@]})) || {
-  echo "ERROR: No canisters found in dfx.json."
+((${#MANIFESTS[@]})) || {
+  echo "ERROR: No workspace members found in Cargo.toml."
   exit 1
 }
 
-for canister in "${CANISTERS[@]}"; do
-  manifest_path="src/$canister/Cargo.toml"
-
-  # Skip non-Rust canisters (or different layouts)
-  [[ -f "$manifest_path" ]] || continue
+for manifest_path in "${MANIFESTS[@]}"; do
+  [[ -f "$manifest_path" ]] || {
+    echo "ERROR: $manifest_path does not exist."
+    exit 1
+  }
 
   RUSTFLAGS="${CLIPPY_RUSTFLAGS[*]}" cargo clippy ${FIX_ARGS[@]+"${FIX_ARGS[@]}"} \
     --manifest-path "$manifest_path" \
