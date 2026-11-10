@@ -333,7 +333,12 @@ pub async fn cancel_limit_order(params: CancelLimitOrderParams) -> SubmitMatched
                 if o.creator != caller {
                     return Err(TradeError::NotOrderCreator);
                 }
-                Ok(m.remove(&order_id).unwrap())
+                #[expect(
+                    clippy::unwrap_used,
+                    reason = "baseline of the quality gate: return an error instead, see docs/ai/patterns.md"
+                )]
+                let order = m.remove(&order_id).unwrap();
+                Ok(order)
             } else {
                 Err(TradeError::OrderNotFound(order_id))
             }

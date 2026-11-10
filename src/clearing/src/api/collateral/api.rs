@@ -329,6 +329,7 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
 
             let handler = get_handler(&config.asset).map_err(WithdrawCollateralError::Asset)?;
 
+            #[expect(clippy::unwrap_used, reason = "baseline of the quality gate: return an error instead, see docs/ai/patterns.md")]
             let amount_u128: u128 = plan.reserved_amount.unwrap();
 
             let res = handler

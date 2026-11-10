@@ -223,6 +223,21 @@ build/download scripts for integration), never on `github.sha`, and
 are saved from `main` only. Branches restore `main`'s entry; saving
 per commit or per branch fills the 10 GB repo quota and evicts it.
 
+### Ratchets
+
+The `lint` job also enforces quality gates whose thresholds are the
+baseline measured when they were added. They pass today and may only
+get stricter: lower a threshold (or shrink a baseline list) in the PR
+that improves the code, never raise it.
+
+| Gate                                                          | Where                                                                                                          | Baseline                                                                                                                       |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| No `unwrap`, `expect`, `panic!`, `unreachable!` outside tests | `[workspace.lints.clippy]` in `Cargo.toml`; tests allowed by `clippy.toml` and `src/clearing/tests/it/main.rs` | 10 existing sites marked `#[expect(..., reason = "baseline of the quality gate: ...")]`; remove the attribute when you fix one |
+| Function length (`too_many_lines`)                            | `too-many-lines-threshold` in `clippy.toml`                                                                    | 238 lines (`execute_trade_impl`)                                                                                               |
+| Cognitive complexity (`cognitive_complexity`)                 | `cognitive-complexity-threshold` in `clippy.toml`                                                              | 21 (`add_series_impl`)                                                                                                         |
+| Duplicated Rust code (`jscpd`)                                | `.jscpd.json`, run by `scripts/lint.duplication.sh`                                                            | 7.2% of lines (7.11% measured); list the clones with `npx jscpd --reporters console`                                           |
+| Lower layers of the clearing importing `api/`                 | `scripts/lint.layering.sh`                                                                                     | 5 files in its `BASELINE`; the script fails when one is clean and still listed                                                 |
+
 ## 7. After CI fails
 
 - **`format` failed** → the job runs `npm run format` and fails the

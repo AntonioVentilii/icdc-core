@@ -27,11 +27,19 @@ fn init(arg: MinterArg) {
 fn pre_upgrade() {
     let config = CONFIG.with(|c| return c.borrow().clone());
 
+    #[expect(
+        clippy::expect_used,
+        reason = "baseline of the quality gate: trapping in an upgrade hook rolls the upgrade back, which is the intended failure"
+    )]
     storage::stable_save((config,)).expect("Failed to save state");
 }
 
 #[post_upgrade]
 fn post_upgrade(arg: MinterArg) {
+    #[expect(
+        clippy::expect_used,
+        reason = "baseline of the quality gate: trapping in an upgrade hook rolls the upgrade back, which is the intended failure"
+    )]
     let (config,): (Option<Config>,) = storage::stable_restore().expect("Failed to restore state");
 
     if config.is_none() {
