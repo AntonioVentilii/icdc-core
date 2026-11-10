@@ -2,6 +2,8 @@
 
 Verified on: 2026-03-16
 
+> Finding 1 below describes the code as it was on that date. Since then `deposit_collateral` and `withdraw_collateral` reject the internal asset (`src/clearing/src/api/collateral/api.rs:58`, `:188`), so `vUSD` can no longer be deposited. The current rules are in [`domain.md`](domain.md#6-assets-custody-and-vusd).
+
 ## Summary
 
 The `vUSD` token serves as the canonical internal accounting unit for the ICDC ecosystem. This document summarizes the verified properties and guarantees of the `vUSD` asset.

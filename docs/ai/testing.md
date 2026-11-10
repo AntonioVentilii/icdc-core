@@ -1,6 +1,6 @@
 # Testing
 
-Where tests live in `icdc-core`, how they are written and how to run them. Every new feature and every bug fix comes with tests, and existing tests pass before and after the change. The invariants they protect are in [`domain.md`](domain.md#6-invariants).
+Where tests live in `icdc-core`, how they are written and how to run them. Every new feature and every bug fix comes with tests, and existing tests pass before and after the change. The invariants they protect are in [`domain.md`](domain.md#8-invariants).
 
 ## Two layers
 
@@ -20,6 +20,7 @@ There is no dfx-based test suite: integration tests deploy the real wasms (clear
   - the state after a mutation (equity, cash balance, reserved margin, positions);
   - decimal scaling, especially with assets of mixed decimals;
   - the edge cases of margin, settlement and transfers. Use property-style loops over inputs where they fit, as `settlement_exhaustive.rs` does.
+- A test of money code asserts numbers, not only `Ok`: the cash, the reserved margin and the position margin of **every** account the operation touches, before and after, and that what one side gained another side or a fund lost ([`domain.md`](domain.md#8-invariants)). Include a case where the account already holds a position at a different price, and one at the exact limit of its equity.
 - `now_ns()` returns `0` off-chain, so pass explicit `now` values to time-dependent cores.
 
 ## Integration tests

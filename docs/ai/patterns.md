@@ -28,13 +28,13 @@ Authorization is declared on the endpoint, never checked ad hoc inside it (publi
 
 - Errors are typed enums with a doc comment per variant. Cross-cutting cases are `CommonError` (`src/clearing/src/types/errors.rs:6`); a domain error wraps it as a variant (`TradeError::Common`, `src/clearing/src/api/trade/errors.rs:14`) rather than repeating `Unauthorized` or `MathOverflow`.
 - Variants carry the data the caller needs (`TradeError::SeriesNotStarted { series_id, start_ns }`), never a formatted string when a field would do. `Internal(String)` is for transport and decode failures only.
-- No `unwrap()`, `expect()`, `panic!` or `unreachable!` outside tests: return the error. Arithmetic on amounts uses checked operations and maps overflow to `CommonError::MathOverflow`.
+- No `unwrap()`, `expect()`, `panic!` or `unreachable!` outside tests: return the error. New arithmetic on amounts uses checked operations (`checked_mul`, `checked_add`, `checked_sub`) and maps a failure to `CommonError::MathOverflow` (or the domain's own `MathOverflow`). Much of the older payoff and trade code multiplies and adds without checks or relies on `saturating_sub`: do not take it as the model, and never use `saturating_*` where a wrong but plausible number is worse than an error. Rounding direction is a domain rule, not a style choice: [`domain.md`](domain.md#1-units-and-rounding).
 - Prefer an enum to a boolean flag that switches behaviour: `SeriesAccess::{OpenExposure, ReduceExposure}` (`src/clearing/src/utils/series.rs:20`) makes every call site state its intent.
 
 ## State
 
 - Each canister keeps its state in `thread_local!` `RefCell` maps declared once in `memory.rs` (`src/clearing/src/memory.rs:49`). Access is `MAP.with(|m| m.borrow())`; keep the borrow inside the closure and never hold it across an `await`.
-- Upgrades serialise the whole state with Candid: `save_state` in `pre_upgrade` (`src/clearing/src/memory.rs:140`), `restore_state` in `post_upgrade` (`:203`). A new map is added to both. A derived index is not saved: it is rebuilt from its source in `restore_state` (`rebuild_series_trade_history`, `:341`).
+- Upgrades serialise the whole state with Candid: `save_state` in `pre_upgrade` (`src/clearing/src/memory.rs:140`), `restore_state` in `post_upgrade` (`:203`). A new map is added to both. A derived index is not saved: it is rebuilt from its source in `restore_state` (`rebuild_series_trade_history`, `:341`). The whole state is saved and restored inside one message each, so anything that grows without bound makes upgrades riskier: see [`domain.md`](domain.md#9-upgrades).
 - A persisted type changes only with a migration: [`migrations.md`](migrations.md).
 - Pass the clock in: pure cores take `now: u64`; endpoints get it from `now_ns()` (`src/clearing/src/utils/system.rs:9`), which returns `0` off-chain so host tests are deterministic.
 
@@ -46,17 +46,17 @@ Do every await first (registry lookups, authorization), then validate and comput
 
 ### Plan, Execute, Finalise
 
-Every ledger interaction runs through a durable plan stored in state, so a retry, a lost response or an upgrade resumes instead of paying twice:
+Every ledger interaction runs through a durable plan stored in state, so that a retry by the caller, a lost response or an upgrade resumes the same plan instead of paying twice:
 
 1. **Plan** (no awaits): `DepositPlan::get_or_create` keyed by the caller's idempotency ID (`src/clearing/src/types/plans.rs:108`); return early if it is `Finalised`.
 2. **Execute** (async, resumable): mark `Executing`, do the transfer, store the receipt.
 3. **Finalise** (no awaits, idempotent): apply the accounting once and mark `Finalised`.
 
-Reference implementation: `deposit_collateral` in `src/clearing/src/api/collateral/api.rs:82` (Phase A), `:96` (Phase B), `:135` (Phase C). Settlement, withdrawals, fund withdrawals, domain migration and reassignment use the same `PlanStatus` (`src/clearing/src/types/plans.rs:21`). Flows: [`docs/architecture/flows.md`](../architecture/flows.md).
+Reference implementation: `deposit_collateral` in `src/clearing/src/api/collateral/api.rs:82` (Phase A), `:96` (Phase B), `:135` (Phase C). Settlement, withdrawals, fund withdrawals, domain migration and reassignment use the same `PlanStatus` (`src/clearing/src/types/plans.rs:21`), but they do not all order their steps or handle a failed call the same way: the table in [`domain.md`](domain.md#3-atomicity) says what each one does. Two rules hold for all of them. The ledger call always carries the plan's `idempotency_ns` as `created_at_time`, so a repeated call is a duplicate at the ledger, not a second payment. And the plan is written to state before the `await`, never only after it. Flows: [`docs/architecture/flows.md`](../architecture/flows.md).
 
 ### Inter-canister calls
 
-Use `Call::bounded_wait(canister, "method").with_args(...)`, map transport and decode errors to a typed error, decode with `candid_tuple`: `src/clearing/src/utils/registry.rs:13`. Reach for an existing wrapper in `utils/registry.rs` or the asset handlers before writing another call.
+Use `Call::bounded_wait(canister, "method").with_args(...)`, map transport and decode errors to a typed error, decode with `candid_tuple`: `src/clearing/src/utils/registry.rs:13`. A bounded-wait call that fails in transport may still have run on the other canister: for a read that is harmless, for a transfer it means the outcome is unknown and only an idempotent retry settles it. Reach for an existing wrapper in `utils/registry.rs` or the asset handlers before writing another call.
 
 ### Moving user state between principals
 
