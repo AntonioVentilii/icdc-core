@@ -104,6 +104,7 @@ pub fn update_engine(params: UpdateEngineParams) -> EngineResult {
                 }
             }
 
+            #[expect(clippy::unwrap_used, reason = "baseline of the quality gate: return an error instead, see docs/ai/patterns.md")]
             let engine = store.get_mut(&params.engine_id).unwrap();
 
             if let Some(name) = params.name {
