@@ -1,7 +1,7 @@
 # Implementation Plan for PR 1: `Linear` payoff (bounded forwards / NDFs)
 
 Satisfies the "Plan First" rule in
-[`.policies/code-modification.md`](../../.policies/code-modification.md) for
+[`docs/ai/governance.md`](../ai/governance.md) for
 [ADR 0001](../adr/0001-linear-payoff-forwards-ndf-futures.md).
 
 **One logical change**: add a single expiring, cash-settled `Linear` payoff type
@@ -17,10 +17,10 @@ Title: `feat(clearing,registry,shared): add Linear payoff (bounded forwards/NDF)
 - **Reuse existing math**: route Linear through `get_unit_payoff`,
   `get_settlement_value`, `get_required_margin`, `scale_price`, `Price`. No new
   pricing model. No Black–Scholes in-core.
-- **Solvency first** ([policy rule 4](../../.policies/code-modification.md)):
+- **Solvency first** ([economic safety first](../../AGENTS.md#the-standard)):
   both legs pre-reserve max loss within the band; long+short PnL nets to zero.
 - **Additive state**: new `Series.settlement_cap` is an `opt` field ⇒ no
-  migration ([patterns.md §5](../../.agents/patterns.md)); re-verify decode.
+  migration ([migrations.md](../ai/migrations.md)); re-verify decode.
 
 ## Steps (ordered; each compiles + tests green before the next)
 
@@ -114,7 +114,7 @@ npm run did
 
 - **Motivation**: FX linear leg (forward = NDF on a cash-settled CCP); first half
   of ADR 0001. Bounded/solvency-safe; variation margin is a follow-up.
-- **Changes**: bullet the files above; note `docs/ai`/`.agents` untouched, ADR +
+- **Changes**: bullet the files above; note `docs/ai` untouched, ADR +
   plan added, candid regenerated.
 - **Tests**: the commands above + which suites were added.
 
