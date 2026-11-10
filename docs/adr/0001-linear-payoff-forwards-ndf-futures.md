@@ -105,7 +105,7 @@ Under the current "pre-reserve max loss, no liquidation" model:
 Real markets solve the short side with **maintenance margin + mark-to-market +
 liquidation**. That is the correct end state, but it is a risk-core project of
 its own, and the repo's policy is incremental, verifiable patches
-([`.policies/code-modification.md`](../../.policies/code-modification.md)).
+([`docs/ai/governance.md`](../ai/governance.md)).
 
 We therefore **sequence** it:
 
@@ -113,7 +113,7 @@ We therefore **sequence** it:
 
 Add a per-series **settlement price band** used only by `Linear`
 (`settlement_cap: Option<Price>`, an `opt` field → no state migration needed,
-per [patterns.md §5](../../.agents/patterns.md)). Margin fully pre-reserves the
+per [migrations.md](../ai/migrations.md)). Margin fully pre-reserves the
 max loss **within the band**:
 
 ```
@@ -183,7 +183,7 @@ against unbounded upside ([`get_required_margin`](../../src/clearing/src/payoffs
 
 - **Separate `Future` payoff type**: a dated future's payoff _is_ the forward's
   (`S_T − K`); the difference is margining. Modelling it as a distinct payoff
-  duplicates logic (violates [patterns.md](../../.agents/patterns.md) / the
+  duplicates logic (violates [patterns.md](../ai/patterns.md) / the
   "No Redundancy" policy rule).
 - **Perpetual futures first**: no `expiry_ns`, requires continuous funding +
   MTM + liquidation and a different lifecycle than the expiry-triggered
@@ -197,4 +197,4 @@ against unbounded upside ([`get_required_margin`](../../src/clearing/src/payoffs
 - [`src/shared/src/types/series.rs`](../../src/shared/src/types/series.rs): `PayoffType`, `Series`, `SettlementInput`
 - [`src/clearing/src/api/settlement/api.rs`](../../src/clearing/src/api/settlement/api.rs): settlement application
 - [`docs/plans/linear-payoff-pr1-implementation.md`](../plans/linear-payoff-pr1-implementation.md): PR 1 implementation plan
-- [`.policies/code-modification.md`](../../.policies/code-modification.md), [`docs/ai/pr-and-ci.md`](../ai/pr-and-ci.md)
+- [`docs/ai/governance.md`](../ai/governance.md), [`docs/ai/pr-and-ci.md`](../ai/pr-and-ci.md)

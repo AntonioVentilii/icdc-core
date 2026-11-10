@@ -11,13 +11,13 @@ The `vUSD` token serves as the canonical internal accounting unit for the ICDC e
 ### 1. Internal Ledger Mapping
 
 - **Finding**: `vUSD` deposits are directly credited to the user's `cash_balance_usd` in the `AccountState`.
-- **Code Reference**: [collateral/api.rs](file:///Users/antonio.ventilii/projects/icdc-core/src/clearing/src/api/collateral/api.rs) (Phase C of `deposit_collateral`).
+- **Code Reference**: [collateral/api.rs](../../src/clearing/src/api/collateral/api.rs) (Phase C of `deposit_collateral`).
 - **Implication**: `vUSD` is not treated as a volatile collateral asset but as realized cash.
 
 ### 2. Collateral Restrictions
 
 - **Finding**: While other assets like `ICP` are subject to haircuts (e.g., 2% in tests), `vUSD` (mapped to `cash_balance_usd`) is included in equity calculations at 1:1 value.
-- **Code Reference**: [margin.rs](file:///Users/antonio.ventilii/projects/icdc-core/src/clearing/src/types/margin.rs) (`calculate_raw_equity_i128`).
+- **Code Reference**: [margin.rs](../../src/clearing/src/types/margin.rs) (`calculate_raw_equity_i128`).
 - **Implication**: `vUSD` acts as the risk-free base currency of the clearing system.
 
 ### 3. Controller Guarantee

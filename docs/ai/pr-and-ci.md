@@ -80,7 +80,7 @@ The template mandates three sections:
 
 <!-- Bulleted list of what actually changed.
      Be specific about file / crate / function names where relevant.
-     If you updated docs/ai/** or .agents/**, mention it here. -->
+     If you updated docs/ai/** or AGENTS.md, mention it here. -->
 
 # Tests
 
@@ -150,10 +150,10 @@ One logical change per PR. If you catch yourself writing
 | "Refactor 5 modules into shared `Foo`"      | PR 1: introduce `Foo` + migrate 1 caller. PR 2..N: migrate the others. |
 | "Speed up tests via CI cache + lazy WASMs"  | One PR per layer (CI infra; in-process fixture cache).                 |
 
-This is also stated as commandment 2 in
-[`.agents/instructions.md`](../../.agents/instructions.md) and is
-enforced by the
-[reviewer agent](../../.agents/reviewer.md).
+This is rule 2 of the
+[universal standard](https://github.com/AntonioVentilii/officina/blob/main/standards/code.md)
+and part of the review step in
+[`governance.md`](governance.md#plan-implement-review).
 
 When a wave of dependent PRs is genuinely needed, follow the base
 branch + draft rule in [§3](#3-base-branch--draft-state); atomicity
@@ -180,7 +180,9 @@ RUSTFLAGS="-D warnings" cargo test --lib --bins
 RUSTFLAGS="-D warnings" cargo test --test it
 ```
 
-If you regenerated Candid:
+If you changed the API or a doc comment on an exposed type, regenerate
+Candid as the last step before committing (it also re-runs format and
+lint):
 
 ```bash
 npm run did               # regenerates clearing.did, registry.did, minter.did
@@ -197,15 +199,16 @@ scripts/pic-install
 
 Defined under [`.github/workflows/`](../../.github/workflows/):
 
-| Workflow      | Job(s)                      | What it runs                                                                                                                                                  |
-| ------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `checks.yml`  | `format`                    | `npm run format`. Fails the job whenever it produces a diff: run `npm run format` locally and push.                                                           |
-| `checks.yml`  | `lint`                      | `npm run lint`: `prettier --check` + `scripts/lint.sh` (rust, did, shell).                                                                                    |
-| `checks.yml`  | `checks-pass`               | Aggregator gate via `.github/actions/needs_success`.                                                                                                          |
-| `tests.yml`   | `unit`                      | `npm run build` then `npm run test:unit` (`cargo test --lib --bins`).                                                                                         |
-| `tests.yml`   | `integration`               | `npm run build` then `npm run test:integration`.                                                                                                              |
-| `tests.yml`   | `tests-pass`                | Aggregator gate via `.github/actions/needs_success`.                                                                                                          |
-| `release.yml` | `wasm`, `candid`, `release` | Triggered by `push: tags: v*`, GitHub `release` events, or `workflow_dispatch`. Builds + uploads WASM/`*.did` artifacts and (for tags) cuts a GitHub Release. |
+| Workflow      | Job(s)                      | What it runs                                                                                                                                                         |
+| ------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `checks.yml`  | `format`                    | `npm run format`. Fails the job whenever it produces a diff: run `npm run format` locally and push.                                                                  |
+| `checks.yml`  | `lint`                      | `npm run lint`: `prettier --check` + `scripts/lint.sh` (no em dashes, workspace dependencies, no generic `Result` names in `.did`, GitHub workflows, clippy, shell). |
+| `checks.yml`  | `did`                       | `npm run did`, then fails on any diff in the committed `.did` files: run `npm run did` locally and commit the result.                                                |
+| `checks.yml`  | `checks-pass`               | Aggregator gate via `.github/actions/needs_success`.                                                                                                                 |
+| `tests.yml`   | `unit`                      | `npm run build` then `npm run test:unit` (`cargo test --lib --bins`).                                                                                                |
+| `tests.yml`   | `integration`               | `npm run build` then `npm run test:integration`.                                                                                                                     |
+| `tests.yml`   | `tests-pass`                | Aggregator gate via `.github/actions/needs_success`.                                                                                                                 |
+| `release.yml` | `wasm`, `candid`, `release` | Triggered by `push: tags: v*`, GitHub `release` events, or `workflow_dispatch`. Builds + uploads WASM/`*.did` artifacts and (for tags) cuts a GitHub Release.        |
 
 The `Prepare` composite action (`.github/actions/prepare`) installs
 the rust toolchain (`rust-toolchain.toml`), npm deps, `cargo-binstall`,
@@ -241,8 +244,9 @@ that improves the code, never raise it.
   build whenever it produces a diff. Run `npm run format` locally and
   push the result.
 - **`lint` failed** → run `npm run lint:rust` (auto-fixes clippy where
-  possible). Never silence with `#[allow(clippy::…)]` unless you can
-  justify it in code review. Pre-existing
+  possible). Never silence a lint: `allow_attributes` is denied, and the
+  rare justified exception is `#[expect(clippy::…, reason = "…")]`
+  agreed in review. Pre-existing
   `pedantic = { level = "deny", priority = -1 }` is intentional.
 - **`unit` / `integration` failed** → reproduce locally:
   ```bash
@@ -250,9 +254,8 @@ that improves the code, never raise it.
   RUSTFLAGS="-D warnings" cargo test --test it
   ```
   Don't commit `#[ignore]` to bypass: failing tests are a signal,
-  not a nuisance. See
-  [`.policies/testing-policy.md`](../../.policies/testing-policy.md)
-  for the broader testing rules.
+  not a nuisance. See [`testing.md`](testing.md) for the broader
+  testing rules.
 
 ## 8. Updating an existing PR
 
@@ -291,3 +294,15 @@ full flow, versioning rationale, and one-time setup live in
 
 Do not edit release artifacts in tree (`*.wasm.gz`, `*.did`): they
 come from the build, not from source.
+
+## 11. Reviewing a PR
+
+Whether you review or propose improvements, rank what you find in this
+order: correctness, safety and side effects (economic safety first),
+consistency with [`structure.md`](structure.md) and
+[`patterns.md`](patterns.md), test coverage, maintainability,
+readability. Do not suggest stylistic rewrites that improve neither
+correctness nor clarity. Prefer the smallest change close to the
+affected code, keep public APIs stable and backward compatible where
+possible, and do not rename widely used symbols or reorganise folders
+as part of an unrelated change.
