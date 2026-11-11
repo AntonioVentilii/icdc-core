@@ -239,21 +239,17 @@ impl Risk<'_> {
     }
 }
 
-#[test]
-fn risk_engine_lifecycle_through_the_timelock() {
-    let env = TestSetup::default();
-    let risk = Risk { env: &env };
-    let admin = test_user(60);
-    let outsider = test_user(61);
-
-    // Nobody holds the role yet, not even a controller, and a controller can never be granted it.
+/// Nobody holds the role yet, not even a controller, and a controller can never be granted it.
+/// Adding a risk administrator waits behind the timelock; only admins and controllers execute.
+/// Returns the id of the executed `AddRiskAdmin` action.
+fn grant_role_through_the_timelock(risk: &Risk<'_>, admin: Principal, outsider: Principal) -> u64 {
+    let env = risk.env;
     assert!(risk.rejected(env.controller, "set_underlying_risk_params", btc_params()));
     assert!(matches!(
         risk.propose_admin(env.controller),
         RiskIdResult::Err(RiskError::InvalidPrincipal(_))
     ));
 
-    // Adding a risk administrator waits behind the timelock; only admins and controllers execute.
     let RiskIdResult::Ok(add_admin) = risk.propose_admin(admin) else {
         panic!("add_risk_admin failed");
     };
@@ -282,8 +278,15 @@ fn risk_engine_lifecycle_through_the_timelock() {
         panic!("get_risk_governance failed");
     };
     assert_eq!(governance.risk_admins, vec![admin]);
+    add_admin
+}
 
-    // Parameters within bounds; the multiplier rises at once and falls only through the timelock.
+/// Parameters within bounds; the multiplier rises at once and falls only through the timelock.
+fn multiplier_rises_at_once_and_falls_through_the_timelock(
+    risk: &Risk<'_>,
+    admin: Principal,
+    outsider: Principal,
+) {
     assert!(matches!(
         risk.update::<RiskUnitResult>(admin, "set_underlying_risk_params", btc_params()),
         RiskUnitResult::Ok
@@ -300,7 +303,8 @@ fn risk_engine_lifecycle_through_the_timelock() {
         risk.set_k(admin, DecimalValue::new(4, 0)),
         RiskChangeResult::Err(RiskError::OutOfBounds { .. })
     ));
-    assert!(env
+    assert!(risk
+        .env
         .clearing
         .update::<RiskChangeResult, _>(
             outsider,
@@ -311,21 +315,31 @@ fn risk_engine_lifecycle_through_the_timelock() {
             },),
         )
         .is_err());
+}
 
-    // A controller raise is an emergency brake: it applies at once and withdraws the pending
-    // lowering. A controller cannot lower.
+/// A controller raise is an emergency brake: it applies at once and withdraws the pending
+/// lowering. A controller cannot lower.
+fn controller_raise_is_an_emergency_brake(risk: &Risk<'_>) {
+    let controller = risk.env.controller;
     assert!(matches!(
-        risk.set_k(env.controller, DecimalValue::new(25, 1)),
+        risk.set_k(controller, DecimalValue::new(25, 1)),
         RiskChangeResult::Ok(RiskChangeView::Applied)
     ));
     assert!(risk.pending().is_empty());
     assert!(matches!(
-        risk.set_k(env.controller, DecimalValue::new(2, 0)),
+        risk.set_k(controller, DecimalValue::new(2, 0)),
         RiskChangeResult::Err(RiskError::Unauthorized(_))
     ));
+}
 
-    // Backfill: a wrong hash is rejected without revealing the computed one; the points of a sealed
-    // upload can be read during the timelock.
+/// Backfill: a chunk with a future date is rejected, a wrong hash is rejected without revealing
+/// the computed one, and the points of a sealed upload can be read during the timelock. Returns
+/// the id of the pending activation.
+fn seal_backfill_and_read_it_during_the_timelock(
+    risk: &Risk<'_>,
+    admin: Principal,
+    outsider: Principal,
+) -> u64 {
     let RiskIdResult::Ok(upload_id) = risk.update::<RiskIdResult>(
         admin,
         "begin_history_upload",
@@ -337,34 +351,25 @@ fn risk_engine_lifecycle_through_the_timelock() {
     ) else {
         panic!("begin_history_upload failed");
     };
-    let start = first_date(&env);
+    let start = first_date(risk.env);
+    let append = |points: Vec<PricePointInput>| -> RiskCountResult {
+        risk.update(
+            admin,
+            "append_history_chunk",
+            AppendHistoryChunkParams { upload_id, points },
+        )
+    };
     let future = vec![PricePointInput {
         date: start + 101,
         price: DecimalValue::new(1, 0),
     }];
     assert!(matches!(
-        risk.update::<RiskCountResult>(
-            admin,
-            "append_history_chunk",
-            AppendHistoryChunkParams {
-                upload_id,
-                points: future,
-            },
-        ),
+        append(future),
         RiskCountResult::Err(RiskError::InvalidHistoryChunk(_))
     ));
     let points = synthetic_points(start);
-    assert!(matches!(
-        risk.update::<RiskCountResult>(
-            admin,
-            "append_history_chunk",
-            AppendHistoryChunkParams {
-                upload_id,
-                points: points.clone(),
-            },
-        ),
-        RiskCountResult::Ok(40)
-    ));
+    assert!(matches!(append(points.clone()), RiskCountResult::Ok(40)));
+
     let seal = |sha256_hex: String| -> RiskIdResult {
         risk.update(
             admin,
@@ -382,7 +387,9 @@ fn risk_engine_lifecycle_through_the_timelock() {
     let RiskIdResult::Ok(activation) = seal(off_chain_sha256(&points)) else {
         panic!("the off-chain hash must seal the upload");
     };
-    let PriceHistoryResult::Ok(page) = env
+
+    let PriceHistoryResult::Ok(page) = risk
+        .env
         .clearing
         .query(
             outsider,
@@ -401,20 +408,32 @@ fn risk_engine_lifecycle_through_the_timelock() {
         page.iter().map(|p| p.date).collect::<Vec<_>>(),
         (start + 10..start + 15).collect::<Vec<_>>()
     );
+    activation
+}
 
-    let volatility = |caller| -> VolatilityResult {
-        env.clearing
-            .query(
-                caller,
-                "get_volatility",
-                (UnderlyingParams {
-                    underlying: "BTC".to_owned(),
-                },),
-            )
-            .unwrap()
-    };
+fn btc_volatility(risk: &Risk<'_>, caller: Principal) -> VolatilityResult {
+    risk.env
+        .clearing
+        .query(
+            caller,
+            "get_volatility",
+            (UnderlyingParams {
+                underlying: "BTC".to_owned(),
+            },),
+        )
+        .unwrap()
+}
+
+/// No volatility before the history is active; after activation, constant 1% daily moves give a
+/// provisional EWMA close to 1%, with no long run and no floor below 250 returns.
+fn volatility_appears_once_the_history_is_active(
+    risk: &Risk<'_>,
+    admin: Principal,
+    outsider: Principal,
+    activation: u64,
+) {
     assert!(matches!(
-        volatility(outsider),
+        btc_volatility(risk, outsider),
         VolatilityResult::Err(RiskError::InsufficientHistory { .. })
     ));
 
@@ -425,34 +444,45 @@ fn risk_engine_lifecycle_through_the_timelock() {
     ));
     assert_eq!(risk.history(None).len(), 40);
 
-    let VolatilityResult::Ok(reading) = volatility(outsider) else {
+    let VolatilityResult::Ok(reading) = btc_volatility(risk, outsider) else {
         panic!("get_volatility failed");
     };
     assert_eq!(reading.returns, 39);
-    // Fewer than 250 returns: EWMA only, no long run and no floor.
     assert!(reading.is_provisional);
     assert_eq!(reading.sigma_long_run, None);
     assert_eq!(reading.sigma_used, None);
-    // Constant 1% daily moves: volatility close to 1% (12 decimals).
+    // 12 decimals.
     assert!((9_900_000_000..=10_100_000_000).contains(&reading.sigma_ewma.value));
     assert_eq!(
         reading.k_effective,
         DecimalValue::new(2_500_000_000_000, 12)
     );
+}
 
-    // Removing an administrator takes effect at once.
+/// Removing an administrator takes effect at once.
+fn removed_admin_is_rejected(risk: &Risk<'_>, admin: Principal) {
     assert!(matches!(
         risk.update::<RiskUnitResult>(
-            env.controller,
+            risk.env.controller,
             "remove_risk_admin",
             RiskAdminParams { principal: admin },
         ),
         RiskUnitResult::Ok
     ));
     assert!(risk.rejected(admin, "set_underlying_risk_params", btc_params()));
+}
 
-    // Every change is in the public audit log, with who did it and what.
-    let audit: Vec<RiskAuditEntryView> = env
+/// Every change is in the public audit log, with who did it and what.
+fn every_change_is_in_the_audit_log(
+    risk: &Risk<'_>,
+    admin: Principal,
+    outsider: Principal,
+    add_admin: u64,
+    activation: u64,
+) {
+    let controller = risk.env.controller;
+    let audit: Vec<RiskAuditEntryView> = risk
+        .env
         .clearing
         .query(
             outsider,
@@ -472,12 +502,12 @@ fn risk_engine_lifecycle_through_the_timelock() {
     };
     assert_eq!(
         find(&format!("proposed action {add_admin}: AddRiskAdmin")).caller,
-        env.controller
+        controller
     );
     assert_eq!(find("set BTC lambda=").caller, admin);
     assert_eq!(
         find("raised BTC k from 2.000000000000 to 2.500000000000").caller,
-        env.controller
+        controller
     );
     assert!(find("withdrew action")
         .description
@@ -485,8 +515,24 @@ fn risk_engine_lifecycle_through_the_timelock() {
     assert_eq!(find(&format!("executed action {activation}")).caller, admin);
     assert_eq!(
         find(&format!("removed risk administrator {admin}")).caller,
-        env.controller
+        controller
     );
+}
+
+#[test]
+fn risk_engine_lifecycle_through_the_timelock() {
+    let env = TestSetup::default();
+    let risk = Risk { env: &env };
+    let admin = test_user(60);
+    let outsider = test_user(61);
+
+    let add_admin = grant_role_through_the_timelock(&risk, admin, outsider);
+    multiplier_rises_at_once_and_falls_through_the_timelock(&risk, admin, outsider);
+    controller_raise_is_an_emergency_brake(&risk);
+    let activation = seal_backfill_and_read_it_during_the_timelock(&risk, admin, outsider);
+    volatility_appears_once_the_history_is_active(&risk, admin, outsider, activation);
+    removed_admin_is_rejected(&risk, admin);
+    every_change_is_in_the_audit_log(&risk, admin, outsider, add_admin, activation);
 }
 
 /// Pending actions and the history survive an upgrade, and the sampler stays off after it.
