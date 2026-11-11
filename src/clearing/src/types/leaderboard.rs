@@ -118,6 +118,10 @@ impl PnlAggregate {
 /// Howard Hinnant's `civil_from_days`
 /// (<http://howardhinnant.github.io/date_algorithms.html#civil_from_days>),
 /// specialized to the non-negative epoch days a canister timestamp produces.
+#[expect(
+    clippy::expect_used,
+    reason = "baseline of the quality gate: return an error instead, see docs/ai/patterns.md"
+)]
 fn civil_from_days(days: u64) -> (u64, u32) {
     // Shift epoch to 0000-03-01 so leap days fall at the end of the 400-year era.
     let z = days + 719_468;

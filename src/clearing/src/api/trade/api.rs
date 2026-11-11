@@ -333,7 +333,12 @@ pub async fn cancel_limit_order(params: CancelLimitOrderParams) -> SubmitMatched
                 if o.creator != caller {
                     return Err(TradeError::NotOrderCreator);
                 }
-                Ok(m.remove(&order_id).unwrap())
+                #[expect(
+                    clippy::unwrap_used,
+                    reason = "baseline of the quality gate: return an error instead, see docs/ai/patterns.md"
+                )]
+                let order = m.remove(&order_id).unwrap();
+                Ok(order)
             } else {
                 Err(TradeError::OrderNotFound(order_id))
             }
@@ -611,6 +616,34 @@ pub(crate) fn validate_no_arbitrage(
     series: &Series,
     new_order: &SubmitLimitOrderParams,
 ) -> Result<(), TradeError> {
+    // Linear (forward/NDF/future): the agreed forward rate is the order price.
+    // It must not exceed the settlement cap, or the short leg's reserved margin
+    // (`cap − entry`) would saturate to zero and leave it under-collateralized.
+    // Checked for both sides (unlike the buy-only arbitrage rule below).
+    if series.payoff_type == PayoffType::Linear {
+        let asset_decimals = u32::from(USD_DECIMALS);
+        let price_usd = scale_price(
+            new_order.price.value(),
+            asset_decimals,
+            u32::from(new_order.price.decimals()),
+            RoundingMode::Ceil,
+        );
+        let cap = series.settlement_cap.as_ref().ok_or_else(|| {
+            TradeError::Common(CommonError::Internal(
+                "Linear series missing settlement_cap".to_owned(),
+            ))
+        })?;
+        let cap_usd = scale_price(
+            cap.value(),
+            asset_decimals,
+            u32::from(cap.decimals()),
+            RoundingMode::Floor,
+        );
+        if price_usd > cap_usd {
+            return Err(TradeError::PriceExceedsSettlementCap { price_usd, cap_usd });
+        }
+    }
+
     if new_order.side != Side::Buy {
         return Ok(());
     }
@@ -1192,6 +1225,7 @@ mod tests {
             start_ns: None,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(50_000_000, 6)),
+            settlement_cap: None,
             price_precision: 6,
             payout_unit: PayoutUnit::usd(),
             outcomes: Some(vec![

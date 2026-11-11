@@ -9,6 +9,9 @@ pub enum WithdrawFundError {
     Common(CommonError),
     InsufficientFunds,
     TransferFailed(String),
+    /// The insurance fund backs the default waterfall and is never withdrawn
+    /// through an administrative path; only the waterfall draws on it.
+    InsuranceFundLocked,
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]

@@ -21,6 +21,7 @@ pub fn is_internal_asset(asset_id: &AssetId) -> bool {
 pub fn get_internal_ledger_id() -> Principal {
     CONFIG.with(|c| match c.borrow().internal_ledger.asset {
         Asset::Icrc(p) => p,
+        #[expect(clippy::panic, reason = "baseline of the quality gate: return an error instead, see docs/ai/patterns.md")]
         _ => panic!("Internal ledger must be an ICRC asset"),
     })
 }

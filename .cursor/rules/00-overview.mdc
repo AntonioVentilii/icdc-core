@@ -1,23 +1,8 @@
 ---
-description: Global bootstrap and discovery for AI agents.
+description: Entry point for agents working in icdc-core.
 globs: ["**/*"]
 ---
 
-# 00-Overview: AI Agent Entry Point
+# Overview
 
-You are an AI agent operating in the `icdc-core` repository. 
-
-## Mandatory First Step
-Before performing any task, you **MUST** read the canonical bootstrap file:
-- [AI.md](file:///Users/antonio.ventilii/projects/icdc-core/AI.md)
-
-## Core Coordination
-The repository uses a multi-layered governance system. Refer to these files for high-level coordination:
-- [AGENTS.md](file:///Users/antonio.ventilii/projects/icdc-core/AGENTS.md): General agent registry and coordination rules.
-- [CLAUDE.md](file:///Users/antonio.ventilii/projects/icdc-core/CLAUDE.md): Claude-specific behavior guidelines.
-
-## Governance & Policies
-Always respect the established constraints:
-- [Governance Overview](file:///Users/antonio.ventilii/projects/icdc-core/docs/ai/governance.md)
-- [Policies](file:///Users/antonio.ventilii/projects/icdc-core/.policies/): Mandatory repository laws.
-- [Boundaries](file:///Users/antonio.ventilii/projects/icdc-core/.boundaries/): Protected zones and sensitive modules.
+Read [AGENTS.md](../../AGENTS.md) before any task. It links the universal code standard and every page under [docs/ai/](../../docs/ai/README.md), and it holds the truth hierarchy. This file only points there.

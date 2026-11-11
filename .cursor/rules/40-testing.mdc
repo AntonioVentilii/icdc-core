@@ -1,18 +1,8 @@
 ---
-description: Testing standards and policy enforcement.
-globs: ["**/*.rs", "tests/**/*"]
+description: How tests are written and run.
+globs: ["**/*.rs"]
 ---
 
-# 40-Testing: Quality Assurance
+# Testing
 
-Ensure all changes are verified and adhere to testing policies.
-
-## Testing Documentation
-- [Testing Policy](file:///Users/antonio.ventilii/projects/icdc-core/.policies/testing-policy.md): Mandatory testing requirements.
-- [Testing Standards Workflow](file:///Users/antonio.ventilii/projects/icdc-core/.workflows/testing-standards.md): Process for verifying changes.
-
-## Requirements
-- **Verification Plan**: Every implementation plan must include a section on how changes will be verified.
-- **Unit Tests**: Mandatory for all new logic.
-- **Integration Tests**: Required for cross-canister or complex state transitions.
-- **Quality Checks**: Ensure `npm run quality` passes before completion.
+Follow [docs/ai/testing.md](../../docs/ai/testing.md). The local gates are in [docs/ai/pr-and-ci.md](../../docs/ai/pr-and-ci.md).

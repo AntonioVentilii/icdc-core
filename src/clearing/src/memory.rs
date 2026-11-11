@@ -202,6 +202,10 @@ pub fn save_state() {
         risk: Some(risk),
     };
 
+    #[expect(
+        clippy::expect_used,
+        reason = "baseline of the quality gate: trapping in an upgrade hook rolls the upgrade back, which is the intended failure"
+    )]
     storage::stable_save((state,)).expect("Save failed");
 }
 
