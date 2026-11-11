@@ -6,7 +6,7 @@ Where code lives in `icdc-core`, where each kind of new code goes, and which way
 
 ```text
 src/
-├── shared/      library: types, constants, migration rules used by more than one canister
+├── shared/      library: types, constants, guards, migration rules used by more than one canister
 ├── registry/    canister: series, oracles, groups, engines
 ├── clearing/    canister: the economic core (and the only integration test suite)
 └── minter/      canister: mints vUSD for authorised callers
@@ -59,7 +59,7 @@ The registry is flatter: `api/{access,engines,groups,oracles,series}.rs` hold en
 | A new collateral network                               | a handler under `src/clearing/src/assets/<network>/`, wired into `AssetHandler`                                                    |
 | Persisted state                                        | the canister's `memory.rs`: the map, its line in `save_state` and `restore_state`                                                  |
 | An upgrade migration                                   | `src/<crate>/src/migrations/`, the canister-agnostic rule in `src/shared/src/migrations/`                                          |
-| An endpoint guard                                      | the canister's `guards.rs`                                                                                                         |
+| An endpoint guard                                      | the canister's `guards.rs`; one that every canister needs goes in `src/shared/src/guards.rs` and is re-exported                    |
 | An integration test                                    | `src/clearing/tests/it/<area>.rs`, registered in `main.rs`                                                                         |
 | A shell helper                                         | `scripts/utils.sh` or `scripts/init.market.common.sh`; config in `scripts/init.common.sh`                                          |
 | A design decision                                      | `docs/adr/NNNN-<title>.md`; feature notes in `docs/ai/` or `docs/architecture/`                                                    |
