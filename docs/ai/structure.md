@@ -26,7 +26,7 @@ Responsibilities, as the design fixes them:
 ```text
 lib.rs          init / pre_upgrade / post_upgrade, the imports export_candid! needs; no logic
 api/            one folder per domain: account, admin, collateral, general, leaderboard,
-                metrics, migration, settlement, trade
+                metrics, migration, risk, settlement, trade
   <domain>/
     api.rs      the #[update] / #[query] endpoints and, today, most of the domain logic
     params.rs   <Action>Params
@@ -36,6 +36,8 @@ api/            one folder per domain: account, admin, collateral, general, lead
 account/        AccountService (account-state response) and reassignment (re-keying a user)
 trade/          execute_trade_impl and its params: the core trade mutation
 payoffs/        payoff, settlement value and required margin per PayoffType; fees
+risk/           margin-model risk engine: fixed point, price history, volatility, calendar,
+                parameters with bounds, roles and the timelock (docs/risk/margin-model.md)
 assets/         AssetHandler and the ICRC / EVM handlers that talk to ledgers
 types/          clearing-only domain types: margin, plans, events, leaderboard, user, state
 utils/          small helpers: subaccount derivation, registry calls, series gates, time, vUSD
@@ -56,6 +58,7 @@ The registry is flatter: `api/{access,engines,groups,oracles,series}.rs` hold en
 | A registry endpoint                                    | `src/registry/src/api/<concept>.rs`, its types in `src/shared/src/types/`                                                          |
 | Clearing logic bigger than a few lines                 | a pure function next to the endpoint, or the domain module (`trade/`, `account/`, `payoffs/`) when more than one endpoint needs it |
 | A new payoff type                                      | `PayoffType` in `src/shared/src/types/series.rs`, the maths in `src/clearing/src/payoffs/`                                         |
+| Risk parameters, price history, volatility, calendar   | `src/clearing/src/risk/`, endpoints in `src/clearing/src/api/risk/`                                                                |
 | A new collateral network                               | a handler under `src/clearing/src/assets/<network>/`, wired into `AssetHandler`                                                    |
 | Persisted state                                        | the canister's `memory.rs`: the map, its line in `save_state` and `restore_state`                                                  |
 | An upgrade migration                                   | `src/<crate>/src/migrations/`, the canister-agnostic rule in `src/shared/src/migrations/`                                          |

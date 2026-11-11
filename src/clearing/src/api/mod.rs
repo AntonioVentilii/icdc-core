@@ -5,5 +5,6 @@ pub mod general;
 pub mod leaderboard;
 pub mod metrics;
 pub mod migration;
+pub mod risk;
 pub mod settlement;
 pub mod trade;

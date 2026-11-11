@@ -24,6 +24,19 @@ A result is a Candid-friendly `Ok`/`Err` enum built from a Rust `Result` through
 
 Authorization is declared on the endpoint, never checked ad hoc inside it (public discovery queries such as `list_series`, `src/clearing/src/api/general/api.rs:9`, carry no guard on purpose): `#[update(guard = "caller_is_not_anonymous")]` (`src/clearing/src/api/trade/api.rs:160`) or `guard = "caller_is_controller"` (`:365`). The guards live in each canister's `guards.rs` (`src/clearing/src/guards.rs:5`). Role checks that need arguments (engine roles, group membership) are functions such as `has_engine_role_on` in the registry's `guards.rs`, called first thing in the endpoint.
 
+## Privileged parameters: roles and the timelock
+
+The risk engine (`src/clearing/src/risk/`, endpoints in `src/clearing/src/api/risk/`) sets the pattern for any API that changes privileged parameters.
+
+- **A role is a set of principals in domain state, checked by a guard.** `RiskState::risk_admins` (`src/clearing/src/risk/state.rs`) is read by `caller_is_risk_admin` (`src/clearing/src/guards.rs`). A controller is never implicitly a role holder, and the guard rejects a controller even when its principal is in the set, so the two powers never sit on one key. An endpoint open to several roles (`caller_is_risk_admin_or_controller`) resolves the caller's role in the API layer and passes it to the state method, which decides what that role may do (`MultiplierCaller`).
+- **A change that can only make the system safer applies at once; anything else goes through the generic timelock** (`src/clearing/src/risk/timelock.rs`): one `TimelockedAction` variant per kind of change, a public `PendingAction` with proposer and times, cancellation by role holders, bounds on the delay itself (`TIMELOCK_DURATION_MIN_NS`, `TIMELOCK_DURATION_MAX_NS`).
+- **A pending action stores the value it changes from** (or a hash of what it changes), and execution fails with `ActionNoLongerValid` when the current state differs. Never re-apply a stale target on top of a state nobody reviewed.
+- **One pending action per key** (`TimelockedAction::key`, `ActionKey`): a new proposal replaces the old one, and an immediate change in the safe direction withdraws pending actions on the same key.
+- **Separate pending caps per proposing role** (`MAX_PENDING_ACTIONS`, `MAX_PENDING_CONTROLLER_ACTIONS`), so one role cannot fill the queue and block the other.
+- **Every change appends to an audit log** with caller, time, and old and new values, exposed through a view type in `api/risk/results.rs` (`RiskAuditEntryView`), not the state type.
+- **Bounds are constants next to the parameter** (`src/clearing/src/risk/params.rs`, `Bounds`); no endpoint accepts a value outside them.
+- **Money-adjacent maths uses `Fixed`** (`src/clearing/src/risk/fixed.rs`), never floating point, so a figure can be reproduced exactly. A query that converts a `Fixed` that can fail returns a `Result`; never substitute a default that looks like a real figure.
+
 ## Errors
 
 - Errors are typed enums with a doc comment per variant. Cross-cutting cases are `CommonError` (`src/clearing/src/types/errors.rs:6`); a domain error wraps it as a variant (`TradeError::Common`, `src/clearing/src/api/trade/errors.rs:14`) rather than repeating `Unauthorized` or `MathOverflow`.

@@ -52,6 +52,7 @@ What already exists in `icdc-core`. Search here and in the code before writing a
 - `payoffs/mod.rs`: `get_unit_payoff`, `get_settlement_value`, `get_required_margin`, `PayoffError`; `payoffs/fees.rs`: `calculate_settlement_fee`; `payoffs/utils.rs`: `scale_price`; `payoffs/types.rs`: `RoundingMode`.
 - `assets/asset/handler.rs`: `get_handler`, `AssetHandler` (`balance_of`, `transfer`, `transfer_from`, `get_fee`); `assets/icrc/handler.rs`: `IcrcHandler` (also `get_symbol`, `get_decimals`, `get_metadata`), `IcrcMetadata`; `assets/evm/`: `EvmHandler`, the EVM RPC client.
 - `api/trade/api.rs`: `validate_no_arbitrage`, `mint_complete_set_logic`, `redeem_complete_set_logic`, `submit_market_order_impl`.
+- `risk/fixed.rs`: `Fixed` (`checked_add`, `checked_sub`, `checked_mul`, `checked_div`, `checked_div_int`, `ln`, `sqrt`, `from_ratio`, `from_decimal`), `FixedError`; `risk/params.rs`: `Bounds`, `UnderlyingRiskParams`, `GlobalRiskParams`; `risk/timelock.rs`: `TimelockedAction`, `ActionKey`, `PendingAction`; `risk/history.rs`: `PriceHistory` (`merge`, `append_if_new`, `range`, `remove_range`), `PricePoint`, `HistoryUpload`, `canonical_sha`; `risk/volatility.rs`: `estimate`, `VolatilityEstimate`; `risk/calendar.rs`: `CalendarEvent`, `day_weight`, `is_weekend`; `risk/state.rs`: `RiskState`, `effective_multiplier`.
 - `api/settlement/api.rs`: `prepare_settlement_impl`, `apply_settlement_accounting_logic`, `settle_series_inner`, `resume_pending_settlements`, `start_settlement_heartbeat`.
 
 ### Types (`types/`)
@@ -65,13 +66,13 @@ What already exists in `icdc-core`. Search here and in the code before writing a
 
 ### State (`memory.rs`)
 
-- Every state map (`CONFIG`, `POSITIONS`, `ACCOUNT_STATES`, `SERIES`, `EVENTS`, the plan maps, `INSURANCE_FUND`, `TREASURY`, the indexes) and `save_state`, `restore_state`.
+- Every state map (`CONFIG`, `POSITIONS`, `ACCOUNT_STATES`, `SERIES`, `EVENTS`, the plan maps, `INSURANCE_FUND`, `TREASURY`, `RISK_STATE`, the indexes) and `save_state`, `restore_state`.
 - `cached_transfer_fee`, `update_cached_transfer_fee`: the ledger fee cache with `BadFee` retry.
 - `index_executed_trade`, `index_settled_events` and the `rebuild_*` functions for the derived indexes.
 
 ### Guards (`guards.rs`)
 
-- `caller_is_not_anonymous`, `caller_is_controller`.
+- `caller_is_not_anonymous`, `caller_is_controller`, `caller_is_risk_admin`, `caller_is_risk_admin_or_controller`.
 
 ## Registry (`src/registry/src/`)
 

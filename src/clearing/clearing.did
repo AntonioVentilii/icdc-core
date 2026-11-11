@@ -36,6 +36,10 @@ type AccountStateResponse = record {
 	// Available equity in USD (total equity - reserved margin).
 	available_margin_usd : int
 };
+type AddCalendarEventsParams = record {
+	underlying : text;
+	events : vec NewCalendarEvent
+};
 // Aggregate long/short lean of a supplied set of principals on a series,
 // broken down per outcome.
 //
@@ -95,6 +99,10 @@ type AggregateSettlementAccuracyParams = record {
 	// therefore matches nothing. The clearing layer ascribes no meaning to the
 	// set; how it is chosen is entirely a consumer concern.
 	series_ids : opt vec text
+};
+type AppendHistoryChunkParams = record {
+	upload_id : nat64;
+	points : vec PricePointInput
 };
 // Represents a supported asset in the ICDC ecosystem.
 type Asset = variant {
@@ -196,6 +204,23 @@ type BalanceDomain = variant {
 	Playground;
 	// Real collateralized trading (e.g., using ckUSDC, ICP).
 	Settlement
+};
+type BeginHistoryUploadParams = record {
+	// Where the data comes from, for example `FRED` or `Coinbase`.
+	source : text;
+	// The source's identifier of the series, for example `DEXUSEU`.
+	series_id : text;
+	underlying : text
+};
+type CalendarEventView = record {
+	id : nat64;
+	weight : DecimalValue;
+	label : text;
+	time_ns : nat64
+};
+type CalendarEventsResult = variant {
+	Ok : vec CalendarEventView;
+	Err : RiskError
 };
 type CancelFundWithdrawalError = variant {
 	PlanNotFound;
@@ -403,12 +428,26 @@ type GetFundsResult = record {
 	insurance_fund : vec record { text; nat };
 	treasury : vec record { text; nat }
 };
+type GetHistoryUploadPointsParams = record {
+	// First date to return (inclusive). Defaults to the start of the upload.
+	from_date : opt nat32;
+	// Maximum number of points. Defaults to 1,000, capped at 5,000.
+	limit : opt nat32;
+	upload_id : nat64
+};
 // Input parameters for retrieving a user's position in a series.
 type GetPositionParams = record {
 	// Optional outcome identifier for categorical markets.
 	outcome_id : opt text;
 	// The derivative series identifier.
 	series_id : text
+};
+type GetPriceHistoryParams = record {
+	// First date to return (inclusive). Defaults to the start of the history.
+	from_date : opt nat32;
+	underlying : text;
+	// Maximum number of points. Defaults to 1,000, capped at 5,000.
+	limit : opt nat32
 };
 // Input parameters for
 // [`get_series_price_history`](super::get_series_price_history).
@@ -430,6 +469,27 @@ type GetSeriesPriceHistoryParams = record {
 	// Inclusive lower bound on a trade's timestamp (ns). `None` starts from the
 	// series' earliest trade.
 	start_time : opt nat64
+};
+// Identifies one history upload.
+type HistoryUploadParams = record { upload_id : nat64 };
+type HistoryUploadStatusView = variant {
+	Open;
+	Sealed : PendingActionParams;
+	Activated : record { activated_at_ns : nat64 };
+	Cancelled
+};
+type HistoryUploadView = record {
+	id : nat64;
+	status : HistoryUploadStatusView;
+	sha256 : opt text;
+	source : text;
+	series_id : text;
+	underlying : text;
+	created_by : principal;
+	created_at_ns : nat64;
+	first_date : opt nat32;
+	last_date : opt nat32;
+	point_count : nat32
 };
 // Represents an incoming HTTP request to the canister.
 type HttpRequest = record {
@@ -565,6 +625,12 @@ type ListOrdersParams = record {
 	// Optional series identifier to filter orders.
 	series_id : opt text
 };
+type ListRiskAuditParams = record {
+	// Maximum number of entries. Defaults to 100, capped at 1,000.
+	limit : opt nat32;
+	// First sequence number to return (inclusive). Defaults to 0.
+	from_seq : opt nat64
+};
 // Input parameters for
 // [`list_series_settlement_statuses`](super::list_series_settlement_statuses).
 //
@@ -647,6 +713,12 @@ type NativeEvmAsset = record {
 	// The EVM chain where this native asset is used.
 	chain_id : nat64
 };
+type NewCalendarEvent = record {
+	// Variance of the event's day as a multiple of an ordinary day.
+	weight : DecimalValue;
+	label : text;
+	time_ns : nat64
+};
 type NonMonetaryUnit = variant { Points; Social : SocialReward };
 // Metadata for a specific outcome in a categorical market.
 type Outcome = record {
@@ -703,6 +775,36 @@ type PayoutUnit = variant {
 	Fiat : FiatUnit;
 	Asset : Asset;
 	NonMonetary : NonMonetaryUnit
+};
+type PendingActionKindView = variant {
+	ChangeTimelockDuration : record { to_ns : nat64; from_ns : nat64 };
+	ActivateHistoryUpload : HistoryUploadParams;
+	LowerGlobalRiskMultiplier : record { to : DecimalValue; from : DecimalValue };
+	AddRiskAdmin : RiskAdminParams;
+	LowerRiskMultiplier : record {
+		to : DecimalValue;
+		from : DecimalValue;
+		underlying : text
+	};
+	RemoveHistoryPoints : record {
+		from_date : nat32;
+		to_date : nat32;
+		underlying : text;
+		expected_sha256 : text
+	}
+};
+// Identifies one pending action.
+type PendingActionParams = record { action_id : nat64 };
+type PendingActionView = record {
+	id : nat64;
+	action : PendingActionKindView;
+	proposed_at_ns : nat64;
+	proposed_by : principal;
+	executable_at_ns : nat64
+};
+type PendingActionsResult = variant {
+	Ok : vec PendingActionView;
+	Err : RiskError
 };
 // The execution status of a background operation plan.
 type PlanStatus = variant {
@@ -773,6 +875,20 @@ type PriceHistoryInterval = variant {
 	Day;
 	// One candle per UTC hour.
 	Hour
+};
+type PriceHistoryResult = variant { Ok : vec PricePointInput; Err : RiskError };
+type PricePointInput = record {
+	// Days since the Unix epoch, UTC.
+	date : nat32;
+	// USD per unit of the underlying.
+	price : DecimalValue
+};
+type ProposeHistoryRemovalParams = record {
+	// First date to remove (inclusive), in days since the Unix epoch.
+	from_date : nat32;
+	// Last date to remove (inclusive), in days since the Unix epoch.
+	to_date : nat32;
+	underlying : text
 };
 type ReassignAccountError = variant {
 	// `old_owner` has no clearing account to reassign.
@@ -846,6 +962,7 @@ type RegisterIcrcAssetParams = record {
 	asset_id : text
 };
 type RegisterIcrcAssetResult = variant { Ok; Err : RegisterIcrcAssetError };
+type RemoveCalendarEventParams = record { underlying : text; event_id : nat64 };
 // Settlement terms for a series. Compulsory on every market.
 //
 // Modeled as a struct (not a bare `String`) so it can grow without a breaking
@@ -858,6 +975,84 @@ type RegisterIcrcAssetResult = variant { Ok; Err : RegisterIcrcAssetError };
 type Resolution = record {
 	// Human-readable clause describing how the market settles.
 	clause : text
+};
+type RiskAdminParams = record { "principal" : principal };
+// One entry of the public risk audit log.
+type RiskAuditEntryView = record {
+	seq : nat64;
+	description : text;
+	caller : principal;
+	time_ns : nat64
+};
+type RiskChangeResult = variant { Ok : RiskChangeView; Err : RiskError };
+// Whether a requested change took effect or waits behind the timelock.
+type RiskChangeView = variant {
+	Applied;
+	Pending : record { action_id : nat64; executable_at_ns : nat64 }
+};
+type RiskCountResult = variant { Ok : nat32; Err : RiskError };
+// Errors of the risk endpoints.
+type RiskError = variant {
+	// No pending action with this id.
+	PendingActionNotFound : nat64;
+	// A value lies outside the hard bounds fixed in code.
+	OutOfBounds : record {
+		max : DecimalValue;
+		min : DecimalValue;
+		parameter : text
+	};
+	// The principal cannot take this role.
+	InvalidPrincipal : text;
+	// The underlying identifier is malformed.
+	InvalidUnderlying : text;
+	// No history upload with this id.
+	UploadNotFound : nat64;
+	// The action no longer applies to the current state.
+	ActionNoLongerValid : text;
+	// No risk parameters exist for this underlying yet.
+	UnknownUnderlying : text;
+	// A storage limit was reached.
+	LimitReached : text;
+	// The caller's role does not allow this change (for example, a controller may raise a
+	// multiplier but only a risk administrator may propose lowering it).
+	Unauthorized : text;
+	// A parameter is malformed or out of its allowed range.
+	InvalidParameter : record { parameter : text; reason : text };
+	// Not enough history to estimate volatility.
+	InsufficientHistory : record { required : nat32; returns : nat32 };
+	// The declared SHA-256 differs from the hash of the uploaded points. The computed hash is not
+	// returned: the declared hash must come from an independent off-chain computation on the
+	// public source, not be copied from the canister.
+	HashMismatch;
+	// The action cannot run before this time.
+	TimelockNotExpired : record { executable_at_ns : nat64 };
+	// A fixed-point computation failed (overflow, division by zero, logarithm of a non-positive
+	// value).
+	ArithmeticError : text;
+	// A history chunk was rejected.
+	InvalidHistoryChunk : text;
+	// The upload no longer accepts chunks or sealing.
+	UploadNotOpen : nat64;
+	// No calendar event with this id for the underlying.
+	CalendarEventNotFound : nat64
+};
+type RiskGovernanceResult = variant {
+	Ok : RiskGovernanceView;
+	Err : RiskError
+};
+type RiskGovernanceView = record {
+	timelock_duration_ns : nat64;
+	global_k : DecimalValue;
+	risk_admins : vec principal
+};
+type RiskIdResult = variant { Ok : nat64; Err : RiskError };
+type RiskIdsResult = variant { Ok : vec nat64; Err : RiskError };
+type RiskUnitResult = variant { Ok; Err : RiskError };
+type SealHistoryUploadParams = record {
+	// Hex SHA-256 of the canonical encoding (see `docs/plans/margin-phase-1-implementation.md`,
+	// section 1.3).
+	sha256_hex : text;
+	upload_id : nat64
 };
 // Defines a specific derivative series (contract).
 type Series = record {
@@ -1047,6 +1242,19 @@ type SeriesTradedVolume = record {
 	volume : int;
 	// Number of executed trades on the series.
 	trade_count : nat64
+};
+type SetGlobalRiskMultiplierParams = record { k : DecimalValue };
+type SetRiskMultiplierParams = record { k : DecimalValue; underlying : text };
+type SetTimelockDurationParams = record { duration_ns : nat64 };
+type SetUnderlyingRiskParamsParams = record {
+	weekend_weight : DecimalValue;
+	floor_ratio : DecimalValue;
+	lambda : DecimalValue;
+	// Underlying identifier, for example `BTC` or `EUR`. Canonicalized to upper case.
+	underlying : text;
+	mpor_days : nat32;
+	// Collateral asset whose oracle price feeds the daily history, if any.
+	oracle_asset_id : opt text
 };
 // Input parameters for initiating a series settlement.
 type SettleSeriesParams = record {
@@ -1379,6 +1587,21 @@ type TradingAccess = variant {
 		groups : vec text
 	}
 };
+// Identifies one underlying.
+type UnderlyingParams = record { underlying : text };
+type UnderlyingRiskParamsResult = variant {
+	Ok : vec UnderlyingRiskParamsView;
+	Err : RiskError
+};
+type UnderlyingRiskParamsView = record {
+	k : DecimalValue;
+	weekend_weight : DecimalValue;
+	floor_ratio : DecimalValue;
+	lambda : DecimalValue;
+	underlying : text;
+	mpor_days : nat32;
+	oracle_asset_id : opt text
+};
 type UpdateAssetMetricsParams = record {
 	metrics : AssetMetrics;
 	asset_id : text
@@ -1407,6 +1630,26 @@ type UpdateCollateralAssetParams = record { config : CollateralAssetConfig };
 type UpdateDomainPolicyParams = record {
 	domain : BalanceDomain;
 	policy : DomainPolicy
+};
+type VolatilityResult = variant { Ok : VolatilityView; Err : RiskError };
+// Daily volatility per unit of volatility time.
+type VolatilityView = record {
+	// True while the history holds fewer than 250 returns: the EWMA is published, but there is no
+	// long-run volatility and no floor yet.
+	is_provisional : bool;
+	// Long-run volatility over the whole history. Absent while the estimate is provisional.
+	sigma_long_run : opt DecimalValue;
+	underlying : text;
+	sigma_ewma : DecimalValue;
+	// Volatility time over the next `mpor_days` days, including weekends and calendar events.
+	mpor_volatility_time : DecimalValue;
+	// `max(sigma_ewma, floor_ratio x sigma_long_run)`. Absent while the estimate is provisional.
+	sigma_used : opt DecimalValue;
+	mpor_days : nat32;
+	// `k x global_k`.
+	k_effective : DecimalValue;
+	last_date : nat32;
+	returns : nat32
 };
 // Errors occurring during collateral withdrawal.
 type WithdrawCollateralError = variant {
@@ -1465,11 +1708,18 @@ type WithdrawFundParams = record {
 };
 type WithdrawFundResult = variant { Ok : nat; Err : WithdrawFundError };
 service : (Config) -> {
+	// Abandons an open or sealed upload (and its pending activation), freeing its slot.
+	abandon_history_upload : (HistoryUploadParams) -> (RiskUnitResult);
 	// Accepts a position transfer from another clearing canister.
 	//
 	// This method validates the series and increases the target user's position based on the provided
 	// proof. This method is gated to canister controllers.
 	accept_position_transfer : (PositionProof) -> (AcceptPositionTransferResult);
+	// Adds scheduled events to an underlying's calendar. Returns their ids.
+	add_calendar_events : (AddCalendarEventsParams) -> (RiskIdsResult);
+	// Proposes granting the risk administrator role. Takes effect after the timelock. A canister
+	// controller cannot be made a risk administrator.
+	add_risk_admin : (RiskAdminParams) -> (RiskIdResult);
 	// Reassigns the entire clearing account of `old_owner` to `new_owner`.
 	//
 	// Moves the full [`AccountState`](crate::types::margin::AccountState) (collateral
@@ -1528,6 +1778,8 @@ service : (Config) -> {
 	aggregate_settlement_accuracy : (AggregateSettlementAccuracyParams) -> (
 		vec SettlementAccuracyEntry
 	) query;
+	// Appends a chunk of daily points to an open upload. Returns the upload's total point count.
+	append_history_chunk : (AppendHistoryChunkParams) -> (RiskCountResult);
 	// One-shot, idempotent backfill of `Settled` events for plans finalized
 	// before per-user event emission was added to `apply_settlement_accounting_logic`.
 	//
@@ -1545,6 +1797,9 @@ service : (Config) -> {
 	backfill_settlement_events : (BackfillSettlementEventsParams) -> (
 		BackfillSettlementEventsResult
 	);
+	// Opens a history upload for an underlying, recording where the data comes from. Returns the
+	// upload id.
+	begin_history_upload : (BeginHistoryUploadParams) -> (RiskIdResult);
 	// Cancels a stuck fund withdrawal and refunds the internal ledger balance.
 	//
 	// This method is gated to canister controllers.
@@ -1555,6 +1810,8 @@ service : (Config) -> {
 	//
 	// Only the creator of the order can cancel it.
 	cancel_limit_order : (CancelLimitOrderParams) -> (SubmitMatchedTradeResult);
+	// Cancels a pending action. Cancelling an upload activation also cancels the upload.
+	cancel_pending_action : (PendingActionParams) -> (RiskUnitResult);
 	// Returns the current global configuration of the Clearing canister.
 	config : () -> (Config) query;
 	// Deposits collateral into the user's account state.
@@ -1564,6 +1821,10 @@ service : (Config) -> {
 	// 2. Executing the asynchronous ledger transfer (`transfer_from`).
 	// 3. Finalising the internal collateral balances.
 	deposit_collateral : (DepositCollateralParams) -> (DepositCollateralResult);
+	// Executes a pending action once its timelock has expired. Restricted to risk administrators and
+	// controllers, so execution happens when the people who can still cancel are watching. The action
+	// is re-validated against the current state.
+	execute_pending_action : (PendingActionParams) -> (RiskUnitResult);
 	// Freezes a user's position to prepare it for transfer to another clearing canister.
 	//
 	// Once frozen, the position is removed from active state and a [`PositionProof`] is issued.
@@ -1590,14 +1851,26 @@ service : (Config) -> {
 	//
 	// This method is gated to canister controllers.
 	get_funds : () -> (GetFundsResult) query;
+	// Metadata, provenance and hash of a history upload. Its points are paged by
+	// `get_history_upload_points`.
+	get_history_upload : (HistoryUploadParams) -> (opt HistoryUploadView) query;
+	// A page of the points of an upload that is still open or sealed, so anyone can check the data
+	// against the public source during the timelock. Activated and cancelled uploads hold no points.
+	get_history_upload_points : (GetHistoryUploadPointsParams) -> (
+		PriceHistoryResult
+	) query;
 	// Retrieves all active limit orders for the caller.
 	get_orders : () -> (vec LimitOrder) query;
 	// Retrieves a specific position for the caller.
 	get_position : (GetPositionParams) -> (opt Position) query;
 	// Retrieves all open positions for the caller.
 	get_positions : () -> (vec Position) query;
+	// A page of an underlying's active daily price history.
+	get_price_history : (GetPriceHistoryParams) -> (PriceHistoryResult) query;
 	// Returns the principal of the Series Registry canister.
 	get_registry_canister : () -> (principal) query;
+	// Risk administrators and global parameters.
+	get_risk_governance : () -> (RiskGovernanceResult) query;
 	// Returns a single series' executed trades aggregated into fixed-width
 	// [`PriceHistoryInterval`] candles (open/high/low/close + volume + trade
 	// count), time-ordered, so a front end can render a time-scoped consensus/price
@@ -1636,10 +1909,15 @@ service : (Config) -> {
 	get_trade_history : () -> (vec Event) query;
 	// Returns the official number of decimals for USD accounting.
 	get_usd_decimals : () -> (nat8) query;
+	// Current volatility of an underlying: EWMA, and once 250 returns exist long-run and floored, with
+	// the volatility time over its MPOR and its effective multiplier. Not yet an input to margin.
+	get_volatility : (UnderlyingParams) -> (VolatilityResult) query;
 	// Handles incoming HTTP requests for Prometheus metrics.
 	//
 	// This endpoint is restricted to canister controllers and serves metrics at `/metrics`.
 	http_request : (HttpRequest) -> (HttpResponse) query;
+	// Calendar events of an underlying, in chronological order.
+	list_calendar_events : (UnderlyingParams) -> (CalendarEventsResult) query;
 	// Returns a list of all supported collateral assets with their metrics.
 	list_collateral_assets : () -> (vec CollateralAssetInfo) query;
 	// Returns ranked standings for a calendar window (this week / this month / all
@@ -1660,6 +1938,10 @@ service : (Config) -> {
 	list_leaderboard : (ListLeaderboardParams) -> (LeaderboardPage) query;
 	// Returns a list of all active limit orders, potentially filtered by series.
 	list_orders : (ListOrdersParams) -> (vec LimitOrder) query;
+	// Every action waiting behind the timelock.
+	list_pending_actions : () -> (PendingActionsResult) query;
+	// A page of the public risk audit log, oldest first.
+	list_risk_audit : (ListRiskAuditParams) -> (vec RiskAuditEntryView) query;
 	// Returns a list of all derivative series currently cached in the clearing canister.
 	list_series : () -> (vec Series) query;
 	// Returns each requested series' settlement status in one call: the batch form
@@ -1733,6 +2015,8 @@ service : (Config) -> {
 	// keyed by `SeriesId`), so paging with the previous response's `next_cursor`
 	// is stable as long as the underlying set is not mutated mid-traversal.
 	list_settled_series : (ListSettledSeriesParams) -> (SettledSeriesPage) query;
+	// Parameters of every configured underlying.
+	list_underlying_risk_params : () -> (UnderlyingRiskParamsResult) query;
 	// Exports internal state as Prometheus metrics.
 	//
 	// This method is gated to canister controllers.
@@ -1753,6 +2037,10 @@ service : (Config) -> {
 	// Returns 1 unit of every outcome position in the series in exchange for the
 	// full collateral requirement (1.0 USD vUSD).
 	mint_complete_set : (text, int) -> (SubmitMatchedTradeResult);
+	// Proposes removing the active history points of an underlying in `from_date..=to_date`, for
+	// example a bad print. Executes after the timelock, only if the range still holds the same points.
+	// Returns the pending action id.
+	propose_history_removal : (ProposeHistoryRemovalParams) -> (RiskIdResult);
 	// Redeems a complete set of categorical outcome positions for collateral.
 	//
 	// Returns 1.0 USD (vUSD) for every full set of N outcome positions provided.
@@ -1767,14 +2055,39 @@ service : (Config) -> {
 	//
 	// This method is gated to canister controllers.
 	register_icrc_asset : (RegisterIcrcAssetParams) -> (RegisterIcrcAssetResult);
+	// Removes one event from an underlying's calendar.
+	remove_calendar_event : (RemoveCalendarEventParams) -> (RiskUnitResult);
+	// Removes a risk administrator immediately.
+	remove_risk_admin : (RiskAdminParams) -> (RiskUnitResult);
 	// Admin function to manually resume a stuck settlement plan, e.g., if the timer was dropped during
 	// upgrade.
 	resume_settlement : (text) -> (SettleSeriesResult);
+	// Verifies the declared SHA-256 of an upload and proposes its activation through the timelock.
+	// Returns the pending action id.
+	seal_history_upload : (SealHistoryUploadParams) -> (RiskIdResult);
+	// Raises the global multiplier immediately, or proposes lowering it through the timelock. Same
+	// roles as `set_risk_multiplier`.
+	set_global_risk_multiplier : (SetGlobalRiskMultiplierParams) -> (
+		RiskChangeResult
+	);
 	// Sets the principal of the Series Registry canister.
 	//
 	// This principal is used to discover and validate derivative series.
 	// This method is gated to canister controllers.
 	set_registry_canister : (principal) -> ();
+	// Raises an underlying's multiplier immediately, or proposes lowering it through the timelock. A
+	// raise withdraws any pending lowering of the same multiplier. Controllers may raise (an emergency
+	// brake) but only risk administrators may propose lowering.
+	set_risk_multiplier : (SetRiskMultiplierParams) -> (RiskChangeResult);
+	// Lengthens the timelock immediately up to twice its current value, or proposes any other change
+	// (shortening, or lengthening beyond twice) through the timelock itself. Bounded to 24 hours to 7
+	// days.
+	set_timelock_duration : (SetTimelockDurationParams) -> (RiskChangeResult);
+	// Sets the parameters of an underlying other than its multiplier, within hard bounds. Creates the
+	// underlying with `k = 1` if it does not exist.
+	set_underlying_risk_params : (SetUnderlyingRiskParamsParams) -> (
+		RiskUnitResult
+	);
 	// Settles a derivative series at a specific price.
 	//
 	// This is a background operation consisting of:

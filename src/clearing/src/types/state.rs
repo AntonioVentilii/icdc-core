@@ -7,15 +7,18 @@ use shared::types::{
     Series, SeriesId,
 };
 
-use crate::types::{
-    event::Event,
-    margin::{AccountState, Position},
-    plans::{
-        DepositPlan, FundWithdrawalPlan, MigrationKey, MigrationPlan, ReassignmentKey,
-        ReassignmentPlan, SettlementPlan, WithdrawalPlan,
+use crate::{
+    risk::state::RiskState,
+    types::{
+        event::Event,
+        margin::{AccountState, Position},
+        plans::{
+            DepositPlan, FundWithdrawalPlan, MigrationKey, MigrationPlan, ReassignmentKey,
+            ReassignmentPlan, SettlementPlan, WithdrawalPlan,
+        },
+        trade::{LimitOrder, OrderId, TradeId, TransferId},
+        user::{DepositKey, User, WithdrawalKey},
     },
-    trade::{LimitOrder, OrderId, TradeId, TransferId},
-    user::{DepositKey, User, WithdrawalKey},
 };
 
 /// A cryptographically signed proof of an open position, used for cross-canister transfers.
@@ -106,4 +109,7 @@ pub struct StableState {
     /// Account reassignment plans. Optional so blobs written before account
     /// reassignment existed still decode (see `docs/ai/migrations.md`).
     pub reassignment_plans: Option<BTreeMap<ReassignmentKey, ReassignmentPlan>>,
+    /// Risk engine state. Optional so blobs written before the risk engine existed still decode
+    /// (see `docs/ai/migrations.md`).
+    pub risk: Option<RiskState>,
 }
