@@ -58,7 +58,7 @@ The registry is flatter: `api/{access,engines,groups,oracles,series}.rs` hold en
 | A registry endpoint                                    | `src/registry/src/api/<concept>.rs`, its types in `src/shared/src/types/`                                                          |
 | Clearing logic bigger than a few lines                 | a pure function next to the endpoint, or the domain module (`trade/`, `account/`, `payoffs/`) when more than one endpoint needs it |
 | A new payoff type                                      | `PayoffType` in `src/shared/src/types/series.rs`, the maths in `src/clearing/src/payoffs/`                                         |
-| Risk parameters, price history, volatility, calendar  | `src/clearing/src/risk/`, endpoints in `src/clearing/src/api/risk/`                                                                |
+| Risk parameters, price history, volatility, calendar   | `src/clearing/src/risk/`, endpoints in `src/clearing/src/api/risk/`                                                                |
 | A new collateral network                               | a handler under `src/clearing/src/assets/<network>/`, wired into `AssetHandler`                                                    |
 | Persisted state                                        | the canister's `memory.rs`: the map, its line in `save_state` and `restore_state`                                                  |
 | An upgrade migration                                   | `src/<crate>/src/migrations/`, the canister-agnostic rule in `src/shared/src/migrations/`                                          |

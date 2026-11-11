@@ -10,7 +10,6 @@ Today the clearing engine collateralizes every position up front by its maximum 
 
 - A short forward or a short call has no finite maximum loss, so it cannot be collateralized at all without inventing an artificial cap.
 - Capital efficiency is poor: a participant posts the worst case instead of a realistic close-out loss.
-- The short side of `Call` and `Put` is currently accounted with the wrong sign, both at settlement and in the per-trade re-mark (section 16).
 
 This document defines a risk-based margin model in line with how listed-derivatives central counterparties and Deribit operate: participants post **initial margin** sized to the loss a position could suffer while it is being closed out, at a high confidence level; positions are **marked to market** continuously; accounts that fall below **maintenance margin** are **liquidated**; a **default fund** absorbs what liquidation cannot recover.
 
@@ -25,7 +24,7 @@ We do not invent a methodology. We adopt published, industry-standard methods an
 5. **Transparent methods, private positions.** Methods, parameters, historical series and aggregate figures are public and queryable. Positions are visible only to their owner, to agents the owner authorizes, and to the risk function (section 11.3).
 6. **Conservative and anti-procyclical.** Margins must not collapse in calm markets and then spike in a crisis. Volatility has a floor, a stressed period is always part of the history, and stress scenarios always apply.
 7. **No single key moves money.** Risk parameters have hard bounds, reductions of margin wait behind a timelock, and nobody can withdraw from the default fund (section 12).
-8. **Published methods, our parameters.** Every choice below cites its source (section 18).
+8. **Published methods, our parameters.** Every choice below cites its source (section 17).
 
 ## 3. Concepts
 
@@ -61,7 +60,7 @@ All margin multipliers compose multiplicatively: `k_eff = k x global_k x stale_f
 | ------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Linear` (forward, NDF, dated future) | Yes                    | No settlement cap. Replaces the bounded design of PR #86.                                                                                                                                                              |
 | `Call`, `Put`                         | Yes                    | The buyer pays the premium at trade time. A long option counts at mark in equity and its scenario losses never exceed that mark, so a long option needs no cash beyond the premium already paid. Sellers are margined. |
-| `Binary`, `Categorical`               | No, unchanged          | Loss is bounded by one unit per contract, so full collateralization stays correct and simple, as on prediction markets. May move into the scenario engine later (open question 17.1).                                  |
+| `Binary`, `Categorical`               | No, unchanged          | Loss is bounded by one unit per contract, so full collateralization stays correct and simple, as on prediction markets. May move into the scenario engine later (open question 16.1).                                  |
 | ARS instruments                       | Fully collateralized   | See section 9.4: risk-based margin for ARS would exceed the notional, so it is stated plainly as full collateral.                                                                                                      |
 
 Every contract on ICDC settles in cash in USD, so for us any currency forward is economically an NDF. Whether a currency is "NDF" in the wider market only matters for where its fixing comes from and for where offshore demand is concentrated.
@@ -314,7 +313,7 @@ When `equity < MM`:
 
 Margin is sized for high-confidence losses, but a market can move faster than liquidation can close a position. The **default fund** pays for that gap. It replaces the existing `INSURANCE_FUND` storage, which today is funded only by settlement fees and is never drawn on by the waterfall.
 
-**Funding.** A share of every fee goes to the default fund: trading fees, settlement fees and the full liquidation fee. The share is `default_fund_fee_share` while the fund is at or above its target, and rises to `default_fund_fee_share_below_target` while it is below. The treasury may seed it (open question 17.4).
+**Funding.** A share of every fee goes to the default fund: trading fees, settlement fees and the full liquidation fee. The share is `default_fund_fee_share` while the fund is at or above its target, and rises to `default_fund_fee_share_below_target` while it is below. The treasury may seed it (open question 16.4).
 
 **Target size: Cover 2.** The fund plus the protocol tranche must be able to absorb the simultaneous default of the two accounts that would leave the largest uncovered loss under the stress scenarios of section 7.3, after their own margin. This is the standard of the CPMI-IOSCO principles for systemically important central counterparties. The target is recomputed on every heartbeat and published.
 
@@ -325,7 +324,7 @@ Margin is sized for high-confidence losses, but a market can move faster than li
 1. the defaulting account's own margin and collateral;
 2. the **protocol tranche** (`protocol_tranche`, from protocol fee income held in the treasury): the clearing operator's own money, consumed before anyone else's, as EU rules require of central counterparties;
 3. the default fund;
-4. only then, loss allocation across the remaining accounts (open question 17.3).
+4. only then, loss allocation across the remaining accounts (open question 16.3).
 
 Every draw on the fund, and every step of the waterfall that is reached, emits an event. No administrative path can withdraw from the default fund (section 12).
 
@@ -341,7 +340,7 @@ A clearing house is where trades from different venues meet. A participant (a tr
 
 ### 11.2 Venues
 
-A venue is a registered engine in the registry. It submits matched trades to the clearing for accounts that have authorized it. This replaces the current controller-only `submit_matched_trade`. Each trade records the venue it came from, for audit and for the per-venue volume used in section 7.4. Onboarding criteria for venues are open question 17.5.
+A venue is a registered engine in the registry. It submits matched trades to the clearing for accounts that have authorized it. This replaces the current controller-only `submit_matched_trade`. Each trade records the venue it came from, for audit and for the per-venue volume used in section 7.4. Onboarding criteria for venues are open question 16.5.
 
 ### 11.3 Delegation
 
@@ -362,7 +361,7 @@ Visibility follows from this: positions are readable by the owner, by agents hol
 - **Hard bounds.** Every risk parameter has a minimum and maximum fixed in code (for example `k` within `[1, 3]`); no administrator can set a value outside them.
 - **Asymmetric speed.** Changes that raise margin take effect immediately, within the bounds. Changes that lower margin, change the pusher set, or activate a backfill upload wait behind a public timelock of `timelock_duration` and can be inspected before they take effect.
 - **No withdrawal from the default fund.** The existing withdrawal path for the insurance fund (`FundType::Insurance` in `src/clearing/src/api/admin/api.rs`) is removed. The fund is only ever drawn by the waterfall.
-- Long-term governance (controllers, an SNS DAO, or a risk committee) is open question 17.2.
+- Long-term governance (controllers, an SNS DAO, or a risk committee) is open question 16.2.
 
 ## 13. Parameters
 
@@ -428,7 +427,7 @@ Each phase is its own small, verifiable change. Margin is never reduced before t
 
 1. **Governance and history.** Role separation, parameter bounds, the timelock, removal of the default-fund withdrawal path; price history storage, the timelocked backfill endpoint with provenance, daily sampling; EWMA, floor, pre-filled event calendar and manual multiplier.
 2. **Prices.** Robust index with pusher quorum, XRC checks, carry-adjusted marks, implied-volatility marks with model fallback, deleveraging-only mode; collateral moved onto the same pipeline.
-3. **Options fixed.** Premium flow and the short side of `Call` and `Put` corrected (section 16), with tests that prove it.
+3. **Options on the margin model.** The premium paid at trade time, and `Call` and `Put` settlement and margin rebuilt on this model, with tests that prove both sides of every position.
 4. **Stress library.** Fixed stressed periods and stress scenarios per underlying.
 5. **Liquidation and default fund, on the current margin.** Heartbeat re-margining, MM check, liquidation to IM plus buffer, default-fund takeover, waterfall, open interest cap; settlement routed through the waterfall.
 6. **Switch to risk-based IM.** Risk arrays, filtered historical simulation with SPAN floor, short option minimum, concentration add-on, collateral in scenarios, account-level pre-trade check; measured instruction and cycle budget.
@@ -436,17 +435,7 @@ Each phase is its own small, verifiable change. Margin is never reduced before t
 8. **`Linear` forwards and NDFs** on the new engine, without `settlement_cap` (the reworked PR #86).
 9. **Offsets across underlyings.**
 
-## 16. Known defect this model removes
-
-In the current code the short side of `Call` and `Put` is accounted like the long side:
-
-- settlement credits a short the option payoff (`payoffs/mod.rs`, the `_ => Ok(abs_qty * unit_payoff)` arm of `get_settlement_value`), so on an in-the-money call both legs are paid;
-- a short call's reserved margin uses the same formula as a long's, so the per-trade re-mark credits the short when the premium rises (`trade/service.rs`, the cash delta of the existing position);
-- a short put that expires out of the money loses its full strike instead of keeping the premium, and the seller never receives the premium.
-
-No test exercises this path: the settlement tests set cashflows by hand and the settlement flow tests use long positions only. Phase 3 fixes it with tests that prove the corrected behavior.
-
-## 17. Open questions
+## 16. Open questions
 
 1. Should `Binary` and `Categorical` stay fully collateralized, or move into the scenario engine?
 2. Who governs the parameters long term: controllers, an SNS DAO, or a risk committee?
@@ -455,7 +444,7 @@ No test exercises this path: the settlement tests set cashflows by hand and the 
 5. What are the onboarding criteria for venues and, later, for contracted market makers who take over liquidated positions?
 6. Which intraday FX feeds the pushers use for the G10 currencies, subject to their licence terms?
 
-## 18. References
+## 17. References
 
 - CME Group, _CME SPAN: Standard Portfolio Analysis of Risk_, methodology overview.
 - CME Group, _SPAN 2_ framework documentation.
