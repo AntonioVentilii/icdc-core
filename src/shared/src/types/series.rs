@@ -974,12 +974,12 @@ impl Default for SocialLimits {
 
 #[cfg(test)]
 mod tests {
-    use candid::Principal;
+    use candid::{decode_one, encode_one, CandidType, Principal};
 
     use crate::types::{
         series::{is_valid_locale, ListSeriesParams, Outcome, PaginationParams, SeriesStatus},
-        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Resolution, Series, SeriesId,
-        SeriesIdParams, TradingAccess,
+        BalanceDomain, Description, EngineId, PayoffType, PayoutUnit, Price, Resolution, Series,
+        SeriesId, SeriesIdParams, TradingAccess,
     };
 
     /// Builds a minimal [`Series`] carrying the given id. Only the id matters
@@ -1910,7 +1910,7 @@ mod tests {
     fn legacy_blob_without_start_ns_decodes_as_none() {
         /// The current [`Series`] shape minus `start_ns`, mirroring what older
         /// canister versions wrote to stable memory.
-        #[derive(candid::CandidType)]
+        #[derive(CandidType)]
         struct PreStartNsSeries {
             series_id: SeriesId,
             underlying: String,
@@ -1919,7 +1919,7 @@ mod tests {
             strike: Option<Price>,
             price_precision: u8,
             payout_unit: PayoutUnit,
-            outcomes: Option<Vec<crate::types::series::Outcome>>,
+            outcomes: Option<Vec<Outcome>>,
             oracle_source: String,
             creator: Principal,
             created_at_ns: u64,
@@ -1930,7 +1930,7 @@ mod tests {
             banner_url: Option<String>,
             balance_domain: BalanceDomain,
             trading_access: Vec<TradingAccess>,
-            engine_id: Option<crate::types::EngineId>,
+            engine_id: Option<EngineId>,
             forked_from: Option<SeriesId>,
             locale: Option<String>,
         }
@@ -1959,8 +1959,8 @@ mod tests {
             locale: None,
         };
 
-        let bytes = candid::encode_one(&legacy).expect("encode legacy series");
-        let decoded: Series = candid::decode_one(&bytes).expect("decode into current Series");
+        let bytes = encode_one(&legacy).expect("encode legacy series");
+        let decoded: Series = decode_one(&bytes).expect("decode into current Series");
 
         assert_eq!(decoded.start_ns, None);
         assert_eq!(decoded.expiry_ns, 1_000);

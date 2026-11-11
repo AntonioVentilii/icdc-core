@@ -244,7 +244,9 @@ that improves the code, never raise it.
   build whenever it produces a diff. Run `npm run format` locally and
   push the result.
 - **`lint` failed** → run `npm run lint:rust` (auto-fixes clippy where
-  possible). Never silence a lint: `allow_attributes` is denied, and the
+  possible). Clippy runs on every crate of the Cargo workspace, the
+  three canisters and `shared`, for the wasm target, the tests, the
+  examples and the benches (`scripts/lint.rust.sh`). Never silence a lint: `allow_attributes` is denied, and the
   rare justified exception is `#[expect(clippy::…, reason = "…")]`
   agreed in review. Pre-existing
   `pedantic = { level = "deny", priority = -1 }` is intentional.
