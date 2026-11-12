@@ -4,10 +4,10 @@ Where tests live in `icdc-core`, how they are written and how to run them. Every
 
 ## Two layers
 
-| Layer       | Where                                                                                                                                           | Runs with                                           |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| Unit        | a `#[cfg(test)] mod tests` at the bottom of the file under test; the trade domain splits its scenarios into `src/clearing/src/api/trade/tests/` | `npm run test:unit` (`cargo test --lib --bins`)     |
-| Integration | `src/clearing/tests/it/<area>.rs`, one module per area, registered in `src/clearing/tests/it/main.rs`; the canisters run on PocketIC            | `npm run test:integration` (`cargo test --test it`) |
+| Layer       | Where                                                                                                                                                                                                                                                | Runs with                                           |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Unit        | a `#[cfg(test)] mod tests` at the bottom of the file under test, moved to `<file>/tests.rs` when the tests outgrow the code (`src/registry/src/api/series/tests.rs`); the trade domain splits its scenarios into `src/clearing/src/api/trade/tests/` | `npm run test:unit` (`cargo test --lib --bins`)     |
+| Integration | `src/clearing/tests/it/<area>.rs`, one module per area, registered in `src/clearing/tests/it/main.rs`; the canisters run on PocketIC                                                                                                                 | `npm run test:integration` (`cargo test --test it`) |
 
 There is no dfx-based test suite: integration tests deploy the real wasms (clearing, registry, minter, ledgers) into PocketIC.
 
