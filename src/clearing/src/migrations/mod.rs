@@ -4,8 +4,8 @@
 //! decode failure. Adding the compulsory `Series::resolution` field makes
 //! pre-resolution blobs undecodable into the current `StableState` (candid
 //! rejects a missing non-optional field). [`LegacyStableState`] mirrors the
-//! historical shape — differing only in the `series` map element type
-//! ([`LegacySeries`]) — so old state can be decoded and converted via
+//! historical shape (differing only in the `series` map element type,
+//! [`LegacySeries`]) so old state can be decoded and converted via
 //! [`into_current`], backfilling `resolution` from each series' description.
 //!
 //! # Retirement
@@ -99,6 +99,7 @@ pub fn into_current(legacy: LegacyStableState) -> StableState {
         asset_metrics: legacy.asset_metrics,
         domain_policies: legacy.domain_policies,
         migration_plans: legacy.migration_plans,
+        reassignment_plans: None,
     }
 }
 

@@ -72,7 +72,7 @@ pub struct SeriesPriceCandle {
     /// Lowest trade price in the bucket.
     pub low: Price,
     /// Price of the last trade in the bucket (latest timestamp, ties broken by
-    /// execution order) — the consensus a sparkline/chart plots.
+    /// execution order): the consensus a sparkline/chart plots.
     pub close: Price,
     /// Total traded quantity in the bucket (sum of each trade's positive `qty`).
     pub volume: i128,
@@ -92,8 +92,8 @@ pub struct SeriesPriceHistory {
 
 /// One series' cumulative market-wide traded volume.
 ///
-/// `volume` is the traded *notional* — the sum over executed trades of
-/// `qty · price`, the value that changed hands — in USD base units (the
+/// `volume` is the traded *notional*, i.e. the sum over executed trades of
+/// `qty · price` (the value that changed hands), in USD base units (the
 /// `USD_DECIMALS` scale), not a contract count. `trade_count` is the number of
 /// executed trades. An untraded or unknown series totals zero on both.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]

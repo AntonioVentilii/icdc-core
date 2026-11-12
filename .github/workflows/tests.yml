@@ -5,6 +5,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Incremental artifacts never get reused on a fresh runner and only bloat
+  # the cached `target/`.
+  CARGO_INCREMENTAL: 0
 
 permissions:
   contents: read
@@ -18,7 +21,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -29,23 +32,25 @@ jobs:
       - name: Prepare
         if: steps.changes.outputs.rust == 'true'
         uses: ./.github/actions/prepare
+        with:
+          lint-tools: 'false'
 
       # Unit tests don't depend on built wasms or downloaded canister
-      # binaries. The primary key includes the commit SHA so a fresh
-      # cache is saved every run; `restore-keys` falls back to the most
-      # recent matching prefix for warm starts.
+      # binaries. The key is derived from the lockfile and toolchain only,
+      # and the cache is saved from `main` only: branches can read `main`'s
+      # caches but not each other's, so saving per commit or per branch just
+      # evicts the useful entries from the 10 GB repo quota.
       - name: Restore cargo cache
         if: steps.changes.outputs.rust == 'true'
         id: cache-unit
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-test-unit-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-${{ github.sha }}
+          key: ${{ runner.os }}-cargo-test-unit-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-test-unit-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}-
             ${{ runner.os }}-cargo-test-unit-
 
       - name: Run tests
@@ -53,8 +58,8 @@ jobs:
         run: npm run test:unit
 
       - name: Save cargo cache
-        if: always() && steps.changes.outputs.rust == 'true' && steps.cache-unit.outputs.cache-hit != 'true'
-        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        if: github.ref == 'refs/heads/main' && steps.changes.outputs.rust == 'true' && steps.cache-unit.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -70,7 +75,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -81,26 +86,25 @@ jobs:
       - name: Prepare
         if: steps.changes.outputs.rust == 'true'
         uses: ./.github/actions/prepare
+        with:
+          lint-tools: 'false'
 
       # Integration tests use both the workspace wasms (built into
       # `target/wasm32-unknown-unknown/release/`) and the downloaded
       # third-party canisters (extracted into `target/ic/`). Both live
       # under `target/`, so caching it skips both rebuild and redownload.
-      # The primary key includes the commit SHA so a fresh cache is
-      # saved every run; `restore-keys` falls back to the most recent
-      # matching prefix.
+      # Keyed and saved like the unit cache: inputs only, `main` only.
       - name: Restore cargo cache
         if: steps.changes.outputs.rust == 'true'
         id: cache-integration
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-test-integration-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'scripts/build.sh', 'scripts/download.ledger.sh', 'scripts/download.icp.sh', 'scripts/download-immutable.sh') }}-${{ github.sha }}
+          key: ${{ runner.os }}-cargo-test-integration-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'scripts/build.sh', 'scripts/download.ledger.sh', 'scripts/download.icp.sh', 'scripts/download-immutable.sh') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-test-integration-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'scripts/build.sh', 'scripts/download.ledger.sh', 'scripts/download.icp.sh', 'scripts/download-immutable.sh') }}-
             ${{ runner.os }}-cargo-test-integration-
 
       - name: Build
@@ -112,8 +116,8 @@ jobs:
         run: npm run test:integration
 
       - name: Save cargo cache
-        if: always() && steps.changes.outputs.rust == 'true' && steps.cache-integration.outputs.cache-hit != 'true'
-        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        if: github.ref == 'refs/heads/main' && steps.changes.outputs.rust == 'true' && steps.cache-integration.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -132,7 +136,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/needs_success

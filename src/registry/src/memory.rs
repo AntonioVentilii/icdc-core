@@ -112,7 +112,7 @@ pub fn save_state() {
 }
 
 pub fn restore_state() {
-    // Try V5 (latest) first — `Series` already carries `resolution`.
+    // Try V5 (latest) first: `Series` already carries `resolution`.
     let v5: Result<(StableStateV5,), String> = storage::stable_restore();
     if let Ok((state,)) = v5 {
         SERIES_STORE.with(|w| *w.borrow_mut() = state.series);
@@ -126,7 +126,7 @@ pub fn restore_state() {
         return;
     }
 
-    // Fallback: pre-resolution V4 — decode via the legacy mirror and backfill
+    // Fallback: pre-resolution V4. Decode via the legacy mirror and backfill
     // `resolution` from each series' description.
     let v4: Result<(LegacyStableStateV4,), String> = storage::stable_restore();
     if let Ok((state,)) = v4 {

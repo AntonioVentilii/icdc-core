@@ -12,6 +12,7 @@ use super::{
     results::{DepositCollateralResult, WithdrawCollateralResult},
 };
 use crate::{
+    account::reassignment::ReassignmentGuard,
     assets::{
         asset::{
             handler::get_handler,
@@ -40,6 +41,12 @@ use crate::{
 pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositCollateralResult {
     let result: Result<(), DepositCollateralError> = (async {
         let user: User = msg_caller().into();
+
+        // Acquired but never revalidated: the plan below is durable and is
+        // created before the first await, and a reassignment rejects an owner
+        // with a non-finalised deposit plan. Nothing can re-key the account
+        // from here on.
+        ReassignmentGuard::acquire(user)?;
 
         let DepositCollateralParams {
             amount,
@@ -164,6 +171,11 @@ pub async fn deposit_collateral(params: DepositCollateralParams) -> DepositColla
 pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCollateralResult {
     let result: Result<(), WithdrawCollateralError> = (async {
         let user: User = msg_caller().into();
+
+        // Acquired but never revalidated: see `deposit_collateral`. The
+        // withdrawal plan is created before the first await and blocks any
+        // reassignment for the rest of the call.
+        ReassignmentGuard::acquire(user)?;
 
         let WithdrawCollateralParams {
             amount,
@@ -317,11 +329,13 @@ pub async fn withdraw_collateral(params: WithdrawCollateralParams) -> WithdrawCo
 
             let handler = get_handler(&config.asset).map_err(WithdrawCollateralError::Asset)?;
 
+            #[expect(clippy::unwrap_used, reason = "baseline of the quality gate: return an error instead, see docs/ai/patterns.md")]
             let amount_u128: u128 = plan.reserved_amount.unwrap();
 
             let res = handler
                 .transfer(AssetTransferParams {
                     asset: &config.asset,
+                    asset_id: &asset_id,
                     from: AssetAccount::UserClearing(user),
                     to: AssetAccount::external_icrc(plan.to_account.0, plan.to_account.1),
                     amount: AssetAmount::Fixed(amount_u128),

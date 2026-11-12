@@ -16,14 +16,14 @@ use crate::{
         },
         admin::{
             params::{
-                CancelFundWithdrawalParams, RefreshIcrcAssetMetadataParams,
+                CancelFundWithdrawalParams, ReassignAccountParams, RefreshIcrcAssetMetadataParams,
                 RegisterIcrcAssetParams, UpdateAssetMetricsParams, UpdateAssetPriceParams,
                 UpdateCollateralAllowedDomainsParams, UpdateCollateralAssetParams,
                 UpdateDomainPolicyParams, WithdrawFundParams,
             },
             results::{
-                CancelFundWithdrawalResult, GetFundsResult, RefreshIcrcAssetMetadataResult,
-                RegisterIcrcAssetResult, UpdateAssetPriceResult,
+                CancelFundWithdrawalResult, GetFundsResult, ReassignAccountResult,
+                RefreshIcrcAssetMetadataResult, RegisterIcrcAssetResult, UpdateAssetPriceResult,
                 UpdateCollateralAllowedDomainsResult, WithdrawFundResult,
             },
         },
@@ -37,8 +37,14 @@ use crate::{
         },
         migration::{params::MigrateDomainParams, results::MigrateDomainResult},
         settlement::{
-            params::{BackfillSettlementEventsParams, ListSettledSeriesParams, SettleSeriesParams},
-            results::{BackfillSettlementEventsResult, SettleSeriesResult, SettledSeriesPage},
+            params::{
+                BackfillSettlementEventsParams, ListSeriesSettlementStatusesParams,
+                ListSettledSeriesParams, SettleSeriesParams,
+            },
+            results::{
+                BackfillSettlementEventsResult, SeriesSettlementStatus, SettleSeriesResult,
+                SettledSeriesPage,
+            },
         },
         trade::{
             errors::TradeError,

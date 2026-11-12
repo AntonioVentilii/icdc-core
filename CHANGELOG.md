@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.1.8](https://github.com/AntonioVentilii/icdc-core/compare/v0.1.7...v0.1.8) (2026-07-24)
+
+
+### Features
+
+* **clearing,registry:** batch/filter reads for the resolution solver ([#112](https://github.com/AntonioVentilii/icdc-core/issues/112)) ([5a12d0c](https://github.com/AntonioVentilii/icdc-core/commit/5a12d0cd5d2ff9ee848fcdae46bd0abdf3026a38))
+
+
+### Bug Fixes
+
+* **clearing:** send explicit fee on ICRC transfers with cached-fee + BadFee retry ([#111](https://github.com/AntonioVentilii/icdc-core/issues/111)) ([7867e15](https://github.com/AntonioVentilii/icdc-core/commit/7867e15e9f052cbf76063e9adff1e259a89db53f))
+
+## [0.1.7](https://github.com/AntonioVentilii/icdc-core/compare/v0.1.6...v0.1.7) (2026-07-22)
+
+
+### Bug Fixes
+
+* **scripts:** use lowercase echo in ledger/index arg builders ([#107](https://github.com/AntonioVentilii/icdc-core/issues/107)) ([3c4d11d](https://github.com/AntonioVentilii/icdc-core/commit/3c4d11d7fa25bc39109aa6fef672247b2a6cdcd2))
+
 ## [0.1.6](https://github.com/AntonioVentilii/icdc-core/compare/v0.1.5...v0.1.6) (2026-07-22)
 
 

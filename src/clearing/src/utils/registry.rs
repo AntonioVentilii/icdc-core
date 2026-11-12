@@ -36,15 +36,15 @@ pub(crate) async fn is_oracle_authorized(
 ///
 /// # Arguments
 ///
-/// * `registry` — the principal of the registry canister.
-/// * `principal` — the trader whose authorization is being checked.
-/// * `series_id` — the series the trader wants to trade on.
+/// * `registry`: the principal of the registry canister.
+/// * `principal`: the trader whose authorization is being checked.
+/// * `series_id`: the series the trader wants to trade on.
 ///
 /// # Returns
 ///
-/// * `Ok(true)` — the principal may trade this series.
-/// * `Ok(false)` — the principal is not authorized.
-/// * `Err(CommonError::Internal)` — transport or Candid decode failure.
+/// * `Ok(true)`: the principal may trade this series.
+/// * `Ok(false)`: the principal is not authorized.
+/// * `Err(CommonError::Internal)`: transport or Candid decode failure.
 pub(crate) async fn is_trading_authorized(
     registry: Principal,
     principal: Principal,

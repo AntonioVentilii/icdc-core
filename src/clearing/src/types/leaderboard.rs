@@ -11,7 +11,7 @@ const NANOS_PER_DAY: u64 = 86_400_000_000_000;
 /// has a well-defined immediately-preceding period (the "prior window") for the
 /// ↑/↓ rank deltas the front end renders:
 ///
-/// - [`Week`](LeaderboardWindow::Week): an ISO week — Monday 00:00:00 UTC through the following
+/// - [`Week`](LeaderboardWindow::Week): an ISO week, Monday 00:00:00 UTC through the following
 ///   Sunday. (Unix epoch day 0, 1970-01-01, was a Thursday, hence the `+ 3` Monday alignment
 ///   below.)
 /// - [`Month`](LeaderboardWindow::Month): a calendar month in UTC.
@@ -84,12 +84,12 @@ impl LeaderboardWindow {
 
 /// Per-principal aggregate of realized settlement `PnL` within one
 /// `(window, period)` bucket. This is the maintained index value, not a Candid
-/// type — the query projects it into a [`LeaderboardEntry`].
+/// type; the query projects it into a [`LeaderboardEntry`].
 ///
 /// [`LeaderboardEntry`]: crate::api::leaderboard::results::LeaderboardEntry
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PnlAggregate {
-    /// Net realized `PnL` over the period, in internal USD (`vUSD`) base units —
+    /// Net realized `PnL` over the period, in internal USD (`vUSD`) base units:
     /// the signed sum of each settlement's `cashflow_usd`.
     pub realized_pnl: i128,
     /// Number of settled positions contributing to this aggregate.
@@ -118,6 +118,10 @@ impl PnlAggregate {
 /// Howard Hinnant's `civil_from_days`
 /// (<http://howardhinnant.github.io/date_algorithms.html#civil_from_days>),
 /// specialized to the non-negative epoch days a canister timestamp produces.
+#[expect(
+    clippy::expect_used,
+    reason = "baseline of the quality gate: return an error instead, see docs/ai/patterns.md"
+)]
 fn civil_from_days(days: u64) -> (u64, u32) {
     // Shift epoch to 0000-03-01 so leap days fall at the end of the 400-year era.
     let z = days + 719_468;

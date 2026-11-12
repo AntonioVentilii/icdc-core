@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// The shape is intentionally an **aggregate**: it exposes only window totals
 /// (net realized `PnL` plus the settled / win counts a front end needs for an
-/// accuracy figure) and the principal's rank — never the per-series or
+/// accuracy figure) and the principal's rank, never the per-series or
 /// per-settlement breakdown.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct LeaderboardEntry {
@@ -19,7 +19,7 @@ pub struct LeaderboardEntry {
     /// last month), for ↑/↓ movement. `None` when the window has no prior
     /// period (all-time) or the principal did not appear in it.
     pub prior_rank: Option<u64>,
-    /// Net realized `PnL` over the window, in internal USD (`vUSD`) base units —
+    /// Net realized `PnL` over the window, in internal USD (`vUSD`) base units:
     /// the signed sum of the principal's settlement cashflows.
     pub realized_pnl: i128,
     /// Number of settled positions in the window.
@@ -34,7 +34,7 @@ pub struct LeaderboardEntry {
 /// Mirrors the aggregate-only contract of [`LeaderboardEntry`]: window totals
 /// (settled / win counts plus net realized `PnL`) and never a per-settlement
 /// breakdown. `win_count / settled_count` is the window accuracy. Only
-/// principals with at least one settlement in the window are returned — a
+/// principals with at least one settlement in the window are returned: a
 /// member with no settlement contributes nothing to a cohort's accuracy, and
 /// the caller already knows the full set it asked for.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -45,7 +45,7 @@ pub struct SettlementAccuracyEntry {
     pub settled_count: u64,
     /// Number of those settlements that were net positive (`cashflow_usd > 0`).
     pub win_count: u64,
-    /// Net realized `PnL` over the window, in internal USD (`vUSD`) base units —
+    /// Net realized `PnL` over the window, in internal USD (`vUSD`) base units:
     /// the signed sum of the principal's settlement cashflows.
     pub realized_pnl: i128,
 }

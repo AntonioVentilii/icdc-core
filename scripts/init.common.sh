@@ -22,14 +22,14 @@ export USD_DECIMALS=4
 
 # --- Balance domains for register_icrc_asset.allowed_balance_domains (Candid) ---
 # Production-like collateral: Settlement only. Play/test tokens: Playground only.
-# App-specific (e.g. Vici XP): ViciXp only — see docs/architecture/balance-domains.md
-# Both: assets you explicitly allow in both Settlement and Playground (not vUSD — that is internal_ledger only).
+# App-specific (e.g. Vici XP): ViciXp only (see docs/architecture/balance-domains.md)
+# Both: assets you explicitly allow in both Settlement and Playground (not vUSD, which is internal_ledger only).
 export CLEARING_DOMAINS_SETTLEMENT='vec { variant { Settlement } }'
 export CLEARING_DOMAINS_PLAYGROUND='vec { variant { Playground } }'
 export CLEARING_DOMAINS_SETTLEMENT_AND_PLAYGROUND='vec { variant { Settlement }; variant { Playground } }'
 export CLEARING_DOMAINS_VICI_XP='vec { variant { ViciXp } }'
 
-# ICP (ICRC-1 ledger on the Internet Computer — mainnet principal)
+# ICP (ICRC-1 ledger on the Internet Computer, mainnet principal)
 export ICP_SYMBOL="ICP"
 export ICP_LEDGER="ryjl3-tyaaa-aaaaa-aaaba-cai"
 export ICP_DECIMALS=8
@@ -37,7 +37,7 @@ export ICP_HAIRCUT_BPS=500
 # USD notional per whole token (USD_DECIMALS=4 → value / 10_000). Oracle can replace later.
 export ICP_PRICE_E6=30000 # $3.00
 
-# Vici XP (VXP) — ICRC ledger; default = mainnet id from vici-points/canister_ids.json. Override: VICI_XP_LEDGER=...
+# Vici XP (VXP): ICRC ledger; default = mainnet id from vici-points/canister_ids.json. Override: VICI_XP_LEDGER=...
 export VICI_XP_SYMBOL="VXP"
 export VICI_XP_LEDGER="${VICI_XP_LEDGER:-s7ux4-yyaaa-aaaam-qidha-cai}"
 export VICI_XP_DECIMALS=4
@@ -48,7 +48,7 @@ export VICI_XP_PRICE_E6=10000 # $1.00
 export VICI_XP_TRANSFER_FEE=1
 
 # vUSD: configured on the clearing canister via install/init `Config.internal_ledger` (build args).
-# Do not use register_icrc_asset for vUSD — it is internal accounting, not user collateral.
+# Do not use register_icrc_asset for vUSD: it is internal accounting, not user collateral.
 # vUSD Configuration
 VUSD_LEDGER_ID=$(dfx canister id ledger --network "$NETWORK" 2>/dev/null)
 if [[ -n "$VUSD_LEDGER_ID" ]]; then

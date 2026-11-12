@@ -14,8 +14,8 @@ use shared::{
             PaginationParams, Series, SeriesError, SeriesPage, SeriesStatus,
             UpdateSeriesMetadataParams, UpdateSeriesResult,
         },
-        BalanceDomain, EngineRole, NonMonetaryUnit, PayoutUnit, SeriesId, SeriesIdParams,
-        TradingAccess,
+        BalanceDomain, EngineRole, NonMonetaryUnit, PayoffType, PayoutUnit, SeriesId,
+        SeriesIdParams, TradingAccess,
     },
 };
 
@@ -92,6 +92,7 @@ fn add_series_impl(
         start_ns,
         payoff_type,
         strike,
+        settlement_cap,
         price_precision,
         payout_unit,
         oracle_source,
@@ -165,8 +166,28 @@ fn add_series_impl(
         }
     }
 
+    // Linear (forward/NDF/future) invariants: a `settlement_cap` is compulsory
+    // and must be strictly positive; the forward rate is the trade price, so a
+    // fixed `strike` and categorical `outcomes` are both rejected. Conversely,
+    // `settlement_cap` is meaningless on any non-`Linear` payoff.
+    if payoff_type == PayoffType::Linear {
+        match settlement_cap.as_ref() {
+            None => return Err(SeriesError::LinearRequiresSettlementCap).into(),
+            Some(cap) if cap.value() == 0 => return Err(SeriesError::InvalidSettlementCap).into(),
+            Some(_) => {}
+        }
+        if outcomes.is_some() {
+            return Err(SeriesError::LinearRejectsOutcomes).into();
+        }
+        if strike.is_some() {
+            return Err(SeriesError::LinearRejectsStrike).into();
+        }
+    } else if settlement_cap.is_some() {
+        return Err(SeriesError::SettlementCapOnlyForLinear).into();
+    }
+
     // A scheduled series must have a window it can actually be traded in, and
-    // "already live" must have exactly one encoding (`None`) — otherwise the same
+    // "already live" must have exactly one encoding (`None`). Otherwise the same
     // market could be registered twice under two different ids, since `start_ns`
     // is hashed into the id.
     if let Some(start_ns) = start_ns {
@@ -194,6 +215,7 @@ fn add_series_impl(
         start_ns,
         payoff_type: &payoff_type,
         strike: strike.as_ref(),
+        settlement_cap: settlement_cap.as_ref(),
         price_precision,
         payout_unit: &payout_unit,
         outcomes: outcomes.as_deref(),
@@ -211,6 +233,7 @@ fn add_series_impl(
         start_ns,
         payoff_type,
         strike,
+        settlement_cap,
         price_precision,
         payout_unit,
         outcomes,
@@ -260,7 +283,7 @@ fn add_series_impl(
 ///    `NonMonetary` payout) into their own closed circle, subject to the same per-user rate limits
 ///    as social market creation. This is the "Challenge your friends" flow.
 ///
-/// In all cases the fork's `trading_access` must be fully `Restricted` — a fork
+/// In all cases the fork's `trading_access` must be fully `Restricted`: a fork
 /// never widens access.
 #[update(guard = "caller_is_not_anonymous")]
 #[must_use]
@@ -364,7 +387,7 @@ fn fork_series_impl(
             balance_domain: source.balance_domain,
             expiry_ns: source.expiry_ns,
             // A fork is the source contract re-titled, so it inherits the whole
-            // trading window verbatim — including a start that has already passed,
+            // trading window verbatim, including a start that has already passed,
             // which simply means the fork is open immediately. Forks cannot
             // collide regardless (`fork_caller` + `fork_index` make the id
             // unique), so the "future start only" rule that `add_series` enforces
@@ -372,6 +395,7 @@ fn fork_series_impl(
             start_ns: source.start_ns,
             payoff_type: &source.payoff_type,
             strike: source.strike.as_ref(),
+            settlement_cap: source.settlement_cap.as_ref(),
             price_precision: source.price_precision,
             payout_unit: &source.payout_unit,
             outcomes: source.outcomes.as_deref(),
@@ -393,6 +417,7 @@ fn fork_series_impl(
             start_ns: source.start_ns,
             payoff_type: source.payoff_type,
             strike: source.strike,
+            settlement_cap: source.settlement_cap,
             price_precision: source.price_precision,
             payout_unit: source.payout_unit,
             outcomes: source.outcomes,
@@ -482,7 +507,7 @@ fn caller_can_manage_series_metadata(
 ///
 /// Only `description`, `icon_url`, `banner_url`, and `locale` can be changed.
 /// The series' identity-bearing economic fields, `title`, and `resolution` are
-/// immutable here by design — see [`UpdateSeriesMetadataParams`].
+/// immutable here by design (see [`UpdateSeriesMetadataParams`]).
 ///
 /// # Authorization
 ///
@@ -554,7 +579,7 @@ pub fn get_series(series_id: SeriesId) -> Option<Series> {
 ///
 /// Clients could derive this from `start_ns`/`expiry_ns` themselves, but only
 /// against their own clock. This evaluates the window with the canister's
-/// `time()`, which is the same clock the trading gate uses — so a countdown built
+/// `time()`, which is the same clock the trading gate uses, so a countdown built
 /// on it cannot disagree with whether an order will actually be accepted.
 ///
 /// Settlement state is not folded in: it lives in the clearing canister. A series
@@ -595,8 +620,8 @@ pub fn list_series(pagination: PaginationParams) -> SeriesPage {
 /// Implementation of `list_series_with` with an injectable caller and clock for
 /// unit tests.
 ///
-/// `now` is the cutoff for every clock-dependent filter — `only_unexpired` and
-/// `tradeable_now` — applied together via [`ListSeriesParams::matches_time`].
+/// `now` is the cutoff for every clock-dependent filter (`only_unexpired` and
+/// `tradeable_now`), applied together via [`ListSeriesParams::matches_time`].
 /// The public query passes the canister's `time()`; tests pass an explicit
 /// value.
 #[must_use]
@@ -633,7 +658,7 @@ mod tests {
             engine::{Engine, EngineId},
             groups::GroupId,
             BalanceDomain, Description, FiatUnit, Group, NonMonetaryUnit, PayoffType, PayoutUnit,
-            Resolution, SocialLimits, SocialReward, TradingAccess,
+            Price, Resolution, SocialLimits, SocialReward, TradingAccess,
         },
     };
 
@@ -675,6 +700,7 @@ mod tests {
             start_ns: None,
             payoff_type: PayoffType::Binary,
             strike: None,
+            settlement_cap: None,
             price_precision: 8,
             payout_unit: PayoutUnit::usd(),
             oracle_source: "oracle".to_owned(),
@@ -699,6 +725,7 @@ mod tests {
             start_ns: None,
             payoff_type: PayoffType::Binary,
             strike: None,
+            settlement_cap: None,
             price_precision: 0,
             payout_unit: PayoutUnit::NonMonetary(NonMonetaryUnit::Social(SocialReward {
                 title: "Pizza".to_owned(),
@@ -1454,7 +1481,7 @@ mod tests {
         };
 
         // Default params (only_unexpired = None) return the series even when
-        // `now` is far past its expiry — the historical contract.
+        // `now` is far past its expiry: the historical contract.
         let visible: Vec<SeriesId> =
             list_series_with_impl(ListSeriesParams::default(), caller, 1_000_000_000)
                 .items
@@ -1580,7 +1607,7 @@ mod tests {
             ..empty_update(id.clone())
         };
 
-        // admin is neither controller nor creator — authorized via the engine.
+        // admin is neither controller nor creator; authorized via the engine.
         update_series_metadata_impl(params, admin, false).expect("engine admin update ok");
         assert_eq!(fetch(&id).description.plain, "Engine admin edit");
 
@@ -1677,6 +1704,85 @@ mod tests {
         assert_eq!(updated.locale.as_deref(), Some("es"));
     }
 
+    // --- Linear (forward/NDF/future) validation ---
+
+    fn linear_params() -> AddSeriesParams {
+        AddSeriesParams {
+            payoff_type: PayoffType::Linear,
+            strike: None,
+            settlement_cap: Some(Price::new(20_0000_0000, 8)),
+            ..base_params()
+        }
+    }
+
+    #[test]
+    fn linear_happy_path() {
+        cleanup();
+        let res = add_as_creator(linear_params(), test_principal(1), 1_000_000_000);
+        assert!(matches!(res, AddSeriesResult::Ok(_)));
+    }
+
+    #[test]
+    fn linear_requires_settlement_cap() {
+        cleanup();
+        let mut p = linear_params();
+        p.settlement_cap = None;
+        let res = add_as_creator(p, test_principal(1), 1_000_000_000);
+        assert!(matches!(
+            res,
+            AddSeriesResult::Err(SeriesError::LinearRequiresSettlementCap)
+        ));
+    }
+
+    #[test]
+    fn linear_rejects_zero_cap() {
+        cleanup();
+        let mut p = linear_params();
+        p.settlement_cap = Some(Price::new(0, 8));
+        let res = add_as_creator(p, test_principal(1), 1_000_000_000);
+        assert!(matches!(
+            res,
+            AddSeriesResult::Err(SeriesError::InvalidSettlementCap)
+        ));
+    }
+
+    #[test]
+    fn linear_rejects_strike() {
+        cleanup();
+        let mut p = linear_params();
+        p.strike = Some(Price::new(8_0000_0000, 8));
+        let res = add_as_creator(p, test_principal(1), 1_000_000_000);
+        assert!(matches!(
+            res,
+            AddSeriesResult::Err(SeriesError::LinearRejectsStrike)
+        ));
+    }
+
+    #[test]
+    fn linear_rejects_outcomes() {
+        cleanup();
+        let mut p = linear_params();
+        p.outcomes = Some(Vec::new());
+        let res = add_as_creator(p, test_principal(1), 1_000_000_000);
+        assert!(matches!(
+            res,
+            AddSeriesResult::Err(SeriesError::LinearRejectsOutcomes)
+        ));
+    }
+
+    #[test]
+    fn settlement_cap_only_for_linear() {
+        cleanup();
+        // base_params is a Binary series; a cap is meaningless there.
+        let mut p = base_params();
+        p.settlement_cap = Some(Price::new(20_0000_0000, 8));
+        let res = add_as_creator(p, test_principal(1), 1_000_000_000);
+        assert!(matches!(
+            res,
+            AddSeriesResult::Err(SeriesError::SettlementCapOnlyForLinear)
+        ));
+    }
+
     // --- start_ns (scheduled series) --------------------------------------
 
     /// Lists series for `caller` with `tradeable_now = Some(true)` evaluated at
@@ -1707,8 +1813,61 @@ mod tests {
         params
     }
 
-    /// `None` is the only way to say "already live", so a start in the past — or
-    /// at exactly `now` — is rejected rather than silently normalized. Otherwise
+    /// Lists series for `caller` with `due = Some(true)` evaluated at `now`,
+    /// returning the matching ids.
+    fn list_due_at(caller: Principal, now: u64) -> Vec<SeriesId> {
+        list_series_with_impl(
+            ListSeriesParams {
+                due: Some(true),
+                pagination: Some(PaginationParams {
+                    limit: None,
+                    cursor: None,
+                }),
+                ..Default::default()
+            },
+            caller,
+            now,
+        )
+        .items
+        .into_iter()
+        .map(|s| s.series_id)
+        .collect()
+    }
+
+    /// The `due` filter returns only expired, resolvable markets (the exact
+    /// candidate set a resolution solver iterates), so the read scales with the
+    /// due subset rather than the whole registry.
+    #[test]
+    fn due_filter_returns_only_expired_series() {
+        cleanup();
+        let caller = test_principal(1);
+
+        let mut early = base_params();
+        early.expiry_ns = 1_000;
+        let AddSeriesResult::Ok(early_id) = add_as_creator(early, caller, 0) else {
+            panic!("early create failed");
+        };
+
+        let mut late = base_params();
+        late.expiry_ns = 5_000;
+        let AddSeriesResult::Ok(late_id) = add_as_creator(late, caller, 0) else {
+            panic!("late create failed");
+        };
+
+        // now = 2000: early (1000) has expired and is due; late (5000) is not.
+        let due = list_due_at(caller, 2_000);
+        assert!(
+            due.contains(&early_id),
+            "an expired, resolvable series must be due"
+        );
+        assert!(
+            !due.contains(&late_id),
+            "a still-open series is not yet due"
+        );
+    }
+
+    /// `None` is the only way to say "already live", so a start in the past (or
+    /// at exactly `now`) is rejected rather than silently normalized. Otherwise
     /// the same market could be registered under two different ids.
     #[test]
     fn add_series_rejects_start_at_or_before_now() {

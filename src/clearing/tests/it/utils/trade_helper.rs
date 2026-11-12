@@ -36,7 +36,7 @@ use crate::utils::constants::{CKUSDC_LEDGER, ICP_LEDGER};
 /// are never accidentally expired.
 ///
 /// `PocketIC`'s clock tracks wall time, so this must stay ahead of it. `9e18` ns
-/// is ~year 2255 — chosen to outlast the project rather than the ~2033 that the
+/// is ~year 2255, chosen to outlast the project rather than the ~2033 that the
 /// old `2e18` literal would have hit, which was close enough to eventually turn
 /// into a spurious suite-wide failure.
 const DEFAULT_TEST_EXPIRY_NS: u64 = 9_000_000_000_000_000_000;
@@ -67,6 +67,14 @@ pub trait TradeHelperTrait {
         &self,
         underlying: &str,
         strike_value: u128,
+        balance_domain: BalanceDomain,
+    ) -> SeriesId;
+    /// Registers a `Linear` (forward/NDF/future) series with the given
+    /// settlement cap (6-decimal value), returning its id.
+    fn add_linear_series(
+        &self,
+        underlying: &str,
+        settlement_cap_value: u128,
         balance_domain: BalanceDomain,
     ) -> SeriesId;
     /// Registers a binary series whose trading window opens `opens_in_ns` after
@@ -315,6 +323,7 @@ impl TradeHelperTrait for TestSetup {
             start_ns,
             payoff_type: PayoffType::Binary,
             strike: Some(Price::new(strike_value, 6)),
+            settlement_cap: None,
             price_precision: 6,
             payout_unit: PayoutUnit::usd(),
             oracle_source: "Chainlink".to_owned(),
@@ -343,6 +352,54 @@ impl TradeHelperTrait for TestSetup {
         let series_id = match add_series_res {
             AddSeriesResult::Ok(id) => id,
             AddSeriesResult::Err(e) => panic!("Add series failed: {e:?}"),
+        };
+        self.pic.tick();
+        series_id
+    }
+
+    fn add_linear_series(
+        &self,
+        underlying: &str,
+        settlement_cap_value: u128,
+        balance_domain: BalanceDomain,
+    ) -> SeriesId {
+        let series_params = AddSeriesParams {
+            resolution: Resolution::new("Settles to oracle spot at expiry"),
+            underlying: underlying.to_owned(),
+            balance_domain,
+            expiry_ns: 2_000_000_000_000_000_000,
+            start_ns: None,
+            payoff_type: PayoffType::Linear,
+            strike: None,
+            settlement_cap: Some(Price::new(settlement_cap_value, 6)),
+            price_precision: 6,
+            payout_unit: PayoutUnit::usd(),
+            oracle_source: "Chainlink".to_owned(),
+            title: format!("{underlying} Forward"),
+            description: Description::plain("Test"),
+            outcomes: None,
+            icon_url: None,
+            banner_url: None,
+            trading_access: vec![],
+            engine_id: None,
+            locale: None,
+        };
+
+        let res_bytes = self
+            .pic
+            .update_call(
+                self.registry.canister_id(),
+                self.controller,
+                "add_series",
+                encode_one(series_params).unwrap(),
+            )
+            .expect("Registry add_series call failed");
+
+        let add_series_res: AddSeriesResult =
+            decode_one(&res_bytes).unwrap_or_else(|_| panic!("Failed to decode add_series result"));
+        let series_id = match add_series_res {
+            AddSeriesResult::Ok(id) => id,
+            AddSeriesResult::Err(e) => panic!("Add linear series failed: {e:?}"),
         };
         self.pic.tick();
         series_id

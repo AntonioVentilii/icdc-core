@@ -138,7 +138,7 @@ pub(crate) fn execute_trade_impl(
                 - (old_seller_margin.cast_signed())
                 - (seller_unblock_amount.unwrap_or(0).cast_signed());
 
-            Ok((
+            Ok::<_, TradeError>((
                 buyer_cash_delta,
                 seller_cash_delta,
                 b_reserved_delta,
@@ -295,8 +295,8 @@ pub(crate) fn execute_trade_impl(
         current
     });
 
-    // Single timestamp for the trade so both counterparty rows — and the
-    // price-history point derived from them — agree.
+    // Single timestamp for the trade so both counterparty rows (and the
+    // price-history point derived from them) agree.
     let timestamp = now_ns();
 
     EVENTS.with(|events| {
@@ -378,6 +378,7 @@ mod tests {
             start_ns: None,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(50_000_000_000, 8)),
+            settlement_cap: None,
             price_precision: 8,
             payout_unit: PayoutUnit::usd(),
             oracle_source: "oracle".to_owned(),
@@ -461,6 +462,7 @@ mod tests {
             start_ns: None,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(50_000_000_000, 8)),
+            settlement_cap: None,
             price_precision: 8,
             payout_unit: PayoutUnit::usd(),
             oracle_source: "oracle".to_owned(),

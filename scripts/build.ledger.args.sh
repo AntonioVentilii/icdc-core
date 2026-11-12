@@ -8,20 +8,20 @@ set -euo pipefail
 # The interface of the Init variant can be found here:
 # https://github.com/dfinity/ic/blob/d5b336cf169b3fec81385701a23e92388e8f77ae/rs/ledger_suite/icrc1/ledger/src/lib.rs#L270
 
-ECHO "Building Ledger args..."
+echo "Building Ledger args..."
 
 MODE="${1:-auto}"
 case "$MODE" in
 auto | init | upgrade) ;;
 *)
-  ECHO "Usage: $0 [auto|init|upgrade]"
-  ECHO "       mode: auto (default), init, upgrade"
+  echo "Usage: $0 [auto|init|upgrade]"
+  echo "       mode: auto (default), init, upgrade"
   exit 1
   ;;
 esac
 
 DFX_NETWORK="${DFX_NETWORK:-local}"
-ECHO "Building Ledger args for network: ${DFX_NETWORK}"
+echo "Building Ledger args for network: ${DFX_NETWORK}"
 
 if ! dfx ping "$DFX_NETWORK" >/dev/null 2>&1; then
   echo "ERROR: Unknown DFX network '${DFX_NETWORK:-<unset>}'"

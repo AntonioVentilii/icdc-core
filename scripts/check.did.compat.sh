@@ -43,7 +43,7 @@ command -v didc >/dev/null 2>&1 || {
 
 # Fail loudly if the baseline does not resolve to a commit. Without this an
 # unfetched ref or a typoed SHA would make every `git cat-file` below miss, be
-# read as "interface absent at baseline", and skip every check — a false green.
+# read as "interface absent at baseline", and skip every check: a false green.
 BASELINE_COMMIT="$(git rev-parse --verify --quiet "${BASELINE}^{commit}")" || {
   echo "error: baseline '${BASELINE}' does not resolve to a commit." >&2
   echo "  Pass a valid ref/SHA, or fetch it first (e.g. git fetch origin main)." >&2

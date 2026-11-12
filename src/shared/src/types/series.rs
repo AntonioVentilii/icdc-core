@@ -71,6 +71,12 @@ pub enum PayoffType {
     Put,
     /// A categorical market with multiple mutually exclusive outcomes.
     Categorical,
+    /// A linear (delta-one) payoff `net_qty · (S_T − F)`: outright forwards,
+    /// non-deliverable forwards (NDFs), and dated futures. The agreed forward
+    /// rate `F` is the trade price (captured in reserved margin, like an option
+    /// premium); settlement is bounded to `[0, settlement_cap]` to keep the
+    /// system solvent without a running liquidation engine. See ADR 0001.
+    Linear,
 }
 impl PayoffType {
     /// Returns the unique identifier bytes used for ID generation.
@@ -81,6 +87,7 @@ impl PayoffType {
             PayoffType::Call => b"CALL",
             PayoffType::Put => b"PUT",
             PayoffType::Categorical => b"CATEGORICAL",
+            PayoffType::Linear => b"LINEAR",
         }
     }
 }
@@ -105,7 +112,7 @@ pub struct Series {
     pub expiry_ns: u64,
     /// Optional timestamp in nanoseconds since UNIX epoch at which trading opens.
     ///
-    /// `None` means the series is tradeable from the moment it is registered —
+    /// `None` means the series is tradeable from the moment it is registered:
     /// the historical behavior, and the canonical way to express "live now".
     /// `Some(t)` schedules the series: it is listed and discoverable immediately
     /// but trading is rejected until `t`. The window is inclusive at the open
@@ -116,7 +123,7 @@ pub struct Series {
     /// series that differ only in their trading window are distinct contracts,
     /// so a scheduled series can never silently collide with an already-live one
     /// and inherit a start date its creator did not ask for. To keep that
-    /// guarantee meaningful `None` is the only encoding of "already live" —
+    /// guarantee meaningful, `None` is the only encoding of "already live":
     /// `add_series` rejects a `start_ns` at or before the current time, so the
     /// same market cannot exist under two ids.
     pub start_ns: Option<u64>,
@@ -124,6 +131,11 @@ pub struct Series {
     pub payoff_type: PayoffType,
     /// Target price for options, if applicable.
     pub strike: Option<Price>,
+    /// Upper settlement bound for `Linear` series (forwards/NDF/futures): the
+    /// fixing is clamped to `[0, settlement_cap]` at settlement and short margin
+    /// is reserved as `cap − entry`. Compulsory for `Linear`, `None` otherwise.
+    /// Additive `opt` field, so no state migration is required (see ADR 0001).
+    pub settlement_cap: Option<Price>,
     /// The canonical number of decimals used for prices and strikes in this series.
     pub price_precision: u8,
     /// The unit in which the contract payoff is expressed.
@@ -154,7 +166,7 @@ pub struct Series {
     /// The domain this market belongs to (e.g. Playground, Settlement).
     pub balance_domain: BalanceDomain,
     /// The set of trading access policies governing who may trade this series.
-    /// **Must never be empty** — every series carries at least one policy.
+    /// **Must never be empty**: every series carries at least one policy.
     ///
     /// Evaluated as a logical OR: a caller is authorized if **any** policy
     /// in the list grants them access.
@@ -180,7 +192,7 @@ pub struct Series {
     /// localized clones of the same market).
     ///
     /// When `None`, consumers should assume the default locale `"en"` and are
-    /// responsible for translating into the user's preferred locale — the
+    /// responsible for translating into the user's preferred locale; the
     /// canister never stores translations on-chain.
     pub locale: Option<String>,
 }
@@ -258,6 +270,15 @@ impl Series {
         hasher.update(b"|ORACLE|");
         hasher.update(params.oracle_source.as_bytes());
 
+        // Appended only when present so existing (cap-less) series ids are
+        // unchanged; distinguishes `Linear` series that differ only by their
+        // settlement cap.
+        if let Some(cap) = params.settlement_cap {
+            hasher.update(b"|SETTLEMENT_CAP|");
+            hasher.update(cap.value().to_be_bytes());
+            hasher.update([cap.decimals()]);
+        }
+
         if let Some(source) = params.forked_from {
             hasher.update(b"|FORKED_FROM|");
             hasher.update(source.as_str().as_bytes());
@@ -280,7 +301,7 @@ impl Series {
 
     /// Returns where `now` falls in this series' trading window.
     ///
-    /// The window is `[start_ns, expiry_ns)` — inclusive at the open so the
+    /// The window is `[start_ns, expiry_ns)`: inclusive at the open so the
     /// series is live at exactly the announced instant, exclusive at the close
     /// to match the pre-existing expiry semantics (a series expires *at*
     /// `expiry_ns`, see [`ListSeriesParams::matches_expiry`]).
@@ -302,11 +323,38 @@ impl Series {
     /// Returns true when `now` falls inside this series' trading window.
     ///
     /// This is the registry's half of the "currently tradeable" predicate. It is
-    /// purely a function of the clock and the series' own window — settlement
+    /// purely a function of the clock and the series' own window. Settlement
     /// state and trading access are owned elsewhere and checked separately.
     #[must_use]
     pub fn is_tradeable_at(&self, now: u64) -> bool {
         matches!(self.status(now), SeriesStatus::Live)
+    }
+
+    /// Returns true when this series carries the minimal structural data its
+    /// payoff model needs to be resolved.
+    ///
+    /// A market can be past expiry yet not meaningfully resolvable: a `Call`/`Put`
+    /// with no `strike` has no reference to settle against (the clearing
+    /// canister's `get_unit_payoff` returns `MissingStrike` for it), a
+    /// `Categorical` with no declared `outcomes` has nothing to resolve to, and a
+    /// `Linear` with no `settlement_cap` has no band to clamp the fixing into
+    /// (`get_unit_payoff` returns `MissingSettlementCap`). A resolution solver
+    /// should skip such a market rather than treat it as due work. `Binary` needs
+    /// only the settlement price the oracle supplies at resolution, so it is
+    /// always structurally resolvable.
+    ///
+    /// This is a pure function of the series (the settlement price itself is
+    /// provided by the oracle at resolution time, not stored here), so it reports
+    /// only whether the *contract* is resolvable, not whether an oracle value is
+    /// available yet.
+    #[must_use]
+    pub fn has_resolvable_payoff(&self) -> bool {
+        match self.payoff_type {
+            PayoffType::Binary => true,
+            PayoffType::Call | PayoffType::Put => self.strike.is_some(),
+            PayoffType::Categorical => self.outcomes.as_ref().is_some_and(|o| !o.is_empty()),
+            PayoffType::Linear => self.settlement_cap.is_some(),
+        }
     }
 }
 
@@ -318,7 +366,7 @@ impl Series {
 /// make the registry's answer depend on state it does not hold.
 #[derive(CandidType, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SeriesStatus {
-    /// `start_ns` is set and still in the future — listed, but not yet tradeable.
+    /// `start_ns` is set and still in the future: listed, but not yet tradeable.
     Upcoming,
     /// Inside the trading window: at or past `start_ns`, strictly before `expiry_ns`.
     Live,
@@ -377,6 +425,8 @@ pub struct SeriesIdParams<'a> {
     pub start_ns: Option<u64>,
     pub payoff_type: &'a PayoffType,
     pub strike: Option<&'a Price>,
+    /// Upper settlement bound for `Linear` series; hashed only when present.
+    pub settlement_cap: Option<&'a Price>,
     pub price_precision: u8,
     pub payout_unit: &'a PayoutUnit,
     pub outcomes: Option<&'a [Outcome]>,
@@ -435,6 +485,17 @@ pub enum SeriesError {
     InvalidLocale,
     /// Returned when the targeted series does not exist.
     SeriesNotFound,
+    /// A `Linear` series requires a `settlement_cap`.
+    LinearRequiresSettlementCap,
+    /// A `Linear` series must not define categorical `outcomes`.
+    LinearRejectsOutcomes,
+    /// A `Linear` series must not define a `strike`: the forward rate is the
+    /// trade price, not a series-fixed strike.
+    LinearRejectsStrike,
+    /// `settlement_cap` was provided on a non-`Linear` series.
+    SettlementCapOnlyForLinear,
+    /// The provided `settlement_cap` is not strictly positive.
+    InvalidSettlementCap,
     /// The provided `start_ns` is at or before the registry's current time.
     ///
     /// A series that is already live must be registered with `start_ns: None`,
@@ -464,6 +525,9 @@ pub struct AddSeriesParams {
     pub payoff_type: PayoffType,
     /// The option strike price, if applicable.
     pub strike: Option<Price>,
+    /// Upper settlement bound for `Linear` series (forwards/NDF/futures).
+    /// Compulsory for `Linear`, `None` otherwise. See `Series::settlement_cap`.
+    pub settlement_cap: Option<Price>,
     /// The number of decimals used for prices and strikes in this series.
     pub price_precision: u8,
     /// The unit in which the contract payoff is expressed.
@@ -475,7 +539,7 @@ pub struct AddSeriesParams {
     /// A detailed description of the series.
     pub description: Description,
     /// The settlement terms describing how this market resolves.
-    /// Compulsory — every new series must state how it settles.
+    /// Compulsory: every new series must state how it settles.
     pub resolution: Resolution,
     /// The defined outcomes for categorical markets (ordered).
     pub outcomes: Option<Vec<Outcome>>,
@@ -484,7 +548,7 @@ pub struct AddSeriesParams {
     /// An optional banner URL for the market.
     pub banner_url: Option<String>,
     /// Initial trading access policies for the new series.
-    /// **Must not be empty** — pass at least `[Open]`.
+    /// **Must not be empty**: pass at least `[Open]`.
     ///
     /// Controls who may submit orders on this market once it is registered.
     /// Pass `[Restricted { groups: [g1, g2, ...] }]` to limit trading to
@@ -551,8 +615,8 @@ impl PaginationParams {
     ///
     /// The returned cursor is the [`SeriesId`] of the **last item returned** in
     /// this page, not the first un-returned one. Every resume path treats the
-    /// cursor as exclusive — the registry ranges with `Bound::Excluded(cursor)`
-    /// and the fallback below skips `id <= cursor` — so handing back the
+    /// cursor as exclusive (the registry ranges with `Bound::Excluded(cursor)`
+    /// and the fallback below skips `id <= cursor`), so handing back the
     /// last-returned id resumes exactly after it, dropping and repeating
     /// nothing. (Returning the first un-returned id here would skip it on the
     /// next call, losing one item per page boundary.) This matches the cursor
@@ -577,7 +641,7 @@ impl PaginationParams {
         // Pre-allocate the vector with a sensible cap (100) to prevent
         // massive allocations if the requested limit is extremely high.
         let mut items = Vec::with_capacity(min(limit, 100));
-        // Id of the last item pushed this page — becomes the exclusive cursor.
+        // Id of the last item pushed this page; it becomes the exclusive cursor.
         let mut last_id: Option<&SeriesId> = None;
 
         // Fallback: Skip items up to the cursor if the caller didn't use a range optimization.
@@ -622,7 +686,7 @@ pub struct ListSeriesParams {
     /// Filter by a search term in the title or description (case-insensitive, partial match).
     pub search_term: Option<String>,
     /// When `Some(true)`, exclude series whose `expiry_ns` is at or before the
-    /// registry's current time — i.e. return only series that are still open
+    /// registry's current time, i.e. return only series that are still open
     /// for trading. `Some(false)` and `None` are equivalent and apply no expiry
     /// filtering (the historical behavior).
     ///
@@ -633,7 +697,7 @@ pub struct ListSeriesParams {
     /// caller (see `clearing.list_settled_series`).
     pub only_unexpired: Option<bool>,
     /// When `Some(true)`, return only series that are inside their trading
-    /// window right now — at or past `start_ns` (when set) *and* strictly before
+    /// window right now: at or past `start_ns` (when set) *and* strictly before
     /// `expiry_ns`. `Some(false)` and `None` apply no filtering.
     ///
     /// This is strictly narrower than [`Self::only_unexpired`], which admits
@@ -645,6 +709,23 @@ pub struct ListSeriesParams {
     /// Like the expiry cutoff, the clock is the canister's own server-side
     /// `time()`.
     pub tradeable_now: Option<bool>,
+    /// When `Some(true)`, return only series that are **due for resolution**: at
+    /// or past `expiry_ns`, carrying a non-empty resolution clause, and with a
+    /// payoff model that has the data required to settle (see
+    /// [`Series::has_resolvable_payoff`]). `Some(false)` and `None` apply no
+    /// filtering.
+    ///
+    /// This is the exact candidate set a resolution solver iterates: markets that
+    /// have expired but not yet settled and can actually be resolved. It is the
+    /// mirror image of [`Self::tradeable_now`] on the expiry axis (expired rather
+    /// than live) and lets the caller fetch only the due subset instead of paging
+    /// the whole registry and discarding most of it. Settlement state itself is
+    /// owned by the clearing canister, so a caller still subtracts the
+    /// already-settled ids (see `clearing.list_settled_series`) from this set.
+    ///
+    /// Like the other clock-dependent filters, the expiry cutoff uses the
+    /// canister's own server-side `time()`.
+    pub due: Option<bool>,
     /// Optional pagination parameters.
     pub pagination: Option<PaginationParams>,
 }
@@ -724,8 +805,8 @@ impl ListSeriesParams {
     /// Returns true if `series` satisfies the `only_unexpired` filter relative to
     /// `now` (nanoseconds since the UNIX epoch).
     ///
-    /// Kept separate from [`Self::matches`] — which is a pure function of the
-    /// filter and the series — because the expiry cutoff depends on the caller's
+    /// Kept separate from [`Self::matches`] (which is a pure function of the
+    /// filter and the series) because the expiry cutoff depends on the caller's
     /// notion of "now". The registry passes its own `time()` so the cutoff is
     /// server-authoritative.
     ///
@@ -758,13 +839,38 @@ impl ListSeriesParams {
         }
     }
 
+    /// Returns true if `series` satisfies the `due` filter relative to `now`
+    /// (nanoseconds since the UNIX epoch).
+    ///
+    /// A series is due when it is at or past `expiry_ns` (the same
+    /// [`SeriesStatus::Expired`] boundary the rest of the system uses; expiry is
+    /// inclusive), carries a non-empty resolution clause, and has a resolvable
+    /// payoff (see [`Series::has_resolvable_payoff`]). Kept separate from
+    /// [`Self::matches`] because the expiry half depends on the caller's notion of
+    /// "now"; the registry supplies its own `time()` so the cutoff stays
+    /// server-authoritative.
+    ///
+    /// When the filter is unset or `Some(false)`, every series passes.
+    #[must_use]
+    pub fn matches_due(&self, series: &Series, now: u64) -> bool {
+        if self.due == Some(true) {
+            now >= series.expiry_ns
+                && !series.resolution.clause.trim().is_empty()
+                && series.has_resolvable_payoff()
+        } else {
+            true
+        }
+    }
+
     /// Applies every clock-dependent filter at once.
     ///
-    /// Convenience for call sites that must not forget one of the two: adding a
-    /// third time-based filter later extends this and every caller picks it up.
+    /// Convenience for call sites that must not forget one of them: adding a
+    /// further time-based filter later extends this and every caller picks it up.
     #[must_use]
     pub fn matches_time(&self, series: &Series, now: u64) -> bool {
-        self.matches_expiry(series, now) && self.matches_tradeable_now(series, now)
+        self.matches_expiry(series, now)
+            && self.matches_tradeable_now(series, now)
+            && self.matches_due(series, now)
     }
 }
 
@@ -871,7 +977,7 @@ mod tests {
     use candid::Principal;
 
     use crate::types::{
-        series::{is_valid_locale, ListSeriesParams, PaginationParams, SeriesStatus},
+        series::{is_valid_locale, ListSeriesParams, Outcome, PaginationParams, SeriesStatus},
         BalanceDomain, Description, PayoffType, PayoutUnit, Price, Resolution, Series, SeriesId,
         SeriesIdParams, TradingAccess,
     };
@@ -886,6 +992,7 @@ mod tests {
             start_ns: None,
             payoff_type: PayoffType::Binary,
             strike: None,
+            settlement_cap: None,
             price_precision: 8,
             payout_unit: PayoutUnit::usd(),
             outcomes: None,
@@ -906,7 +1013,7 @@ mod tests {
     }
 
     /// Walking every page with a fixed `limit` must reproduce the full ordered
-    /// set exactly — no item dropped at a page boundary, none repeated. This is
+    /// set exactly: no item dropped at a page boundary, none repeated. This is
     /// a regression test for an off-by-one where `next_cursor` pointed at the
     /// first *un-returned* item while the resume path treats the cursor as
     /// exclusive, silently skipping that item.
@@ -954,7 +1061,7 @@ mod tests {
 
     /// Mirrors how the registry actually resumes: it pre-ranges the store with
     /// `Bound::Excluded(cursor)` before handing the iterator to `apply`. The
-    /// returned cursor must be exclusive-resume-safe through that path too —
+    /// returned cursor must be exclusive-resume-safe through that path too:
     /// every item returned exactly once, in order.
     #[test]
     fn pagination_through_excluded_range_resume_has_no_drops() {
@@ -1088,6 +1195,7 @@ mod tests {
             start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1104,6 +1212,7 @@ mod tests {
             start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1132,6 +1241,7 @@ mod tests {
             start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1148,6 +1258,7 @@ mod tests {
             start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1176,6 +1287,7 @@ mod tests {
             start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: 8,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1192,6 +1304,7 @@ mod tests {
             start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: 10,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1222,6 +1335,7 @@ mod tests {
             start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1238,6 +1352,7 @@ mod tests {
             start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1268,6 +1383,7 @@ mod tests {
             start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1284,6 +1400,7 @@ mod tests {
             start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1300,6 +1417,7 @@ mod tests {
             start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1334,6 +1452,7 @@ mod tests {
             start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1350,6 +1469,7 @@ mod tests {
             start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1366,6 +1486,7 @@ mod tests {
             start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: precision,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1391,6 +1512,7 @@ mod tests {
             start_ns: None,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(100, 8)),
+            settlement_cap: None,
             price_precision: 8,
             payout_unit: PayoutUnit::usd(),
             outcomes: None,
@@ -1431,6 +1553,7 @@ mod tests {
                 start_ns: None,
                 payoff_type: &series.payoff_type,
                 strike: series.strike.as_ref(),
+                settlement_cap: None,
                 price_precision: series.price_precision,
                 payout_unit: &series.payout_unit,
                 outcomes: series.outcomes.as_deref(),
@@ -1449,6 +1572,7 @@ mod tests {
             start_ns: None,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(100, 8)),
+            settlement_cap: None,
             price_precision: 8,
             payout_unit: PayoutUnit::usd(),
             outcomes: None,
@@ -1529,7 +1653,7 @@ mod tests {
     ///
     /// `start_ns: None` must hash byte-identically to how it did before the field
     /// existed, otherwise every already-registered series would change id on
-    /// upgrade. This golden value predates `start_ns` — if a change to
+    /// upgrade. This golden value predates `start_ns`: if a change to
     /// `generate_id` breaks it, that change is not backward compatible.
     #[test]
     fn unscheduled_series_id_is_unchanged_by_start_ns() {
@@ -1543,6 +1667,7 @@ mod tests {
             start_ns: None,
             payoff_type: &payoff_type,
             strike: strike.as_ref(),
+            settlement_cap: None,
             price_precision: 8,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1569,6 +1694,7 @@ mod tests {
             start_ns,
             payoff_type: &payoff_type,
             strike: None,
+            settlement_cap: None,
             price_precision: 8,
             payout_unit: &payout_unit,
             outcomes: None,
@@ -1660,9 +1786,125 @@ mod tests {
         assert!(!params.matches_time(&upcoming, 250), "expired");
     }
 
+    // --- due filter -------------------------------------------------------
+
+    /// `has_resolvable_payoff` must dereference exactly the fields the clearing
+    /// canister's payoff formula needs: nothing extra for `Binary`, a `strike`
+    /// for `Call`/`Put`, and at least one outcome for `Categorical`.
+    #[test]
+    fn has_resolvable_payoff_matches_required_data() {
+        let mut binary = series_with_id("s");
+        binary.payoff_type = PayoffType::Binary;
+        binary.strike = None;
+        assert!(binary.has_resolvable_payoff(), "binary needs no strike");
+
+        let mut call_no_strike = series_with_id("s");
+        call_no_strike.payoff_type = PayoffType::Call;
+        call_no_strike.strike = None;
+        assert!(
+            !call_no_strike.has_resolvable_payoff(),
+            "a call with no strike cannot settle"
+        );
+
+        let mut put_with_strike = series_with_id("s");
+        put_with_strike.payoff_type = PayoffType::Put;
+        put_with_strike.strike = Some(Price::new(100, 8));
+        assert!(put_with_strike.has_resolvable_payoff());
+
+        let mut categorical_empty = series_with_id("s");
+        categorical_empty.payoff_type = PayoffType::Categorical;
+        categorical_empty.outcomes = Some(vec![]);
+        assert!(
+            !categorical_empty.has_resolvable_payoff(),
+            "a categorical with no outcomes cannot settle"
+        );
+
+        let mut categorical = series_with_id("s");
+        categorical.payoff_type = PayoffType::Categorical;
+        categorical.outcomes = Some(vec![Outcome {
+            id: "yes".to_owned().into(),
+            title: "Yes".to_owned(),
+            description: None,
+            icon_url: None,
+        }]);
+        assert!(categorical.has_resolvable_payoff());
+    }
+
+    /// A due series is expired (expiry is inclusive), resolvable, and carries a
+    /// resolution clause.
+    #[test]
+    fn due_filter_selects_expired_resolvable_series() {
+        let series = windowed_series(None, 200); // Binary, clause "r", no strike needed
+
+        let params = ListSeriesParams {
+            due: Some(true),
+            ..Default::default()
+        };
+
+        assert!(!params.matches_due(&series, 199), "still live, not due");
+        assert!(
+            params.matches_due(&series, 200),
+            "due at exactly expiry (inclusive)"
+        );
+        assert!(params.matches_due(&series, 250), "still due after expiry");
+    }
+
+    /// An expired market whose payoff cannot be settled (a call with no strike)
+    /// is not due work: the solver would only hit a payoff error on it.
+    #[test]
+    fn due_filter_excludes_unresolvable_expired_series() {
+        let mut series = windowed_series(None, 200);
+        series.payoff_type = PayoffType::Call;
+        series.strike = None;
+
+        let params = ListSeriesParams {
+            due: Some(true),
+            ..Default::default()
+        };
+
+        assert!(
+            !params.matches_due(&series, 250),
+            "expired but unresolvable must be excluded"
+        );
+    }
+
+    /// An expired market with a blank resolution clause is not due: there is no
+    /// stated rule to resolve it by. (`add_series` rejects empty clauses, so this
+    /// guards a defensive edge rather than a common state.)
+    #[test]
+    fn due_filter_excludes_blank_resolution_clause() {
+        let mut series = windowed_series(None, 200);
+        series.resolution = Resolution::new("   ");
+
+        let params = ListSeriesParams {
+            due: Some(true),
+            ..Default::default()
+        };
+
+        assert!(!params.matches_due(&series, 250));
+    }
+
+    /// `due` unset or `Some(false)` filters nothing.
+    #[test]
+    fn due_filter_unset_admits_everything() {
+        let live = windowed_series(None, 200);
+
+        let unset = ListSeriesParams::default();
+        assert!(unset.matches_due(&live, 50), "None applies no filter");
+
+        let disabled = ListSeriesParams {
+            due: Some(false),
+            ..Default::default()
+        };
+        assert!(
+            disabled.matches_due(&live, 50),
+            "Some(false) applies no filter"
+        );
+    }
+
     /// Stable state written before `start_ns` existed must still decode, with the
     /// field defaulting to `None`. Candid treats an absent `opt` record field as
-    /// null, which is why this needs no migration — but the guarantee is load
+    /// null, which is why this needs no migration, but the guarantee is load
     /// bearing enough to pin with a test.
     #[test]
     fn legacy_blob_without_start_ns_decodes_as_none() {
