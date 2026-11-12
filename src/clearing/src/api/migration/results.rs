@@ -1,5 +1,6 @@
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
+use shared::impl_from_result;
 
 use super::errors::MigrationError;
 
@@ -9,11 +10,4 @@ pub enum MigrateDomainResult {
     Err(MigrationError),
 }
 
-impl From<Result<(), MigrationError>> for MigrateDomainResult {
-    fn from(res: Result<(), MigrationError>) -> Self {
-        match res {
-            Ok(()) => Self::Ok,
-            Err(e) => Self::Err(e),
-        }
-    }
-}
+impl_from_result!(MigrateDomainResult, (), MigrationError);

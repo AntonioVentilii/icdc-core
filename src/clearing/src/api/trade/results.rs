@@ -1,6 +1,9 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
-use shared::types::{Price, SeriesId};
+use shared::{
+    impl_from_result,
+    types::{Price, SeriesId},
+};
 
 use crate::{api::trade::errors::TradeError, types::event::SeriesTradePoint};
 
@@ -12,14 +15,7 @@ pub enum SubmitMatchedTradeResult {
     /// Failed to submit or match the trade.
     Err(TradeError),
 }
-impl From<Result<bool, TradeError>> for SubmitMatchedTradeResult {
-    fn from(value: Result<bool, TradeError>) -> Self {
-        match value {
-            Ok(v) => SubmitMatchedTradeResult::Ok(v),
-            Err(e) => SubmitMatchedTradeResult::Err(e),
-        }
-    }
-}
+impl_from_result!(SubmitMatchedTradeResult, bool, TradeError);
 
 /// Outcome of a position transfer acceptance.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -29,14 +25,7 @@ pub enum AcceptPositionTransferResult {
     /// Failed to accept the position transfer.
     Err(TradeError),
 }
-impl From<Result<bool, TradeError>> for AcceptPositionTransferResult {
-    fn from(value: Result<bool, TradeError>) -> Self {
-        match value {
-            Ok(v) => AcceptPositionTransferResult::Ok(v),
-            Err(e) => AcceptPositionTransferResult::Err(e),
-        }
-    }
-}
+impl_from_result!(AcceptPositionTransferResult, bool, TradeError);
 
 /// A page of executed trades scoped to a single series.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, Default)]

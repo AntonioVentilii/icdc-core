@@ -2,6 +2,8 @@ use candid::{CandidType, Deserialize, Nat, Principal};
 use icrc_ledger_types::icrc1::transfer::{BlockIndex, TransferError};
 use serde::Serialize;
 
+use crate::impl_from_result;
+
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct Config {
     pub ledger_canister: Principal,
@@ -33,14 +35,7 @@ pub enum ConfigResult {
     Err(String),
 }
 
-impl From<Result<Config, String>> for ConfigResult {
-    fn from(value: Result<Config, String>) -> Self {
-        match value {
-            Ok(v) => ConfigResult::Ok(v),
-            Err(e) => ConfigResult::Err(e),
-        }
-    }
-}
+impl_from_result!(ConfigResult, Config, String);
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub struct MintParams {

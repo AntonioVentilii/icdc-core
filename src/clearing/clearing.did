@@ -512,7 +512,7 @@ type LeaderboardPage = record {
 type LeaderboardWindow = variant {
 	// All settlements ever, in one period.
 	AllTime;
-	// Current ISO week (Monday–Sunday, UTC).
+	// Current ISO week (Monday to Sunday, UTC).
 	Week;
 	// Current calendar month (UTC).
 	Month
