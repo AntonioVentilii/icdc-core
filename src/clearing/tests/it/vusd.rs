@@ -54,7 +54,7 @@ fn vusd_ledger_controllers() {
 
 #[test]
 fn complex_available_margin_check() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(54);
     let user_b = test_user(55);
 
@@ -115,8 +115,8 @@ fn complex_available_margin_check() {
     if let GetAccountStateResult::Ok(resp) = state_final {
         assert_eq!(
             resp.state.get_cash_balance_usd(BalanceDomain::Settlement),
-            -500_000,
-            "Cash balance should be negative $50"
+            0,
+            "Cash balance should be 0 (no deduction for margin in new model)"
         );
         assert_eq!(
             resp.total_equity_usd, 2_205_000,
@@ -160,7 +160,7 @@ fn vusd_registration_checks() {
     // 2. Verify vUSD is NOT in collateral assets list
     let collateral_assets: Vec<CollateralAssetInfo> = env
         .clearing
-        .query(env.user, "get_collateral_assets", ())
+        .query(env.user, "list_collateral_assets", ())
         .unwrap();
     assert!(collateral_assets
         .iter()

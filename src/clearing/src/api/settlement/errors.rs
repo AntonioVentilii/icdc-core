@@ -1,6 +1,6 @@
 use candid::CandidType;
 use serde::{Deserialize, Serialize};
-use shared::types::{asset::errors::AssetError, Price};
+use shared::types::{asset::errors::AssetError, SettlementInput};
 
 use crate::types::errors::CommonError;
 
@@ -18,9 +18,15 @@ pub enum SettlementError {
         total_net_payoff: u128,
         total_collateral_usd: u128,
     },
-    /// Settlement price inconsistent with already executing plan.
-    InconsistentSettlementPrice {
-        existing: Box<Price>,
-        requested: Box<Price>,
+    /// A second `settle_series` call arrived with a `SettlementInput` that does
+    /// not match the one already locked in by the in-flight plan.
+    ///
+    /// Covers both `Price` and `Outcome` settlement types: the variant that's
+    /// locked is stored in `existing`, and the one just attempted is in
+    /// `requested`. Callers that need to surface a human-readable diff can
+    /// pattern-match on both variants without losing information.
+    InconsistentSettlement {
+        existing: Box<SettlementInput>,
+        requested: Box<SettlementInput>,
     },
 }

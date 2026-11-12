@@ -3,7 +3,7 @@ use serde::Serialize;
 
 use super::errors::{BlockingError, DepositCollateralError, WithdrawCollateralError};
 
-/// Result of a collateral blocking operation.
+/// Outcome of a collateral blocking operation.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum BlockCollateralResult {
     /// Collateral was successfully blocked.
@@ -20,7 +20,7 @@ impl From<Result<(), BlockingError>> for BlockCollateralResult {
     }
 }
 
-/// Result of a collateral unblocking operation.
+/// Outcome of a collateral unblocking operation.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum UnblockCollateralResult {
     /// Collateral was successfully unblocked.
@@ -37,7 +37,7 @@ impl From<Result<(), BlockingError>> for UnblockCollateralResult {
     }
 }
 
-/// Result of a collateral deposit operation.
+/// Outcome of a collateral deposit operation.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum DepositCollateralResult {
     /// Deposit was successfully planned or executed.
@@ -54,7 +54,7 @@ impl From<Result<(), DepositCollateralError>> for DepositCollateralResult {
     }
 }
 
-/// Result of a collateral withdrawal operation.
+/// Outcome of a collateral withdrawal operation.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum WithdrawCollateralResult {
     /// Withdrawal was successfully planned or executed.

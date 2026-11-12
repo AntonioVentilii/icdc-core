@@ -1,26 +1,33 @@
 use core::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 
-use ic_cdk::{caller, id};
+use candid::Principal;
+use ic_cdk::api::{canister_self, msg_caller};
 use ic_cdk_macros::{query, update};
 use shared::{
     constants::USD_DECIMALS,
-    types::{PayoffType, Series, SeriesId},
+    types::{PayoffType, Series, SeriesId, TradingAccess},
 };
 
 use super::{
     errors::TradeError,
     params::{
-        CancelLimitOrderParams, FreezePositionForTransferParams, ListOrdersParams,
+        CancelLimitOrderParams, FreezePositionForTransferParams, GetSeriesPriceHistoryParams,
+        ListOrdersParams, ListSeriesTradeHistoryParams, ListSeriesTradedVolumesParams,
         SubmitLimitOrderParams, SubmitMarketOrderParams, SubmitMatchedTradeParams,
     },
-    results::{AcceptPositionTransferResult, SubmitMatchedTradeResult},
+    results::{
+        AcceptPositionTransferResult, SeriesPriceCandle, SeriesPriceHistory,
+        SeriesTradeHistoryPage, SeriesTradedVolume, SubmitMatchedTradeResult,
+    },
 };
 use crate::{
+    account::reassignment::ReassignmentGuard,
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
         ACCEPTED_TRANSFERS, ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, EVENTS,
-        FROZEN_TRANSFERS, LIMIT_ORDERS, POSITIONS,
+        EXECUTED_TRADES, FROZEN_TRANSFERS, LIMIT_ORDERS, POSITIONS, REGISTRY_CANISTER,
+        SERIES_TRADED_VOLUME, SERIES_TRADE_HISTORY,
     },
     payoffs::{get_required_margin, scale_price, RoundingMode},
     trade::{
@@ -29,13 +36,17 @@ use crate::{
     },
     types::{
         errors::CommonError,
-        event::{Event, EventType},
+        event::{Event, EventType, SeriesTradePoint},
         margin::{AccountState, Position, PositionsMap},
+        price_history::PriceHistoryInterval,
         state::PositionProof,
         trade::{LimitOrder, OrderId, Side, TradeId, TransferId},
         user::User,
     },
-    utils::series::ensure_series_registered,
+    utils::{
+        registry::is_trading_authorized,
+        series::{ensure_series_registered, SeriesAccess},
+    },
 };
 
 /// Submits a limit order for the caller.
@@ -44,7 +55,7 @@ use crate::{
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatchedTradeResult {
     let result: Result<bool, TradeError> = (async {
-        let caller: User = caller().into();
+        let caller: User = msg_caller().into();
 
         if params.qty <= 0 {
             return Err(TradeError::Common(CommonError::InvalidInput(
@@ -62,9 +73,16 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
             return Ok(true);
         }
 
-        let series = ensure_series_registered(&params.series_id).await?;
+        let reassignment = ReassignmentGuard::acquire(caller)?;
+
+        let series =
+            ensure_series_registered(&params.series_id, SeriesAccess::OpenExposure).await?;
+
+        check_trading_access(&series, caller.0).await?;
 
         validate_no_arbitrage(&series, &params)?;
+
+        reassignment.revalidate()?;
 
         let SubmitLimitOrderParams {
             order_id,
@@ -135,15 +153,19 @@ pub async fn submit_limit_order(params: SubmitLimitOrderParams) -> SubmitMatched
 
 /// Submits a market order to match an existing limit order.
 ///
-/// The caller is the taker.
+/// The caller is the taker. An optional `qty` caps the fill: the trade executes for
+/// `min(qty, resting order qty)` at the order's price and the unfilled remainder stays
+/// on the book with proportionally reduced blocked margin. `None` fills the entire
+/// resting order.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatchedTradeResult {
     let result: Result<bool, TradeError> = (async {
-        let taker: User = caller().into();
+        let taker: User = msg_caller().into();
 
         let SubmitMarketOrderParams {
             trade_id,
             matching_order_id,
+            qty,
         } = params;
 
         let order = LIMIT_ORDERS.with(|m| {
@@ -153,9 +175,18 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
                 .ok_or(TradeError::OrderNotFound(matching_order_id.clone()))
         })?;
 
-        let series = ensure_series_registered(&order.series_id).await?;
+        // Only the taker needs a guard: the maker's account cannot be reassigned
+        // while their order is resting, because a reassignment rejects an owner
+        // that still has orders on the book.
+        let reassignment = ReassignmentGuard::acquire(taker)?;
 
-        submit_market_order_impl(taker, order, &trade_id, &series)
+        let series = ensure_series_registered(&order.series_id, SeriesAccess::OpenExposure).await?;
+
+        check_trading_access(&series, taker.0).await?;
+
+        reassignment.revalidate()?;
+
+        submit_market_order_impl(taker, &order, &trade_id, &series, qty)
     })
     .await;
 
@@ -164,41 +195,122 @@ pub async fn submit_market_order(params: SubmitMarketOrderParams) -> SubmitMatch
 
 pub(crate) fn submit_market_order_impl(
     taker: User,
-    order: LimitOrder,
+    order: &LimitOrder,
     trade_id: &TradeId,
     series: &Series,
+    requested_qty: Option<i128>,
 ) -> Result<bool, TradeError> {
-    // Verify the order still exists — it may have been cancelled during the await.
-    LIMIT_ORDERS.with(|m| {
+    if requested_qty.is_some_and(|q| q <= 0) {
+        return Err(TradeError::Common(CommonError::InvalidInput(
+            "Quantity must be positive".to_owned(),
+        )));
+    }
+
+    // Idempotency: if this trade already executed, return success without touching the
+    // book again: re-applying the book mutation would shrink the resting order a
+    // second time without a matching fill.
+    if EXECUTED_TRADES.with(|m| m.borrow().contains_key(trade_id)) {
+        return Ok(true);
+    }
+
+    // Re-read the order: it may have been cancelled or partially filled by a
+    // concurrent call during the await, so the pre-await copy's remaining quantity and
+    // blocked margin cannot be trusted.
+    let current = LIMIT_ORDERS.with(|m| {
         m.borrow()
-            .contains_key(&order.order_id)
-            .then_some(())
+            .get(&order.order_id)
+            .cloned()
             .ok_or_else(|| TradeError::OrderNotFound(order.order_id.clone()))
     })?;
 
+    // Order ids are client-chosen and become reusable the moment an order leaves the
+    // book, so the entry under this id may be a *different* order than the one the
+    // pre-await series and access checks validated. Only the quantity (and the margin
+    // blocked for it) may legitimately change (partial fills shrink both), so any
+    // other field diverging means the validated order is gone and was replaced:
+    // reject so the caller re-validates against the current book.
+    if current.creator != order.creator
+        || current.series_id != order.series_id
+        || current.outcome_id != order.outcome_id
+        || current.side != order.side
+        || current.price != order.price
+    {
+        return Err(TradeError::OrderNotFound(order.order_id.clone()));
+    }
+
+    let order = current;
+
+    let fill_qty = requested_qty.map_or(order.qty, |q| q.min(order.qty));
+    let remaining_qty = order.qty - fill_qty;
+
+    // Remaining blocked margin is recomputed with the same formula used when the limit
+    // order was placed, so `blocked - remaining` releases exactly the filled share and
+    // the leftover order stays fully collateralized.
+    let remaining_blocked_margin_usd = if remaining_qty == 0 {
+        0
+    } else {
+        let margin_qty = if order.side == Side::Sell {
+            -remaining_qty
+        } else {
+            remaining_qty
+        };
+        get_required_margin(series, &order.price, margin_qty, &order.outcome_id).map_err(|e| {
+            TradeError::Common(CommonError::Internal(format!(
+                "Payoff calculation failed: {e:?}"
+            )))
+        })?
+    };
+    // `get_required_margin` is linear in `abs(qty)`, so the margin for the remaining
+    // quantity can never exceed what the full order blocked; a violation means the
+    // order and series data are out of sync, and silently unblocking too little would
+    // strand the maker's collateral. Surface it instead; nothing has been mutated yet.
+    let unblock_amount = order
+        .blocked_margin_usd
+        .checked_sub(remaining_blocked_margin_usd)
+        .ok_or_else(|| {
+            TradeError::Common(CommonError::Internal(format!(
+                "Remaining blocked margin {remaining_blocked_margin_usd} exceeds blocked margin \
+                 {} for order {:?}",
+                order.blocked_margin_usd, order.order_id
+            )))
+        })?;
+
     let (buyer, seller, b_unblock, s_unblock) = match order.side {
-        Side::Buy => (order.creator, taker, Some(order.blocked_margin_usd), None),
-        Side::Sell => (taker, order.creator, None, Some(order.blocked_margin_usd)),
+        Side::Buy => (order.creator, taker, Some(unblock_amount), None),
+        Side::Sell => (taker, order.creator, None, Some(unblock_amount)),
     };
 
     execute_trade_impl(
         series,
         ExecuteTradeParams {
             trade_id: trade_id.clone(),
-            series_id: order.series_id,
-            outcome_id: order.outcome_id,
+            series_id: order.series_id.clone(),
+            outcome_id: order.outcome_id.clone(),
             buyer,
             seller,
-            qty: order.qty,
-            price: order.price,
+            qty: fill_qty,
+            price: order.price.clone(),
             buyer_unblock_amount: b_unblock,
             seller_unblock_amount: s_unblock,
         },
     )?;
 
-    // Only remove the order after successful execution
+    // Only mutate the book after successful execution.
     LIMIT_ORDERS.with(|m| {
-        m.borrow_mut().remove(&order.order_id);
+        let mut m = m.borrow_mut();
+        if remaining_qty == 0 {
+            m.remove(&order.order_id);
+        } else {
+            let order_id = order.order_id.clone();
+            m.insert(
+                order_id,
+                LimitOrder {
+                    qty: remaining_qty,
+                    blocked_margin_usd: remaining_blocked_margin_usd,
+                    ..order
+                },
+            );
+        }
     });
 
     Ok(true)
@@ -210,7 +322,7 @@ pub(crate) fn submit_market_order_impl(
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn cancel_limit_order(params: CancelLimitOrderParams) -> SubmitMatchedTradeResult {
     let result: Result<bool, TradeError> = (async {
-        let caller: User = caller().into();
+        let caller: User = msg_caller().into();
 
         let order_id = params.order_id;
 
@@ -221,7 +333,12 @@ pub async fn cancel_limit_order(params: CancelLimitOrderParams) -> SubmitMatched
                 if o.creator != caller {
                     return Err(TradeError::NotOrderCreator);
                 }
-                Ok(m.remove(&order_id).unwrap())
+                #[expect(
+                    clippy::unwrap_used,
+                    reason = "baseline of the quality gate: return an error instead, see docs/ai/patterns.md"
+                )]
+                let order = m.remove(&order_id).unwrap();
+                Ok(order)
             } else {
                 Err(TradeError::OrderNotFound(order_id))
             }
@@ -322,7 +439,7 @@ pub fn freeze_position_for_transfer(
                 series_id,
                 outcome_id,
                 qty: pos.net_qty,
-                clearing_id: id(),
+                clearing_id: canister_self(),
                 // Proofs are unsigned in the current cross-clearing protocol version.
                 signature: vec![],
                 valuation_price,
@@ -352,7 +469,12 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
             return Ok(true);
         }
 
-        let series = ensure_series_registered(&proof.series_id).await?;
+        let reassignment = ReassignmentGuard::acquire(proof.user)?;
+
+        let series =
+            ensure_series_registered(&proof.series_id, SeriesAccess::ReduceExposure).await?;
+
+        reassignment.revalidate()?;
 
         let valuation_price = proof
             .valuation_price
@@ -434,7 +556,7 @@ pub async fn accept_position_transfer(proof: PositionProof) -> AcceptPositionTra
 #[query(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn get_orders() -> Vec<LimitOrder> {
-    let caller: User = caller().into();
+    let caller: User = msg_caller().into();
 
     LIMIT_ORDERS.with(|orders: &RefCell<BTreeMap<OrderId, LimitOrder>>| {
         orders
@@ -446,10 +568,82 @@ pub fn get_orders() -> Vec<LimitOrder> {
     })
 }
 
+/// Verifies that a principal is authorized to trade on a series based on its
+/// [`TradingAccess`] policies.
+///
+/// # Performance
+///
+/// This function is designed for **zero overhead on open markets**:
+/// - If the series' `trading_access` contains [`TradingAccess::Open`], the function returns
+///   `Ok(())` immediately with no inter-canister call.
+/// - Only when all policies are [`TradingAccess::Restricted`] does it make a bounded-wait query to
+///   the registry canister to resolve group membership.
+///
+/// # Errors
+///
+/// * [`TradeError::Common(RegistryNotSet)`]: the registry principal is not configured.
+/// * [`TradeError::RegistryError`]: the inter-canister call to the registry failed.
+/// * [`TradeError::NotAuthorizedToTrade`]: the principal is not a member of any group referenced by
+///   the series' restricted policies.
+async fn check_trading_access(series: &Series, principal: Principal) -> Result<(), TradeError> {
+    let dominated_by_open = series
+        .trading_access
+        .iter()
+        .any(|p| matches!(p, TradingAccess::Open));
+
+    if dominated_by_open {
+        return Ok(());
+    }
+
+    let registry = REGISTRY_CANISTER.with(|r| *r.borrow());
+
+    if registry == Principal::anonymous() {
+        return Err(TradeError::Common(CommonError::RegistryNotSet));
+    }
+
+    let authorized = is_trading_authorized(registry, principal, series.series_id.clone())
+        .await
+        .map_err(|e| TradeError::RegistryError(format!("Trading access check failed: {e:?}")))?;
+
+    if authorized {
+        Ok(())
+    } else {
+        Err(TradeError::NotAuthorizedToTrade)
+    }
+}
+
 pub(crate) fn validate_no_arbitrage(
     series: &Series,
     new_order: &SubmitLimitOrderParams,
 ) -> Result<(), TradeError> {
+    // Linear (forward/NDF/future): the agreed forward rate is the order price.
+    // It must not exceed the settlement cap, or the short leg's reserved margin
+    // (`cap − entry`) would saturate to zero and leave it under-collateralized.
+    // Checked for both sides (unlike the buy-only arbitrage rule below).
+    if series.payoff_type == PayoffType::Linear {
+        let asset_decimals = u32::from(USD_DECIMALS);
+        let price_usd = scale_price(
+            new_order.price.value(),
+            asset_decimals,
+            u32::from(new_order.price.decimals()),
+            RoundingMode::Ceil,
+        );
+        let cap = series.settlement_cap.as_ref().ok_or_else(|| {
+            TradeError::Common(CommonError::Internal(
+                "Linear series missing settlement_cap".to_owned(),
+            ))
+        })?;
+        let cap_usd = scale_price(
+            cap.value(),
+            asset_decimals,
+            u32::from(cap.decimals()),
+            RoundingMode::Floor,
+        );
+        if price_usd > cap_usd {
+            return Err(TradeError::PriceExceedsSettlementCap { price_usd, cap_usd });
+        }
+    }
+
     if new_order.side != Side::Buy {
         return Ok(());
     }
@@ -465,13 +659,11 @@ pub(crate) fn validate_no_arbitrage(
     );
 
     match series.payoff_type {
-        PayoffType::Binary => {
-            if price_usd > limit_usd {
-                return Err(TradeError::ArbitrageLimitExceeded {
-                    sum_usd: price_usd,
-                    limit_usd,
-                });
-            }
+        PayoffType::Binary if price_usd > limit_usd => {
+            return Err(TradeError::ArbitrageLimitExceeded {
+                sum_usd: price_usd,
+                limit_usd,
+            });
         }
         PayoffType::Categorical => {
             let outcomes = series.outcomes.as_ref().ok_or_else(|| {
@@ -524,18 +716,261 @@ pub(crate) fn validate_no_arbitrage(
     Ok(())
 }
 
-/// Retrieves the trade history (executed trades) for the caller.
+/// Retrieves the trade history for the caller. Returns events that move the
+/// user's economic position: executed trades, settlements, and liquidations.
+/// Order-placement events are excluded so the response is bounded to events
+/// that materially settle cashflow.
+///
+/// Results are sorted by `(timestamp, event_id)` so that backfilled rows whose
+/// timestamp reflects the original settlement time interleave chronologically
+/// with live events rather than appearing in storage-insertion order.
 #[query(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn get_trade_history() -> Vec<Event> {
-    let caller: User = caller().into();
+    let caller: User = msg_caller().into();
 
     EVENTS.with(|events: &RefCell<Vec<Event>>| {
-        events
+        let mut filtered: Vec<Event> = events
             .borrow()
             .iter()
-            .filter(|e| e.user == caller && matches!(e.event_type, EventType::Executed))
+            .filter(|e| {
+                e.user == caller
+                    && matches!(
+                        e.event_type,
+                        EventType::Executed | EventType::Settled | EventType::Liquidated
+                    )
+            })
             .cloned()
+            .collect();
+        filtered.sort_by(|a, b| {
+            a.timestamp
+                .cmp(&b.timestamp)
+                .then(a.event_id.cmp(&b.event_id))
+        });
+        filtered
+    })
+}
+
+/// Returns the executed-trade history for a single series, with stable cursor
+/// pagination.
+///
+/// Unlike [`get_trade_history`], which is caller-scoped, this surfaces every
+/// participant's executed trades on `series_id`, so a front end can derive a
+/// market-wide price history (e.g. a YES-probability sparkline) from the
+/// per-trade `price`/`timestamp` rather than only the viewer's own fills.
+///
+/// Each trade is returned as a single [`SeriesTradePoint`] (the two
+/// counterparty rows are collapsed), ordered by `event_id` ascending, i.e.
+/// execution order. Served from the `SERIES_TRADE_HISTORY` index, so the read
+/// is `O(log series + page)` rather than a scan of the whole event log. The
+/// cursor is the last trade's `event_id` and is exclusive; since executed-trade
+/// `event_id`s are strictly increasing, resuming neither drops nor repeats a
+/// trade. Mirrors the pagination contract of `list_settled_series`.
+#[query(guard = "caller_is_not_anonymous")]
+#[must_use]
+pub fn list_series_trade_history(params: ListSeriesTradeHistoryParams) -> SeriesTradeHistoryPage {
+    let ListSeriesTradeHistoryParams {
+        series_id,
+        start_after,
+        limit,
+    } = params;
+
+    // Default to "all remaining" when no limit is supplied, and clamp to at
+    // least 1 so a limit of 0 still makes forward progress (returns one trade +
+    // a cursor) instead of an empty page that strands a paging caller.
+    let limit = usize::try_from(limit.unwrap_or(u64::MAX))
+        .unwrap_or(usize::MAX)
+        .max(1);
+
+    SERIES_TRADE_HISTORY.with(|idx| {
+        let idx = idx.borrow();
+        let Some(points) = idx.get(&series_id) else {
+            return SeriesTradeHistoryPage::default();
+        };
+
+        // Exclusive cursor: skip the prefix up to and including the `event_id`
+        // the caller last saw. `points` is sorted ascending by `event_id`, so
+        // `partition_point` finds the resume offset in O(log n).
+        let start = match start_after {
+            Some(cursor) => points.partition_point(|p| p.event_id <= cursor),
+            None => 0,
+        };
+
+        let remaining = &points[start..];
+        let page_len = remaining.len().min(limit);
+        let items = remaining[..page_len].to_vec();
+
+        // Emit a cursor only if at least one more trade exists beyond this page.
+        let next_cursor = (remaining.len() > page_len)
+            .then(|| items.last().map(|p| p.event_id))
+            .flatten();
+
+        SeriesTradeHistoryPage { items, next_cursor }
+    })
+}
+
+/// Upper bound on the candles one [`get_series_price_history`] call returns.
+/// Aggregated output is already far smaller than the raw tape, but an
+/// open-ended range at a fine interval (e.g. hourly over years) could still grow
+/// unboundedly; capping keeps the read within the replica's instruction and
+/// response-size budget. When the range yields more buckets than this, the most
+/// recent ones are kept (a chart reads the latest window). The cap bounds the
+/// *work* too, not just the payload (see [`aggregate_price_history`]).
+const MAX_PRICE_HISTORY_POINTS: usize = 1_000;
+
+/// Returns a single series' executed trades aggregated into fixed-width
+/// [`PriceHistoryInterval`] candles (open/high/low/close + volume + trade
+/// count), time-ordered, so a front end can render a time-scoped consensus/price
+/// chart without fetching and re-bucketing the raw per-trade tape that
+/// [`list_series_trade_history`] returns.
+///
+/// `start_time`/`end_time` window the trades considered (inclusive lower,
+/// exclusive upper), letting the caller request just the window it draws; the
+/// `interval` selects hourly or daily resolution. Buckets with no trades are
+/// omitted (a young or untraded market returns an empty history rather than
+/// fabricated points), and the result is capped at [`MAX_PRICE_HISTORY_POINTS`]
+/// most-recent candles.
+///
+/// Served from the same `SERIES_TRADE_HISTORY` index as
+/// [`list_series_trade_history`], so it adds no write-path cost and no persisted
+/// state. Aggregation scans newest-first and stops once it has filled
+/// [`MAX_PRICE_HISTORY_POINTS`] buckets, so both the work and the payload are
+/// bounded even when `start_time`/`end_time` are open-ended (see
+/// [`aggregate_price_history`]). Guarded by `caller_is_not_anonymous`, matching
+/// the other series-scoped reads.
+#[query(guard = "caller_is_not_anonymous")]
+#[must_use]
+pub fn get_series_price_history(params: GetSeriesPriceHistoryParams) -> SeriesPriceHistory {
+    let GetSeriesPriceHistoryParams {
+        series_id,
+        interval,
+        start_time,
+        end_time,
+    } = params;
+
+    SERIES_TRADE_HISTORY.with(|idx| {
+        let idx = idx.borrow();
+        match idx.get(&series_id) {
+            Some(points) => aggregate_price_history(points, interval, start_time, end_time),
+            None => SeriesPriceHistory::default(),
+        }
+    })
+}
+
+/// Folds a trade *older* than the candle's current `open` into it. The scan in
+/// [`aggregate_price_history`] runs newest→oldest, so a bucket's first-seen
+/// point is its `close` (set on insert) and each subsequent point is older and
+/// becomes the new `open`; `high`/`low`/`volume`/`trade_count` accumulate
+/// regardless of direction.
+fn fold_older_point(candle: &mut SeriesPriceCandle, point: &SeriesTradePoint) {
+    if point.price.value() > candle.high.value() {
+        candle.high = point.price.clone();
+    }
+    if point.price.value() < candle.low.value() {
+        candle.low = point.price.clone();
+    }
+    candle.open = point.price.clone();
+    candle.volume += point.qty;
+    candle.trade_count += 1;
+}
+
+/// Buckets `points` (one series' executed trades, ascending `event_id`) into
+/// [`PriceHistoryInterval`] candles within `[start_time, end_time)`. Factored
+/// out of [`get_series_price_history`] so it can be unit-tested without the
+/// thread-local index.
+///
+/// Scans **newest→oldest** and stops as soon as it would open a
+/// (`MAX_PRICE_HISTORY_POINTS` + 1)-th bucket, so the work is bounded by the
+/// most recent capped window rather than the whole series: an open-ended
+/// (`None`/`None`) request on a long-lived market processes only the points in
+/// its newest `MAX_PRICE_HISTORY_POINTS` buckets, not every trade ever. `points`
+/// is ascending `event_id`, i.e. chronological (trades execute sequentially, so
+/// a higher `event_id` never carries an earlier timestamp), so reversing it
+/// visits buckets in strictly non-increasing `bucket_start_ns`: once the cap is
+/// full, the next not-yet-seen bucket is strictly older than every kept one and
+/// terminates the scan.
+fn aggregate_price_history(
+    points: &[SeriesTradePoint],
+    interval: PriceHistoryInterval,
+    start_time: Option<u64>,
+    end_time: Option<u64>,
+) -> SeriesPriceHistory {
+    // Keyed by bucket start, so the BTreeMap yields candles time-ordered with no
+    // separate sort.
+    let mut buckets: BTreeMap<u64, SeriesPriceCandle> = BTreeMap::new();
+
+    for point in points.iter().rev() {
+        if end_time.is_some_and(|to| point.timestamp >= to) {
+            // Above the window; older points may still qualify.
+            continue;
+        }
+        if start_time.is_some_and(|from| point.timestamp < from) {
+            // Below the window; every remaining (older) point is too.
+            break;
+        }
+
+        let bucket_start_ns = interval.bucket_start(point.timestamp);
+        if let Some(candle) = buckets.get_mut(&bucket_start_ns) {
+            fold_older_point(candle, point);
+        } else {
+            // A new, strictly-older bucket once the cap is full ends the scan.
+            if buckets.len() == MAX_PRICE_HISTORY_POINTS {
+                break;
+            }
+            buckets.insert(
+                bucket_start_ns,
+                SeriesPriceCandle {
+                    bucket_start_ns,
+                    open: point.price.clone(),
+                    high: point.price.clone(),
+                    low: point.price.clone(),
+                    close: point.price.clone(),
+                    volume: point.qty,
+                    trade_count: 1,
+                },
+            );
+        }
+    }
+
+    SeriesPriceHistory {
+        candles: buckets.into_values().collect(),
+    }
+}
+
+/// Returns each requested series' cumulative market-wide traded volume (the
+/// notional that changed hands, i.e. the sum of `qty · price`, in USD base units) plus
+/// its executed-trade count, one entry per requested id in request order.
+///
+/// Lets a front end label a page of market cards in a single call instead of a
+/// per-card read. An unknown or untraded series totals zero. Reads the
+/// `SERIES_TRADED_VOLUME` aggregate that [`index_executed_trade`] maintains
+/// alongside the trade index, so the work is `O(#series_ids)` lookups, bounded
+/// regardless of how many trades a series has accumulated, rather than scanning
+/// each series' tape. Guarded by `caller_is_not_anonymous`, matching the other
+/// series-scoped reads.
+///
+/// [`index_executed_trade`]: crate::memory::index_executed_trade
+#[query(guard = "caller_is_not_anonymous")]
+#[must_use]
+pub fn list_series_traded_volumes(
+    params: ListSeriesTradedVolumesParams,
+) -> Vec<SeriesTradedVolume> {
+    let ListSeriesTradedVolumesParams { series_ids } = params;
+
+    SERIES_TRADED_VOLUME.with(|agg| {
+        let agg = agg.borrow();
+
+        series_ids
+            .into_iter()
+            .map(|series_id| {
+                let totals = agg.get(&series_id);
+
+                SeriesTradedVolume {
+                    volume: totals.map_or(0_i128, |t| t.notional_usd),
+                    trade_count: totals.map_or(0_u64, |t| t.trade_count),
+                    series_id,
+                }
+            })
             .collect()
     })
 }
@@ -564,8 +999,11 @@ pub fn list_orders(params: ListOrdersParams) -> Vec<LimitOrder> {
 /// full collateral requirement (1.0 USD vUSD).
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn mint_complete_set(series_id: SeriesId, qty: i128) -> Result<bool, TradeError> {
-    let caller: User = caller().into();
-    let series = ensure_series_registered(&series_id).await?;
+    let caller: User = msg_caller().into();
+    let reassignment = ReassignmentGuard::acquire(caller)?;
+    let series = ensure_series_registered(&series_id, SeriesAccess::OpenExposure).await?;
+    check_trading_access(&series, caller.0).await?;
+    reassignment.revalidate()?;
     mint_complete_set_logic(caller, &series_id, &series, qty)
 }
 
@@ -621,7 +1059,7 @@ pub(crate) fn mint_complete_set_logic(
 
         let equity = acc.calculate_raw_equity_i128(domain, &configs, &metrics);
         let current_reserved = acc.get_reserved_margin_usd(domain);
-        if equity - total_cost_usd < (current_reserved.cast_signed()) {
+        if equity < (current_reserved.cast_signed() + total_cost_usd) {
             return Err(TradeError::InsufficientMargin {
                 user: caller,
                 balance: acc.calculate_equity_usd(domain, &configs, &metrics),
@@ -629,9 +1067,6 @@ pub(crate) fn mint_complete_set_logic(
             });
         }
         acc.set_reserved_margin_usd(domain, current_reserved + total_cost_usd.unsigned_abs());
-
-        let current_cash = acc.get_cash_balance_usd(domain);
-        acc.set_cash_balance_usd(domain, current_cash - total_cost_usd);
         Ok(())
     })?;
 
@@ -669,8 +1104,11 @@ pub(crate) fn mint_complete_set_logic(
 /// Returns 1.0 USD (vUSD) for every full set of N outcome positions provided.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn redeem_complete_set(series_id: SeriesId, qty: i128) -> Result<bool, TradeError> {
-    let caller: User = caller().into();
-    let series = ensure_series_registered(&series_id).await?;
+    let caller: User = msg_caller().into();
+    let reassignment = ReassignmentGuard::acquire(caller)?;
+    let series = ensure_series_registered(&series_id, SeriesAccess::ReduceExposure).await?;
+    check_trading_access(&series, caller.0).await?;
+    reassignment.revalidate()?;
     redeem_complete_set_logic(caller, &series_id, &series, qty)
 }
 
@@ -753,20 +1191,8 @@ pub(crate) fn redeem_complete_set_logic(
         }
     });
 
-    // Credit cash
-    let asset_decimals = u32::from(USD_DECIMALS);
-    let unit_cost_usd = 10_u128.pow(asset_decimals);
-    let total_credit_usd = (qty.unsigned_abs() * unit_cost_usd).cast_signed();
-
-    ACCOUNT_STATES.with(|accounts| {
-        let mut accounts = accounts.borrow_mut();
-        if let Some(acc) = accounts.get_mut(&caller) {
-            let domain = series.balance_domain;
-            let current = acc.get_cash_balance_usd(domain);
-            acc.set_cash_balance_usd(domain, current + total_credit_usd);
-        }
-    });
-
+    // We don't credit cash here anymore, as redemption simply releases the reserved margin.
+    // The underlying collateral remains in the 'balances' map.
     Ok(true)
 }
 
@@ -774,7 +1200,8 @@ pub(crate) fn redeem_complete_set_logic(
 mod tests {
     use candid::Principal;
     use shared::types::{
-        BalanceDomain, Description, Outcome, PayoffType, PayoutUnit, Price, Series, SeriesId,
+        BalanceDomain, Description, Outcome, PayoffType, PayoutUnit, Price, Resolution, Series,
+        SeriesId,
     };
 
     use crate::{
@@ -791,11 +1218,14 @@ mod tests {
 
     fn test_series(series_id: &SeriesId) -> Series {
         Series {
+            resolution: Resolution::new("Resolved per oracle at expiry"),
             series_id: series_id.clone(),
             underlying: "BTC".to_owned(),
             expiry_ns: 2_000_000_000,
+            start_ns: None,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(50_000_000, 6)),
+            settlement_cap: None,
             price_precision: 6,
             payout_unit: PayoutUnit::usd(),
             outcomes: Some(vec![
@@ -820,6 +1250,10 @@ mod tests {
             icon_url: None,
             banner_url: None,
             balance_domain: BalanceDomain::Settlement,
+            trading_access: vec![],
+            engine_id: None,
+            forked_from: None,
+            locale: None,
         }
     }
 
@@ -873,7 +1307,8 @@ mod tests {
             acc.insert(taker, t_acc);
         });
 
-        let result = submit_market_order_impl(taker, order, &trade_id, &test_series(&series_id));
+        let result =
+            submit_market_order_impl(taker, &order, &trade_id, &test_series(&series_id), None);
 
         assert!(result.is_err());
 
@@ -914,7 +1349,8 @@ mod tests {
             acc.insert(taker, t_acc);
         });
 
-        let result = submit_market_order_impl(taker, order, &trade_id, &test_series(&series_id));
+        let result =
+            submit_market_order_impl(taker, &order, &trade_id, &test_series(&series_id), None);
 
         assert!(result.is_ok());
 
@@ -942,12 +1378,70 @@ mod tests {
         LIMIT_ORDERS.with(|m| m.borrow_mut().clear());
         ACCOUNT_STATES.with(|acc| acc.borrow_mut().clear());
 
-        let result = submit_market_order_impl(taker, order, &trade_id, &test_series(&series_id));
+        let result =
+            submit_market_order_impl(taker, &order, &trade_id, &test_series(&series_id), None);
 
         assert!(
             matches!(&result, Err(TradeError::OrderNotFound(id)) if *id == order_id),
             "expected OrderNotFound for a cancelled order, got: {result:?}"
         );
+    }
+
+    /// Simulates the scenario where the limit order is removed and a *different*
+    /// order is created under the same (client-chosen, reusable) id during the
+    /// await. The impl must not execute against the replacement order that the
+    /// pre-await checks never validated.
+    #[test]
+    fn market_order_replaced_during_await() {
+        let maker = User(Principal::from_slice(&[1]));
+        let taker = User(Principal::from_slice(&[2]));
+        let series_id = SeriesId::from("test_ser".to_owned());
+        let order_id = OrderId::from("order_1".to_owned());
+        let trade_id = TradeId::from("trade_1".to_owned());
+
+        // Snapshot read before the await: maker's Buy order.
+        let order = test_order(&order_id, &series_id, maker, Side::Buy);
+
+        // During the await the order is cancelled and the id reused for a Sell
+        // order at a different price.
+        let mut replacement = test_order(&order_id, &series_id, maker, Side::Sell);
+        replacement.price = Price::new(40_000_000, 6);
+
+        LIMIT_ORDERS.with(|m| {
+            let mut m = m.borrow_mut();
+            m.clear();
+            m.insert(order_id.clone(), replacement);
+        });
+
+        ACCOUNT_STATES.with(|acc| {
+            let mut acc = acc.borrow_mut();
+            acc.clear();
+
+            let mut m_acc = AccountState::new(maker);
+            m_acc.set_cash_balance_usd(BalanceDomain::Settlement, 1_000_000_000);
+            m_acc.set_reserved_margin_usd(BalanceDomain::Settlement, 60_000_000);
+            acc.insert(maker, m_acc);
+
+            let mut t_acc = AccountState::new(taker);
+            t_acc.set_cash_balance_usd(BalanceDomain::Settlement, 1_000_000_000);
+            acc.insert(taker, t_acc);
+        });
+
+        let result =
+            submit_market_order_impl(taker, &order, &trade_id, &test_series(&series_id), None);
+
+        assert!(
+            matches!(&result, Err(TradeError::OrderNotFound(id)) if *id == order_id),
+            "expected OrderNotFound for a replaced order, got: {result:?}"
+        );
+
+        // The replacement order must remain untouched on the book.
+        LIMIT_ORDERS.with(|m| {
+            let m = m.borrow();
+            let on_book = m.get(&order_id).expect("replacement order must remain");
+            assert_eq!(on_book.side, Side::Sell);
+            assert_eq!(on_book.qty, 1);
+        });
     }
 
     #[test]

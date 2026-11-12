@@ -17,16 +17,29 @@ use clearing::{
 };
 use icrc_ledger_types::icrc2::approve::ApproveArgs;
 use shared::types::{
+    engine::{
+        EngineId, EngineResult, EngineRole, GrantEngineRoleParams, RegisterEngineParams,
+        RegisterEngineResult,
+    },
     evm::NativeEvmAsset,
-    series::{AddSeriesParams, AddSeriesResult},
+    series::{AddSeriesParams, AddSeriesResult, ForkSeriesParams},
     Asset, AssetMetrics, BalanceDomain, CollateralAssetConfig, DecimalValue, Description,
-    PayoffType, PayoutUnit, Price, SeriesId,
+    PayoffType, PayoutUnit, Price, Resolution, SeriesId, TradingAccess,
 };
 
 use super::{
     constants::VUSD_ASSET_ID, pic_canister::PicCanisterTrait as _, test_environment::TestSetup,
 };
 use crate::utils::constants::{CKUSDC_LEDGER, ICP_LEDGER};
+
+/// Default expiry for test series, so series created through the plain helpers
+/// are never accidentally expired.
+///
+/// `PocketIC`'s clock tracks wall time, so this must stay ahead of it. `9e18` ns
+/// is ~year 2255, chosen to outlast the project rather than the ~2033 that the
+/// old `2e18` literal would have hit, which was close enough to eventually turn
+/// into a spurious suite-wide failure.
+const DEFAULT_TEST_EXPIRY_NS: u64 = 9_000_000_000_000_000_000;
 
 /// Arguments for [`TradeHelperTrait::setup_icrc_asset`] (keeps call sites readable for clippy).
 pub struct SetupIcrcAsset<'a> {
@@ -56,6 +69,47 @@ pub trait TradeHelperTrait {
         strike_value: u128,
         balance_domain: BalanceDomain,
     ) -> SeriesId;
+    /// Registers a `Linear` (forward/NDF/future) series with the given
+    /// settlement cap (6-decimal value), returning its id.
+    fn add_linear_series(
+        &self,
+        underlying: &str,
+        settlement_cap_value: u128,
+        balance_domain: BalanceDomain,
+    ) -> SeriesId;
+    /// Registers a binary series whose trading window opens `opens_in_ns` after
+    /// the current `PocketIC` time.
+    ///
+    /// The offset is relative because `add_series` rejects a start at or before
+    /// the registry's `now`, and `PocketIC`'s clock is not a fixed constant.
+    fn add_scheduled_binary_series(
+        &self,
+        underlying: &str,
+        strike_value: u128,
+        balance_domain: BalanceDomain,
+        opens_in_ns: u64,
+    ) -> SeriesId;
+    /// Registers a binary series whose trading window closed `expired_since_ns`
+    /// before the current `PocketIC` time.
+    ///
+    /// `add_series` does not require `expiry_ns` to be in the future, so a
+    /// past-expiry series can be registered directly.
+    fn add_expired_binary_series(
+        &self,
+        underlying: &str,
+        strike_value: u128,
+        balance_domain: BalanceDomain,
+        expired_since_ns: u64,
+    ) -> SeriesId;
+    /// Shared body of the constructors above; not called directly by tests.
+    fn add_scheduled_binary_series_inner(
+        &self,
+        underlying: &str,
+        strike_value: u128,
+        balance_domain: BalanceDomain,
+        start_ns: Option<u64>,
+        expiry_ns: u64,
+    ) -> SeriesId;
     fn setup_icrc_asset(&self, args: SetupIcrcAsset<'_>);
     fn setup_evm_asset(
         &self,
@@ -75,6 +129,15 @@ pub trait TradeHelperTrait {
         qty: i128,
         price_value: u128,
     ) -> SubmitMatchedTradeResult;
+    fn register_engine(&self, name: &str, allowed_roles: Vec<EngineRole>) -> EngineId;
+    fn grant_engine_role(&self, engine_id: &EngineId, principal: Principal, role: EngineRole);
+    fn fork_binary_series(
+        &self,
+        caller: Principal,
+        source_id: &SeriesId,
+        trading_access: Vec<TradingAccess>,
+        engine_id: Option<EngineId>,
+    ) -> AddSeriesResult;
 }
 
 impl TradeHelperTrait for TestSetup {
@@ -195,12 +258,72 @@ impl TradeHelperTrait for TestSetup {
         strike_value: u128,
         balance_domain: BalanceDomain,
     ) -> SeriesId {
+        self.add_scheduled_binary_series_inner(
+            underlying,
+            strike_value,
+            balance_domain,
+            None,
+            DEFAULT_TEST_EXPIRY_NS,
+        )
+    }
+
+    fn add_scheduled_binary_series(
+        &self,
+        underlying: &str,
+        strike_value: u128,
+        balance_domain: BalanceDomain,
+        opens_in_ns: u64,
+    ) -> SeriesId {
+        let now_ns = self.pic.get_time().as_nanos_since_unix_epoch();
+        let start_ns = now_ns.checked_add(opens_in_ns).unwrap_or_else(|| {
+            panic!("start_ns overflowed u64: now={now_ns} + opens_in_ns={opens_in_ns}")
+        });
+        self.add_scheduled_binary_series_inner(
+            underlying,
+            strike_value,
+            balance_domain,
+            Some(start_ns),
+            DEFAULT_TEST_EXPIRY_NS,
+        )
+    }
+
+    fn add_expired_binary_series(
+        &self,
+        underlying: &str,
+        strike_value: u128,
+        balance_domain: BalanceDomain,
+        expired_since_ns: u64,
+    ) -> SeriesId {
+        let now_ns = self.pic.get_time().as_nanos_since_unix_epoch();
+        let expiry_ns = now_ns.checked_sub(expired_since_ns).unwrap_or_else(|| {
+            panic!("expiry_ns underflowed: now={now_ns} - expired_since_ns={expired_since_ns}")
+        });
+        self.add_scheduled_binary_series_inner(
+            underlying,
+            strike_value,
+            balance_domain,
+            None,
+            expiry_ns,
+        )
+    }
+
+    fn add_scheduled_binary_series_inner(
+        &self,
+        underlying: &str,
+        strike_value: u128,
+        balance_domain: BalanceDomain,
+        start_ns: Option<u64>,
+        expiry_ns: u64,
+    ) -> SeriesId {
         let series_params = AddSeriesParams {
+            resolution: Resolution::new("Resolved per oracle at expiry"),
             underlying: underlying.to_owned(),
             balance_domain,
-            expiry_ns: 2_000_000_000_000_000_000,
+            expiry_ns,
+            start_ns,
             payoff_type: PayoffType::Binary,
             strike: Some(Price::new(strike_value, 6)),
+            settlement_cap: None,
             price_precision: 6,
             payout_unit: PayoutUnit::usd(),
             oracle_source: "Chainlink".to_owned(),
@@ -209,6 +332,9 @@ impl TradeHelperTrait for TestSetup {
             outcomes: None,
             icon_url: None,
             banner_url: None,
+            trading_access: vec![],
+            engine_id: None,
+            locale: None,
         };
 
         let res_bytes = self
@@ -226,6 +352,54 @@ impl TradeHelperTrait for TestSetup {
         let series_id = match add_series_res {
             AddSeriesResult::Ok(id) => id,
             AddSeriesResult::Err(e) => panic!("Add series failed: {e:?}"),
+        };
+        self.pic.tick();
+        series_id
+    }
+
+    fn add_linear_series(
+        &self,
+        underlying: &str,
+        settlement_cap_value: u128,
+        balance_domain: BalanceDomain,
+    ) -> SeriesId {
+        let series_params = AddSeriesParams {
+            resolution: Resolution::new("Settles to oracle spot at expiry"),
+            underlying: underlying.to_owned(),
+            balance_domain,
+            expiry_ns: 2_000_000_000_000_000_000,
+            start_ns: None,
+            payoff_type: PayoffType::Linear,
+            strike: None,
+            settlement_cap: Some(Price::new(settlement_cap_value, 6)),
+            price_precision: 6,
+            payout_unit: PayoutUnit::usd(),
+            oracle_source: "Chainlink".to_owned(),
+            title: format!("{underlying} Forward"),
+            description: Description::plain("Test"),
+            outcomes: None,
+            icon_url: None,
+            banner_url: None,
+            trading_access: vec![],
+            engine_id: None,
+            locale: None,
+        };
+
+        let res_bytes = self
+            .pic
+            .update_call(
+                self.registry.canister_id(),
+                self.controller,
+                "add_series",
+                encode_one(series_params).unwrap(),
+            )
+            .expect("Registry add_series call failed");
+
+        let add_series_res: AddSeriesResult =
+            decode_one(&res_bytes).unwrap_or_else(|_| panic!("Failed to decode add_series result"));
+        let series_id = match add_series_res {
+            AddSeriesResult::Ok(id) => id,
+            AddSeriesResult::Err(e) => panic!("Add linear series failed: {e:?}"),
         };
         self.pic.tick();
         series_id
@@ -356,5 +530,79 @@ impl TradeHelperTrait for TestSetup {
                 },),
             )
             .unwrap()
+    }
+
+    fn register_engine(&self, name: &str, allowed_roles: Vec<EngineRole>) -> EngineId {
+        let res: RegisterEngineResult = self
+            .registry
+            .update(
+                self.controller,
+                "register_engine",
+                (RegisterEngineParams {
+                    name: name.to_owned(),
+                    description: None,
+                    icon_url: None,
+                    admins: vec![self.controller],
+                    allowed_roles,
+                },),
+            )
+            .unwrap();
+
+        match res {
+            RegisterEngineResult::Ok(id) => id,
+            RegisterEngineResult::Err(e) => panic!("register_engine failed: {e:?}"),
+        }
+    }
+
+    fn grant_engine_role(&self, engine_id: &EngineId, grantee: Principal, role: EngineRole) {
+        let res: EngineResult = self
+            .registry
+            .update(
+                self.controller,
+                "grant_engine_role",
+                (GrantEngineRoleParams {
+                    engine_id: engine_id.clone(),
+                    grantee,
+                    role,
+                },),
+            )
+            .unwrap();
+
+        match res {
+            EngineResult::Ok => {}
+            EngineResult::Err(e) => {
+                panic!("grant_engine_role failed: {e:?}")
+            }
+        }
+    }
+
+    fn fork_binary_series(
+        &self,
+        caller: Principal,
+        source_id: &SeriesId,
+        trading_access: Vec<TradingAccess>,
+        engine_id: Option<EngineId>,
+    ) -> AddSeriesResult {
+        let fork_params = ForkSeriesParams {
+            resolution: None,
+            source_series_id: source_id.clone(),
+            title: None,
+            description: None,
+            trading_access,
+            engine_id,
+            locale: None,
+        };
+
+        let res_bytes = self
+            .pic
+            .update_call(
+                self.registry.canister_id(),
+                caller,
+                "fork_series",
+                encode_one(fork_params).unwrap(),
+            )
+            .expect("Registry fork_series call failed");
+
+        decode_one(&res_bytes).unwrap_or_else(|_| panic!("Failed to decode fork_series result"))
     }
 }

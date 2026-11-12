@@ -1,22 +1,22 @@
 use core::cell::RefCell;
 
-use shared::types::Series;
+use shared::types::{BalanceDomain, Series};
 
 use crate::{
     api::trade::errors::TradeError,
     memory::{
-        ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, EVENTS, EXECUTED_TRADES, NEXT_EVENT_ID,
-        POSITIONS,
+        index_executed_trade, ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, EVENTS,
+        EXECUTED_TRADES, NEXT_EVENT_ID, POSITIONS,
     },
     payoffs::get_required_margin,
     trade::types::ExecuteTradeParams,
     types::{
         errors::CommonError,
-        event::{Event, EventType},
+        event::{Event, EventType, SeriesTradePoint},
         margin::{AccountState, Position, PositionsMap},
     },
     utils::{
-        series::ensure_series_registered,
+        series::{ensure_series_registered, SeriesAccess},
         system::{canister_id, now_ns},
     },
 };
@@ -25,7 +25,7 @@ use crate::{
 pub(crate) async fn internal_execute_trade(params: ExecuteTradeParams) -> Result<bool, TradeError> {
     let series_id = params.series_id.clone();
 
-    let series = ensure_series_registered(&series_id).await?;
+    let series = ensure_series_registered(&series_id, SeriesAccess::OpenExposure).await?;
 
     execute_trade_impl(&series, params)
 }
@@ -118,14 +118,13 @@ pub(crate) fn execute_trade_impl(
                 })?;
 
             // Mark-to-Market Cashflow Model:
-            // We calculate the cash delta as the difference in required margin
-            // Evaluated at the CURRENT trade price.
-            // This ensures that any PnL from the previous price to 'price'
-            // is realized immediately into the cash balance.
+            // We calculate the realized PnL of the existing position
+            // by comparing its cost-basis (old_margin) to its value at
+            // the CURRENT trade price (old_margin_at_price).
             let buyer_cash_delta =
-                (new_buyer_margin_usd.cast_signed()) - (old_buyer_margin_at_price.cast_signed());
+                (old_buyer_margin.cast_signed()) - (old_buyer_margin_at_price.cast_signed());
             let seller_cash_delta =
-                (new_seller_margin_usd.cast_signed()) - (old_seller_margin_at_price.cast_signed());
+                (old_seller_margin.cast_signed()) - (old_seller_margin_at_price.cast_signed());
 
             // Margin Delta:
             // We calculate how much the TOTAL reserved margin in the account should change.
@@ -139,7 +138,7 @@ pub(crate) fn execute_trade_impl(
                 - (old_seller_margin.cast_signed())
                 - (seller_unblock_amount.unwrap_or(0).cast_signed());
 
-            Ok((
+            Ok::<_, TradeError>((
                 buyer_cash_delta,
                 seller_cash_delta,
                 b_reserved_delta,
@@ -156,6 +155,10 @@ pub(crate) fn execute_trade_impl(
     ACCOUNT_STATES.with(|accounts| {
         let accounts = accounts.borrow();
         let domain = series.balance_domain;
+
+        if domain == BalanceDomain::Social {
+            return Ok(());
+        }
 
         // 1. Validate Buyer
         // We check if the post-trade equity covers the target reserved margin.
@@ -292,6 +295,10 @@ pub(crate) fn execute_trade_impl(
         current
     });
 
+    // Single timestamp for the trade so both counterparty rows (and the
+    // price-history point derived from them) agree.
+    let timestamp = now_ns();
+
     EVENTS.with(|events| {
         let mut events = events.borrow_mut();
 
@@ -304,7 +311,7 @@ pub(crate) fn execute_trade_impl(
             qty,
             price: price.clone(),
             event_type: EventType::Executed,
-            timestamp: now_ns(),
+            timestamp,
         });
 
         // Seller Event (using same event_id or should it be different? Usually history shows the
@@ -316,11 +323,23 @@ pub(crate) fn execute_trade_impl(
             series_id: series_id.clone(),
             user: seller,
             qty: -qty,
-            price,
+            price: price.clone(),
             event_type: EventType::Executed,
-            timestamp: now_ns(),
+            timestamp,
         });
     });
+
+    // Maintain the per-series price-history index incrementally (one point per
+    // trade), keeping `list_series_trade_history` reads off the full event log.
+    index_executed_trade(
+        &series_id,
+        SeriesTradePoint {
+            event_id,
+            price,
+            qty,
+            timestamp,
+        },
+    );
 
     EXECUTED_TRADES.with(|m| {
         m.borrow_mut().insert(trade_id, event_id);
@@ -333,7 +352,7 @@ pub(crate) fn execute_trade_impl(
 mod tests {
     use candid::Principal;
     use shared::types::{
-        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId,
+        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Resolution, Series, SeriesId,
     };
 
     use crate::{
@@ -352,11 +371,14 @@ mod tests {
         let series_id = SeriesId::from("test".to_owned());
 
         let series = Series {
+            resolution: Resolution::new("Resolved per oracle at expiry"),
             series_id: series_id.clone(),
             underlying: "BTC".to_owned(),
             expiry_ns: 2_000_000_000,
+            start_ns: None,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(50_000_000_000, 8)),
+            settlement_cap: None,
             price_precision: 8,
             payout_unit: PayoutUnit::usd(),
             oracle_source: "oracle".to_owned(),
@@ -368,6 +390,10 @@ mod tests {
             icon_url: None,
             banner_url: None,
             balance_domain: BalanceDomain::Settlement,
+            trading_access: vec![],
+            engine_id: None,
+            forked_from: None,
+            locale: None,
         };
 
         // Initialize state
@@ -429,11 +455,14 @@ mod tests {
         let series_id = SeriesId::from("test".to_owned());
 
         let series = Series {
+            resolution: Resolution::new("Resolved per oracle at expiry"),
             series_id: series_id.clone(),
             underlying: "BTC".to_owned(),
             expiry_ns: 2_000_000_000,
+            start_ns: None,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(50_000_000_000, 8)),
+            settlement_cap: None,
             price_precision: 8,
             payout_unit: PayoutUnit::usd(),
             oracle_source: "oracle".to_owned(),
@@ -445,6 +474,10 @@ mod tests {
             icon_url: None,
             banner_url: None,
             balance_domain: BalanceDomain::Settlement,
+            trading_access: vec![],
+            engine_id: None,
+            forked_from: None,
+            locale: None,
         };
 
         let params = ExecuteTradeParams {

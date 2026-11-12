@@ -1,0 +1,308 @@
+# PR & CI
+
+Everything an agent needs to open a green PR against `icdc-core`.
+
+This page mirrors the structure of
+[`dfinity/control-panel`'s `docs/ai/pr-and-ci.md`](https://github.com/dfinity/control-panel/blob/main/docs/ai/pr-and-ci.md)
+and adapts it to icdc-core's Rust-workspace + npm-script stack.
+
+## 1. PR title: Conventional Commits
+
+Use a [Conventional Commits](https://www.conventionalcommits.org/) title:
+
+```
+type(scope): description
+type(scope)!: description   # breaking change
+```
+
+The scope is **required**: a scopeless title is rejected. Use the affected
+area/crate as the scope, or a short tooling area such as `deps`.
+
+Examples:
+
+- `fix(settlement): safety rails (orders, trades, error shape)`
+- `refactor(registry): Principal to Grantee`
+- `chore(release): v0.0.7`
+- `chore(npm-deps-dev): bump prettier-plugin-motoko from 0.12.5 to 0.13.0`
+- `chore(github-actions): bump actions/download-artifact from 7.0.0 to 8.0.1`
+- `feat(clearing)!: change settlement signature` ← `!` marks a breaking change
+
+The `pr-title` job in `checks.yml` enforces this with the regex
+`^(feat|fix|perf|deps|revert|docs|style|chore|refactor|test|build|ci)\([-a-zA-Z0-9,._/]+\)!?: .+$`
+and feeds the aggregate `checks-pass` gate, so a malformed title blocks merge.
+
+### Verbs
+
+| verb       | when                                                     |
+| ---------- | -------------------------------------------------------- |
+| `feat`     | new user-visible feature or new public API surface       |
+| `fix`      | bug fix                                                  |
+| `refactor` | internal change with no behavior change                  |
+| `perf`     | performance improvement                                  |
+| `docs`     | docs only (incl. `docs/ai/**`, `README.md`, crate docs)  |
+| `test`     | tests only                                               |
+| `chore`    | misc maintenance (release bumps, dependency hygiene, …)  |
+| `build`    | build system / packaging (`scripts/build.*`, `dfx.json`) |
+| `ci`       | CI workflows / actions / `dev-tools.json`                |
+| `style`    | formatting only, no logic change                         |
+
+### Scope
+
+Single word or comma-separated list of affected areas. Use the
+existing vocabulary so it shows up grouped in changelogs.
+
+Common scopes used in this repo:
+
+- Crate names: `clearing`, `registry`, `minter`, `shared`
+- Pseudo-areas: `ci`, `build`, `release`, `docs`, `ai`
+- Dependabot-style: `npm-deps-dev`, `github-actions`, `rust`,
+  `cargo-deps`
+
+If you introduce a new scope, keep it short and lowercase, no spaces.
+
+## 2. PR body: template
+
+Always follow the repo's PR template. The canonical source is
+[`.github/pull_request_template.md`](../../.github/pull_request_template.md).
+Never invent your own structure, never drop sections, never replace
+it with a free-form description. If the template changes, the new
+version wins; re-read it before opening a PR.
+
+The template mandates three sections:
+
+```markdown
+# Motivation
+
+<!-- Why this change exists. 1-3 sentences. Link the issue / Linear /
+     Slack thread if there is one. -->
+
+# Changes
+
+<!-- Bulleted list of what actually changed.
+     Be specific about file / crate / function names where relevant.
+     If you updated docs/ai/** or AGENTS.md, mention it here. -->
+
+# Tests
+
+<!-- What you ran locally to validate.
+     Examples: `npm run test:unit`, `npm run test:integration`,
+     `cargo clippy --tests -p clearing`, manual `dfx deploy --network
+     local` smoke check. Screenshots only for visible UI work. -->
+```
+
+Rules:
+
+- **All three sections are required.** Don't leave them empty, don't
+  merge them, don't rename them.
+- **Use the exact section headings** (`# Motivation`, `# Changes`,
+  `# Tests`) so downstream tooling (release notes, search) can find
+  them.
+- **Do not hard-wrap lines.** Write one line per paragraph or list
+  item and let the GitHub renderer wrap. Hard-wrapping at ~80 columns
+  (a default many models fall back to) breaks rendering inside lists,
+  blockquotes, and tables. This applies to the PR body only; source
+  files still follow `rustfmt` / `prettier` / `shfmt`.
+- **Atomicity statement.** If the PR touches more than one logical
+  thing, add a one-liner under `# Motivation` explaining why they
+  belong together. If you can't, split the PR.
+
+## 3. Base branch & draft state
+
+Default base branch is **`main`**. Open every PR against `main` unless
+the user explicitly tells you to use a different base.
+
+This applies **even when work is split into a wave / stack of related
+PRs**. Each PR in the wave still branches from `main` and targets
+`main`. Never target another open PR's branch as a base.
+
+If a PR depends on another PR that has not landed yet:
+
+- Mark the dependent PR as **draft** on creation.
+- Note the dependency in the PR body under `# Motivation` (e.g.
+  "Depends on #1234. Will mark ready once that lands.").
+- Once the prerequisite merges into `main`, pull `main` into the
+  dependent branch (regular merge, no force-push, see
+  [§8](#8-updating-an-existing-pr)) and flip the PR to "ready for
+  review".
+
+Why this rule exists:
+
+- One review surface per PR. Reviewers always diff against `main`.
+- The prerequisite PR can be edited, force-pushed by its author, or
+  re-titled without silently breaking dependents.
+- `release.yml` and tag-based release flows assume `main` as the merge
+  target.
+
+**Draft state** is also the correct status for any PR that is not yet
+ready for review: work-in-progress, waiting on an upstream
+dependency, smoke-testing in CI. Mark it draft on creation and flip to
+"ready for review" only once it stands on its own.
+
+## 4. Atomicity
+
+One logical change per PR. If you catch yourself writing
+"and also" / "while I was there" / "I noticed that" in the body, split.
+
+| Anti-pattern                                | Do this instead                                                        |
+| ------------------------------------------- | ---------------------------------------------------------------------- |
+| "Add feature X and rename old function"     | PR 1: `refactor: rename`. PR 2: `feat: X`.                             |
+| "Fix bug Y and update unrelated formatting" | Two PRs.                                                               |
+| "Refactor 5 modules into shared `Foo`"      | PR 1: introduce `Foo` + migrate 1 caller. PR 2..N: migrate the others. |
+| "Speed up tests via CI cache + lazy WASMs"  | One PR per layer (CI infra; in-process fixture cache).                 |
+
+This is rule 2 of the
+[universal standard](https://github.com/AntonioVentilii/officina/blob/main/standards/code.md)
+and part of the review step in
+[`governance.md`](governance.md#plan-implement-review).
+
+When a wave of dependent PRs is genuinely needed, follow the base
+branch + draft rule in [§3](#3-base-branch--draft-state); atomicity
+and stacking are complementary, not in conflict.
+
+## 5. Local quality gates (run before opening the PR)
+
+From the repo root:
+
+```bash
+# 1. Format and auto-fix lint
+npm run quality           # = format + lint (prettier + scripts)
+npm run quality:rust      # = rustfmt + clippy --fix
+
+# 2. Run unit tests
+npm run test:unit
+
+# 3. Run integration tests (slower; spins up PocketIC)
+npm run test:integration
+# Or scoped: cargo test --test it -p clearing settlement
+
+# 4. Match CI's strict gates
+RUSTFLAGS="-D warnings" cargo test --lib --bins
+RUSTFLAGS="-D warnings" cargo test --test it
+```
+
+If you changed the API or a doc comment on an exposed type, regenerate
+Candid as the last step before committing (it also re-runs format and
+lint):
+
+```bash
+npm run did               # regenerates clearing.did, registry.did, minter.did
+```
+
+If you've never run integration tests on this machine, install
+PocketIC first:
+
+```bash
+scripts/pic-install
+```
+
+## 6. CI jobs you must keep green
+
+Defined under [`.github/workflows/`](../../.github/workflows/):
+
+| Workflow      | Job(s)                      | What it runs                                                                                                                                                         |
+| ------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `checks.yml`  | `format`                    | `npm run format`. Fails the job whenever it produces a diff: run `npm run format` locally and push.                                                                  |
+| `checks.yml`  | `lint`                      | `npm run lint`: `prettier --check` + `scripts/lint.sh` (no em dashes, workspace dependencies, no generic `Result` names in `.did`, GitHub workflows, clippy, shell). |
+| `checks.yml`  | `did`                       | `npm run did`, then fails on any diff in the committed `.did` files: run `npm run did` locally and commit the result.                                                |
+| `checks.yml`  | `checks-pass`               | Aggregator gate via `.github/actions/needs_success`.                                                                                                                 |
+| `tests.yml`   | `unit`                      | `npm run build` then `npm run test:unit` (`cargo test --lib --bins`).                                                                                                |
+| `tests.yml`   | `integration`               | `npm run build` then `npm run test:integration`.                                                                                                                     |
+| `tests.yml`   | `tests-pass`                | Aggregator gate via `.github/actions/needs_success`.                                                                                                                 |
+| `release.yml` | `wasm`, `candid`, `release` | Triggered by `push: tags: v*`, GitHub `release` events, or `workflow_dispatch`. Builds + uploads WASM/`*.did` artifacts and (for tags) cuts a GitHub Release.        |
+
+The `Prepare` composite action (`.github/actions/prepare`) installs
+the rust toolchain (`rust-toolchain.toml`), npm deps, `cargo-binstall`,
+`cargo-sort`, `shfmt`, `zizmor`, and `yq`. Jobs that only build and
+test pass `lint-tools: 'false'` to skip everything after the rust
+toolchain. Touch [`dev-tools.json`](../../dev-tools.json) when you need
+to add or upgrade one of these.
+
+Cargo caches (`~/.cargo/registry`, `~/.cargo/git`, `target`) are keyed
+on their inputs only (`Cargo.lock`, `rust-toolchain.toml`, plus the
+build/download scripts for integration), never on `github.sha`, and
+are saved from `main` only. Branches restore `main`'s entry; saving
+per commit or per branch fills the 10 GB repo quota and evicts it.
+
+### Ratchets
+
+The `lint` job also enforces quality gates whose thresholds are the
+baseline measured when they were added. They pass today and may only
+get stricter: lower a threshold (or shrink a baseline list) in the PR
+that improves the code, never raise it.
+
+| Gate                                                          | Where                                                                                                          | Baseline                                                                                                                       |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| No `unwrap`, `expect`, `panic!`, `unreachable!` outside tests | `[workspace.lints.clippy]` in `Cargo.toml`; tests allowed by `clippy.toml` and `src/clearing/tests/it/main.rs` | 10 existing sites marked `#[expect(..., reason = "baseline of the quality gate: ...")]`; remove the attribute when you fix one |
+| Function length (`too_many_lines`)                            | `too-many-lines-threshold` in `clippy.toml`                                                                    | 238 lines (`execute_trade_impl`)                                                                                               |
+| Cognitive complexity (`cognitive_complexity`)                 | `cognitive-complexity-threshold` in `clippy.toml`                                                              | 21 (`add_series_impl`)                                                                                                         |
+| Duplicated Rust code (`jscpd`)                                | `.jscpd.json`, run by `scripts/lint.duplication.sh`                                                            | 7.2% of lines (7.11% measured); list the clones with `npx jscpd --reporters console`                                           |
+| Lower layers of the clearing importing `api/`                 | `scripts/lint.layering.sh`                                                                                     | 5 files in its `BASELINE`; the script fails when one is clean and still listed                                                 |
+
+## 7. After CI fails
+
+- **`format` failed** → the job runs `npm run format` and fails the
+  build whenever it produces a diff. Run `npm run format` locally and
+  push the result.
+- **`lint` failed** → run `npm run lint:rust` (auto-fixes clippy where
+  possible). Never silence a lint: `allow_attributes` is denied, and the
+  rare justified exception is `#[expect(clippy::…, reason = "…")]`
+  agreed in review. Pre-existing
+  `pedantic = { level = "deny", priority = -1 }` is intentional.
+- **`unit` / `integration` failed** → reproduce locally:
+  ```bash
+  RUSTFLAGS="-D warnings" cargo test --lib --bins
+  RUSTFLAGS="-D warnings" cargo test --test it
+  ```
+  Don't commit `#[ignore]` to bypass: failing tests are a signal,
+  not a nuisance. See [`testing.md`](testing.md) for the broader
+  testing rules.
+
+## 8. Updating an existing PR
+
+When you need to change a PR after it has been pushed (review feedback,
+CI fixes, follow-up tweaks), **add new commits**. Do not rewrite history.
+
+- **Never `git push --force` / `--force-with-lease`** on a PR branch.
+- **Never `git commit --amend`** a commit that is already on the remote.
+- **Never `git rebase` / squash / reword** pushed commits.
+- Just `git commit` the new change and `git push`; the PR will pick it
+  up.
+
+The only exception is an **explicit user instruction** to force-push,
+amend, rebase, or otherwise rewrite history (e.g. "please squash these
+commits and force-push"). Without that explicit command, treat the
+branch history as append-only.
+
+## 9. CODEOWNERS auto-routing
+
+[`.github/CODEOWNERS`](../../.github/CODEOWNERS) currently routes every
+path to `@antonioventilii`. Agents do not assign reviewers; the file
+does it. If/when team-based ownership is introduced (mirror
+control-panel for the pattern), update this section in the same PR.
+
+## 10. Release flow (informational)
+
+`release-please` maintains a `chore(release): vX.Y.Z` PR from the
+Conventional Commit history on `main`. Merging it creates the tag,
+the GitHub Release + notes, and the `CHANGELOG.md` update; that
+published Release triggers `release.yml`, which builds WASMs + Candid
+for `clearing`, `registry`, `minter` (plus the downloaded `ledger` /
+`index` artifacts) and attaches them via `softprops/action-gh-release`.
+Deployment is separate: `main` → staging, `v*` tag → production. The
+full flow, versioning rationale, and one-time setup live in
+[`docs/ci-cd/release-deploy.md`](../ci-cd/release-deploy.md).
+
+Do not edit release artifacts in tree (`*.wasm.gz`, `*.did`): they
+come from the build, not from source.
+
+## 11. Reviewing a PR
+
+Whether you review or propose improvements, rank what you find in this
+order: correctness, safety and side effects (economic safety first),
+consistency with [`structure.md`](structure.md) and
+[`patterns.md`](patterns.md), test coverage, maintainability,
+readability. Do not suggest stylistic rewrites that improve neither
+correctness nor clarity. Prefer the smallest change close to the
+affected code, keep public APIs stable and backward compatible where
+possible, and do not rename widely used symbols or reorganise folders
+as part of an unrelated change.

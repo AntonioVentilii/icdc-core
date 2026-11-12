@@ -1,25 +1,34 @@
-use core::{cell::RefCell, time::Duration};
-use std::collections::{BTreeMap, HashMap};
+use core::{cell::RefCell, ops::Bound, time::Duration};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use candid::Principal;
-use ic_cdk::{
-    api::{instruction_counter, is_controller},
-    call, caller, spawn,
-};
+use ic_cdk::api::{instruction_counter, is_controller, msg_caller};
 use ic_cdk_macros::{query, update};
-use ic_cdk_timers::set_timer;
-use shared::types::{BalanceDomain, Series, SeriesId, SettlementInput};
+use ic_cdk_timers::{set_timer, set_timer_interval};
+use shared::types::{BalanceDomain, Price, Series, SeriesId, SettlementInput};
 
-use super::{errors::SettlementError, params::SettleSeriesParams, results::SettleSeriesResult};
+use super::{
+    errors::SettlementError,
+    params::{
+        BackfillSettlementEventsParams, ListSeriesSettlementStatusesParams,
+        ListSettledSeriesParams, SettleSeriesParams,
+    },
+    results::{
+        BackfillSettlementEventsResult, SeriesSettlementStatus, SettleSeriesResult,
+        SettledSeriesPage,
+    },
+};
 use crate::{
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
-        ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, CONFIG, INSURANCE_FUND, POSITIONS,
-        REGISTRY_CANISTER, SERIES, SETTLEMENT_PLANS, TREASURY,
+        index_settled_events, ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, CONFIG, EVENTS,
+        INSURANCE_FUND, LIMIT_ORDERS, NEXT_EVENT_ID, POSITIONS, REGISTRY_CANISTER, SERIES,
+        SETTLEMENT_PLANS, TREASURY,
     },
     payoffs::{fees::calculate_settlement_fee, get_settlement_value},
     types::{
         errors::CommonError,
+        event::{Event, EventType},
         margin::PositionsMap,
         plans::{
             PlanStatus, SettlementPlan, SettlementPlanParams, SettlementPosition,
@@ -27,7 +36,11 @@ use crate::{
         },
         user::User,
     },
-    utils::vusd::get_internal_asset_id,
+    utils::{
+        registry,
+        system::{canister_id, now_ns},
+        vusd::get_internal_asset_id,
+    },
 };
 
 /// Settles a derivative series at a specific price.
@@ -47,7 +60,7 @@ use crate::{
 /// the series. Unauthorized callers are rejected even if a plan already exists.
 #[update(guard = "caller_is_not_anonymous")]
 pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
-    let caller = caller();
+    let caller = msg_caller();
 
     // ---------- Full authorization on EVERY call ----------
     // Controllers are always authorized.
@@ -84,23 +97,12 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
             return SettleSeriesResult::Err(SettlementError::Common(CommonError::RegistryNotSet));
         }
 
-        let is_authorized: Result<(bool,), _> = call(
-            registry_canister,
-            "is_oracle_authorized",
-            (oracle_source, caller),
-        )
-        .await;
-
-        match is_authorized {
-            Ok((true,)) => {} // authorized
-            Ok((false,)) => {
+        match registry::is_oracle_authorized(registry_canister, oracle_source, caller).await {
+            Ok(true) => {}
+            Ok(false) => {
                 return SettleSeriesResult::Err(SettlementError::Common(CommonError::Unauthorized));
             }
-            Err((code, msg)) => {
-                return SettleSeriesResult::Err(SettlementError::Common(CommonError::Internal(
-                    format!("Registry call failed: {code:?} - {msg}"),
-                )));
-            }
+            Err(e) => return SettleSeriesResult::Err(SettlementError::Common(e)),
         }
     }
 
@@ -110,17 +112,123 @@ pub async fn settle_series(params: SettleSeriesParams) -> SettleSeriesResult {
 /// Returns the full settlement plan including per-position accounting details (admin only).
 #[query(guard = "caller_is_controller")]
 #[must_use]
-#[expect(clippy::needless_pass_by_value)]
 pub fn get_settlement_plan(series_id: SeriesId) -> Option<SettlementPlan> {
-    SETTLEMENT_PLANS.with(|m| m.borrow().get(&series_id).cloned())
+    SETTLEMENT_PLANS.with(move |m| m.borrow().get(&series_id).cloned())
 }
 
 /// Returns the public settlement progress for a derivative series without exposing user positions.
 #[query(guard = "caller_is_not_anonymous")]
 #[must_use]
-#[expect(clippy::needless_pass_by_value)]
 pub fn get_settlement_status(series_id: SeriesId) -> Option<SettlementStatusView> {
-    SETTLEMENT_PLANS.with(|m| m.borrow().get(&series_id).map(SettlementStatusView::from))
+    SETTLEMENT_PLANS.with(move |m| m.borrow().get(&series_id).map(SettlementStatusView::from))
+}
+
+/// Returns each requested series' settlement status in one call: the batch form
+/// of [`get_settlement_status`].
+///
+/// A resolution solver checks "is this market already settled?" for every due
+/// market on each pass; done one id at a time that is N sequential canister
+/// calls. This collapses them into one: each id is looked up in
+/// `SETTLEMENT_PLANS` and returned with its [`SettlementStatusView`], or `None`
+/// when no plan exists yet (the series is still open / not being settled).
+/// Results are one per requested id, in request order, so the caller can zip them
+/// back against its input; the `series_id` is echoed on each entry so a `None`
+/// status is still attributable.
+///
+/// The work is `O(#series_ids)` map lookups, bounded by the request rather than by the
+/// number of plans, so callers should pass the (already bounded) set they care
+/// about, e.g. the registry's "due" candidates. Reads the same
+/// `SETTLEMENT_PLANS` map as [`get_settlement_status`] and mirrors the
+/// aggregate-read shape of
+/// [`list_series_traded_volumes`](crate::api::trade::list_series_traded_volumes).
+/// Guarded by `caller_is_not_anonymous`, matching the other settlement reads.
+#[query(guard = "caller_is_not_anonymous")]
+#[must_use]
+pub fn list_series_settlement_statuses(
+    params: ListSeriesSettlementStatusesParams,
+) -> Vec<SeriesSettlementStatus> {
+    let ListSeriesSettlementStatusesParams { series_ids } = params;
+
+    SETTLEMENT_PLANS.with(|plans| {
+        let plans = plans.borrow();
+
+        series_ids
+            .into_iter()
+            .map(|series_id| {
+                let status = plans.get(&series_id).map(SettlementStatusView::from);
+
+                SeriesSettlementStatus { series_id, status }
+            })
+            .collect()
+    })
+}
+
+/// Lists the ids of series that have been settled (resolved), with stable
+/// cursor pagination.
+///
+/// A series appears here as soon as a [`SettlementPlan`] is opened for it (in
+/// any [`PlanStatus`]), which is precisely when it stops being tradeable. This
+/// is the authoritative resolution set: the clearing canister owns settlement
+/// state, the registry does not. Front ends that build a "currently-tradeable"
+/// candidate set call the registry's `list_series_with` with `only_unexpired`
+/// for the open/unexpired catalog and subtract the ids returned here to drop the
+/// resolved markets, instead of reconstructing resolution from the activity log.
+///
+/// Ids are returned in ascending order from `SETTLEMENT_PLANS` (a `BTreeMap`
+/// keyed by `SeriesId`), so paging with the previous response's `next_cursor`
+/// is stable as long as the underlying set is not mutated mid-traversal.
+#[query(guard = "caller_is_not_anonymous")]
+#[must_use]
+pub fn list_settled_series(params: ListSettledSeriesParams) -> SettledSeriesPage {
+    let ListSettledSeriesParams {
+        balance_domain,
+        start_after,
+        limit,
+    } = params;
+
+    // Default to "all remaining" when no limit is supplied, and clamp to at
+    // least 1 so a limit of 0 still makes forward progress (returns one id +
+    // a cursor) instead of an empty page that strands a paging caller.
+    // Mirrors the registry's pagination contract.
+    let limit = usize::try_from(limit.unwrap_or(u64::MAX))
+        .unwrap_or(usize::MAX)
+        .max(1);
+
+    SETTLEMENT_PLANS.with(|plans| {
+        let plans = plans.borrow();
+
+        let mut iter = match &start_after {
+            Some(after) => plans.range((Bound::Excluded(after), Bound::Unbounded)),
+            None => plans.range(..),
+        }
+        .filter(|(_, plan)| balance_domain.is_none_or(|d| plan.balance_domain == d))
+        .map(|(series_id, _)| series_id);
+
+        let mut items = Vec::new();
+        for _ in 0..limit {
+            match iter.next() {
+                Some(id) => items.push(id.clone()),
+                None => {
+                    // Fewer than `limit` ids remain: this is the last page.
+                    return SettledSeriesPage {
+                        items,
+                        next_cursor: None,
+                    };
+                }
+            }
+        }
+
+        // A full page was produced. Emit a cursor only if at least one more id
+        // exists. `start_after` is exclusive, so the cursor is the last id
+        // returned (mirroring `backfill_settlement_events`); resuming with it
+        // yields the next id without dropping or repeating any.
+        let next_cursor = iter
+            .next()
+            .is_some()
+            .then(|| items.last().cloned())
+            .flatten();
+        SettledSeriesPage { items, next_cursor }
+    })
 }
 
 /// Admin function to manually resume a stuck settlement plan, e.g., if the timer was dropped during
@@ -141,7 +249,76 @@ pub async fn resume_settlement(series_id: SeriesId) -> SettleSeriesResult {
     }
 }
 
-/// Internal settlement logic — caller has already been authorized.
+/// Returns resume parameters for every settlement plan that has not yet reached
+/// [`PlanStatus::Finalised`].
+///
+/// Extracted from [`resume_pending_settlements`] so the selection logic is
+/// unit-testable without the IC timer runtime.
+pub(crate) fn pending_settlement_params() -> Vec<SettleSeriesParams> {
+    SETTLEMENT_PLANS.with(|m| {
+        m.borrow()
+            .values()
+            .filter(|plan| plan.status != PlanStatus::Finalised)
+            .map(|plan| SettleSeriesParams {
+                series_id: plan.series_id.clone(),
+                settlement: plan.settlement.clone(),
+            })
+            .collect()
+    })
+}
+
+/// Re-drives every settlement plan that is still in flight.
+///
+/// IC timers do not survive a canister upgrade, so a plan left in
+/// `Planned`/`Executing` when the canister is upgraded keeps a consistent
+/// (but no longer advancing) state. Calling this from `post_upgrade`
+/// re-schedules background processing for each such plan so it catches up on
+/// its own instead of waiting for a manual [`resume_settlement`].
+///
+/// Re-driving is safe: `settle_series_inner` is idempotent. The accounting
+/// cursor advances atomically per message and a `Finalised` plan is a no-op,
+/// so a redundant resume can never double-apply accounting.
+pub(crate) fn resume_pending_settlements() {
+    // Stagger the resumptions rather than firing them all at once: a burst of
+    // simultaneous timer callbacks right after an upgrade could spike work and
+    // cycles. The step mirrors the 50ms cadence the self-resumption chain in
+    // `settle_series_inner` already uses between chunks.
+    const STAGGER_STEP: Duration = Duration::from_millis(50);
+    for (index, params) in pending_settlement_params().into_iter().enumerate() {
+        let slot = u32::try_from(index).unwrap_or(u32::MAX).saturating_add(1);
+        set_timer(STAGGER_STEP * slot, async move {
+            let _ = settle_series_inner(params).await;
+        });
+    }
+}
+
+/// How often the heartbeat sweeps for stalled settlement plans.
+///
+/// The 50ms self-resumption chain handles the common case within seconds, so
+/// this interval only needs to be short enough that a settlement whose chain
+/// broke (a trapping accounting chunk consumes the timer that would have
+/// scheduled the next chunk) recovers promptly without burning cycles on
+/// needless sweeps.
+const SETTLEMENT_HEARTBEAT_INTERVAL: Duration = Duration::from_mins(5);
+
+/// Arms a periodic sweep that re-drives any settlement plan stuck in
+/// `Planned`/`Executing`.
+///
+/// The self-resumption chain in `settle_series_inner` only schedules the next
+/// chunk when the current chunk succeeds; if a chunk traps, that scheduling is
+/// rolled back with it and the chain stops, leaving the plan consistent but
+/// not advancing. This heartbeat is the safety net that picks such plans back
+/// up. Re-driving is idempotent (see [`resume_pending_settlements`]).
+///
+/// Must be armed from both `init` and `post_upgrade`, since interval timers do
+/// not survive an upgrade.
+pub(crate) fn start_settlement_heartbeat() {
+    set_timer_interval(SETTLEMENT_HEARTBEAT_INTERVAL, || async {
+        resume_pending_settlements();
+    });
+}
+
+/// Internal settlement logic; the caller has already been authorized.
 ///
 /// This function is also used by the timer-based self-resumption so that
 /// background processing does not re-enter the IC update guard.
@@ -166,11 +343,14 @@ pub(crate) async fn settle_series_inner(params: SettleSeriesParams) -> SettleSer
             }
 
             if existing.settlement != settlement {
-                // For simplicity in the log check, we just return an error if mismatched.
-                // Comparing SettlementInput (enum) is fine.
-                return Err(SettlementError::Common(CommonError::InvalidInput(
-                    "Inconsistent settlement data".to_owned(),
-                )));
+                // A plan has already been locked on this series with a
+                // different settlement input. Rather than flattening this into
+                // `InvalidInput`, return the structured variant so the oracle
+                // tooling can diff the two.
+                return Err(SettlementError::InconsistentSettlement {
+                    existing: Box::new(existing.settlement.clone()),
+                    requested: Box::new(settlement),
+                });
             }
             existing
         } else {
@@ -242,10 +422,8 @@ pub(crate) async fn settle_series_inner(params: SettleSeriesParams) -> SettleSer
                 settlement: settlement.clone(),
             };
 
-            set_timer(Duration::from_millis(50), move || {
-                spawn(async move {
-                    let _ = settle_series_inner(params_clone).await;
-                });
+            set_timer(Duration::from_millis(50), async move {
+                let _ = settle_series_inner(params_clone).await;
             });
 
             Ok(SettleSeriesResult::processing())
@@ -295,8 +473,10 @@ pub(crate) fn prepare_settlement_impl(
 
                 let p_fee = calculate_settlement_fee(payoff_u128, protocol_fee_ratio);
 
-                let cashflow: i128 =
-                    (payoff_u128.cast_signed()) - (i_fee.cast_signed()) - (p_fee.cast_signed());
+                let cashflow: i128 = (payoff_u128.cast_signed())
+                    - (pos.reserved_margin_usd.cast_signed())
+                    - (i_fee.cast_signed())
+                    - (p_fee.cast_signed());
 
                 total_insurance_fee += i_fee;
                 total_protocol_fee += p_fee;
@@ -319,7 +499,7 @@ pub(crate) fn prepare_settlement_impl(
     )?;
 
     // Perform solvency check before any state modifications.
-    // Uses the aggregate net payoff (post-fee) — fees stay in the system
+    // Uses the aggregate net payoff (post-fee): fees stay in the system
     // (TREASURY + INSURANCE_FUND) so they don't reduce system equity.
     // We pass the settlement positions so that the check can compute
     // expected post-settlement equity (accounting for max(0,...) clamping).
@@ -333,6 +513,12 @@ pub(crate) fn prepare_settlement_impl(
         }
     });
 
+    // Cancel every open LIMIT order on this series and release the maker's
+    // blocked margin back to their account. Leaving orders in the book after
+    // settlement would let takers match them against a series that no longer
+    // trades, and would leave collateral reserved forever.
+    cancel_open_limit_orders(series_id);
+
     Ok(SettlementPlan::get_or_create(SettlementPlanParams {
         series_id: series_id.clone(),
         settlement: settlement.clone(),
@@ -344,12 +530,62 @@ pub(crate) fn prepare_settlement_impl(
     }))
 }
 
+/// Removes every open limit order on `series_id` and releases each order's
+/// `blocked_margin_usd` from the maker's `reserved_margin_usd` (freeing that
+/// collateral for other trades or withdrawals), mirroring the bookkeeping
+/// done by [`cancel_limit_order`].
+///
+/// Called synchronously from [`prepare_settlement_impl`] right after positions
+/// are removed so that the canister-level invariant "no open orders for a
+/// settled series" holds before the plan is persisted. Idempotent: safe to
+/// call on a series that has no open orders.
+fn cancel_open_limit_orders(series_id: &SeriesId) {
+    let cancelled: Vec<(User, BalanceDomain, u128)> = LIMIT_ORDERS.with(|orders| {
+        let mut orders = orders.borrow_mut();
+        let matching: Vec<_> = orders
+            .iter()
+            .filter(|(_, o)| &o.series_id == series_id)
+            .map(|(id, o)| {
+                (
+                    id.clone(),
+                    o.creator,
+                    o.balance_domain,
+                    o.blocked_margin_usd,
+                )
+            })
+            .collect();
+
+        for (id, _, _, _) in &matching {
+            orders.remove(id);
+        }
+
+        matching
+            .into_iter()
+            .map(|(_, creator, domain, margin)| (creator, domain, margin))
+            .collect()
+    });
+
+    if cancelled.is_empty() {
+        return;
+    }
+
+    ACCOUNT_STATES.with(|accounts| {
+        let mut accounts = accounts.borrow_mut();
+        for (user, domain, blocked_margin_usd) in cancelled {
+            if let Some(acc) = accounts.get_mut(&user) {
+                let current = acc.get_reserved_margin_usd(domain);
+                acc.set_reserved_margin_usd(domain, current.saturating_sub(blocked_margin_usd));
+            }
+        }
+    });
+}
+
 /// Validates aggregate solvency for a settlement batch.
 ///
 /// Computes the **expected post-settlement** system equity by simulating the
 /// cashflows on each account and clamping to zero.  This is more conservative
 /// than using pre-settlement equity because `calculate_equity_usd` returns
-/// `max(0, cash + collateral)` — a loser whose equity would go negative
+/// `max(0, cash + collateral)`: a loser whose equity would go negative
 /// contributes 0 post-settlement, but their full positive equity would have
 /// been counted in a pre-settlement snapshot, inflating the apparent resources.
 ///
@@ -398,6 +634,20 @@ fn check_settlement_solvency(
 }
 
 pub(crate) fn apply_settlement_accounting_logic(plan: &mut SettlementPlan) -> bool {
+    // Settlement events emitted in this invocation; pushed once after the
+    // accounting loop so we don't hold both ACCOUNT_STATES and EVENTS
+    // borrows simultaneously.
+    let mut emitted: Vec<Event> = Vec::new();
+
+    // Price field on a Settled event records what the series resolved to.
+    // For Price settlements we surface the actual settlement price; for
+    // Outcome settlements there's no scalar, so encode 1.0 as a neutral
+    // placeholder so consumers can still read `decimal` without special-casing.
+    let settlement_price: Price = match &plan.settlement {
+        SettlementInput::Price(p) => p.clone(),
+        SettlementInput::Outcome(_) => Price::new(1, 0),
+    };
+
     ACCOUNT_STATES.with(|accounts| {
         let mut accounts = accounts.borrow_mut();
 
@@ -417,6 +667,26 @@ pub(crate) fn apply_settlement_accounting_logic(plan: &mut SettlementPlan) -> bo
                     domain,
                     current_reserved.saturating_sub(pos.reserved_margin_usd),
                 );
+
+                // 3. Record a per-user Settled event so the trade-history query can surface the
+                //    settlement. `qty` carries the signed cashflow (positive = winner, negative =
+                //    loser).
+                let event_id = NEXT_EVENT_ID.with(|id| {
+                    let mut id = id.borrow_mut();
+                    let current = *id;
+                    *id += 1;
+                    current
+                });
+                emitted.push(Event {
+                    event_id,
+                    clearing_id: canister_id(),
+                    series_id: plan.series_id.clone(),
+                    user: pos.user,
+                    qty: pos.cashflow_usd,
+                    price: settlement_price.clone(),
+                    event_type: EventType::Settled,
+                    timestamp: now_ns(),
+                });
             }
 
             plan.accounting_cursor += 1;
@@ -430,11 +700,153 @@ pub(crate) fn apply_settlement_accounting_logic(plan: &mut SettlementPlan) -> bo
         }
     });
 
+    if !emitted.is_empty() {
+        index_settled_events(&emitted);
+        EVENTS.with(|events| {
+            events.borrow_mut().extend(emitted);
+        });
+    }
+
     let newly_applied = plan.accounting_cursor == plan.positions.len() && !plan.accounting_applied;
     if newly_applied {
         plan.accounting_applied = true;
     }
     newly_applied
+}
+
+/// One-shot, idempotent backfill of `Settled` events for plans finalized
+/// before per-user event emission was added to `apply_settlement_accounting_logic`.
+///
+/// Iterates `SETTLEMENT_PLANS` in sorted order starting after
+/// `params.start_after`. For each `Finalised` plan it synthesizes one
+/// `EventType::Settled` event per `SettlementPosition` whose `(user,
+/// series_id)` pair has no pre-existing `Settled` event in `EVENTS`. The
+/// synthesized event's `timestamp` is the plan's original
+/// `idempotency_ns` so backfilled rows sort alongside the live events
+/// that would have been written at settlement time.
+///
+/// Yields cooperatively when the instruction counter is high so a single
+/// call cannot exhaust the update budget. Callers loop until the response
+/// returns `next_cursor: None`.
+#[update(guard = "caller_is_controller")]
+#[must_use]
+pub fn backfill_settlement_events(
+    params: BackfillSettlementEventsParams,
+) -> BackfillSettlementEventsResult {
+    // Threshold below the 10B-per-message instruction limit. Same shape
+    // as the `apply_settlement_accounting_logic` chunking pattern but
+    // using a hard ceiling rather than batch-of-100, since per-plan work
+    // varies with the number of positions.
+    #[cfg(not(test))]
+    const INSTRUCTION_BUDGET: u64 = 1_000_000_000;
+
+    let BackfillSettlementEventsParams { start_after } = params;
+
+    // Per-series dedup: any plan whose series already has at least one
+    // Settled event in EVENTS is treated as already backfilled. A plan
+    // is backfilled atomically (all positions or none), so this single
+    // marker is sufficient and matches the live-emission contract,
+    // which emits one event per `SettlementPosition`, including
+    // multiple positions per user on the same series (e.g. hedged
+    // YES + NO).
+    let mut series_already_backfilled: HashSet<SeriesId> = EVENTS.with(|events| {
+        events
+            .borrow()
+            .iter()
+            .filter(|e| matches!(e.event_type, EventType::Settled))
+            .map(|e| e.series_id.clone())
+            .collect()
+    });
+
+    let mut result = BackfillSettlementEventsResult::default();
+    let mut emitted: Vec<Event> = Vec::new();
+
+    SETTLEMENT_PLANS.with(|plans| {
+        let plans = plans.borrow();
+
+        // Lower bound on the iteration: exclude `start_after` itself.
+        let iter: Box<dyn Iterator<Item = (&SeriesId, &SettlementPlan)>> = match &start_after {
+            None => Box::new(plans.iter()),
+            Some(after) => {
+                Box::new(plans.range::<SeriesId, _>((Bound::Excluded(after), Bound::Unbounded)))
+            }
+        };
+
+        for (series_id, plan) in iter {
+            if plan.status == PlanStatus::Finalised {
+                result.plans_scanned += 1;
+
+                if series_already_backfilled.contains(series_id) {
+                    // Skip the whole plan: at least one position has already
+                    // produced a Settled event for this series.
+                    result.events_skipped += plan.positions.len() as u64;
+                } else {
+                    // Use the original settlement-initiation timestamp so
+                    // backfilled rows have meaningful chronology rather than the
+                    // backfill execution time.
+                    let timestamp = plan
+                        .idempotency_ns
+                        .to_created_at_time_ns()
+                        .unwrap_or_else(now_ns);
+
+                    let price: Price = match &plan.settlement {
+                        SettlementInput::Price(p) => p.clone(),
+                        SettlementInput::Outcome(_) => Price::new(1, 0),
+                    };
+
+                    for pos in &plan.positions {
+                        let event_id = NEXT_EVENT_ID.with(|id| {
+                            let mut id = id.borrow_mut();
+                            let current = *id;
+                            *id += 1;
+                            current
+                        });
+                        emitted.push(Event {
+                            event_id,
+                            clearing_id: canister_id(),
+                            series_id: series_id.clone(),
+                            user: pos.user,
+                            qty: pos.cashflow_usd,
+                            price: price.clone(),
+                            event_type: EventType::Settled,
+                            timestamp,
+                        });
+                        result.events_emitted += 1;
+                    }
+
+                    series_already_backfilled.insert(series_id.clone());
+                }
+            }
+
+            // Cooperative yield after every visited plan (including
+            // non-finalized and already-backfilled ones) so the per-call
+            // instruction budget remains bounded even when the cursor
+            // encounters long runs of plans that produce no events.
+            // `instruction_counter()` panics when called outside a canister,
+            // so unit tests skip the check entirely and process every plan in
+            // one pass. The cursor uses exclusive `start_after` semantics, so
+            // the next call resumes after `series_id`.
+            #[cfg(not(test))]
+            {
+                let used = instruction_counter();
+                if used > INSTRUCTION_BUDGET {
+                    result.next_cursor = Some(series_id.clone());
+                    return;
+                }
+            }
+        }
+
+        result.next_cursor = None;
+    });
+
+    if !emitted.is_empty() {
+        index_settled_events(&emitted);
+        EVENTS.with(|events| {
+            events.borrow_mut().extend(emitted);
+        });
+    }
+
+    result
 }
 
 #[cfg(test)]
@@ -444,13 +856,16 @@ mod tests {
 
     use candid::Principal;
     use shared::types::{
-        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId,
+        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Resolution, Series, SeriesId,
         SettlementInput,
     };
 
     use crate::{
         api::settlement::{
-            api::check_settlement_solvency, errors::SettlementError, get_settlement_plan,
+            api::check_settlement_solvency,
+            errors::SettlementError,
+            get_settlement_plan, list_series_settlement_statuses, list_settled_series,
+            params::{ListSeriesSettlementStatusesParams, ListSettledSeriesParams},
             prepare_settlement_impl,
         },
         memory::{ACCOUNT_STATES, COLLATERAL_ASSETS, POSITIONS, SETTLEMENT_PLANS},
@@ -469,11 +884,14 @@ mod tests {
         let series_id = SeriesId::from("test_ser".to_owned());
 
         let series = Series {
+            resolution: Resolution::new("Resolved per oracle at expiry"),
             series_id: series_id.clone(),
             underlying: "BTC".to_owned(),
             expiry_ns: 2_000_000_000,
+            start_ns: None,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(100, 0)),
+            settlement_cap: None,
             price_precision: 0,
             payout_unit: PayoutUnit::usd(),
             outcomes: None,
@@ -485,6 +903,10 @@ mod tests {
             description: Description::plain("Test Description"),
             icon_url: None,
             banner_url: None,
+            trading_access: vec![],
+            engine_id: None,
+            forked_from: None,
+            locale: None,
         };
 
         // Settlement price 200 → Call payoff = 200 - 100 = 100 USD per unit.
@@ -500,7 +922,7 @@ mod tests {
                     series_id: series_id.clone(),
                     outcome_id: None,
                     net_qty: 1,
-                    reserved_margin_usd: 10,
+                    reserved_margin_usd: 100_000,
                 },
             );
         });
@@ -534,8 +956,9 @@ mod tests {
             total_collateral_usd,
         }) = result
         {
-            assert_eq!(total_net_payoff, 1_000_000); // 100 USD
-            assert_eq!(total_collateral_usd, 900_000); // 90 USD post-settlement
+            assert_eq!(total_net_payoff, 900_000); // 100 USD payoff - 10 USD margin
+            assert_eq!(total_collateral_usd, 800_000); // -10 initial + 100 payoff - 10 margin = 80
+                                                       // USD
         } else {
             panic!("Expected SolvencyViolation, got {result:?}");
         }
@@ -553,11 +976,14 @@ mod tests {
         let series_id = SeriesId::from("test_ser".to_owned());
 
         let series = Series {
+            resolution: Resolution::new("Resolved per oracle at expiry"),
             series_id: series_id.clone(),
             underlying: "BTC".to_owned(),
             expiry_ns: 2_000_000_000,
+            start_ns: None,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(100, 0)),
+            settlement_cap: None,
             price_precision: 0,
             payout_unit: PayoutUnit::usd(),
             outcomes: None,
@@ -569,6 +995,10 @@ mod tests {
             description: Description::plain("Test Description"),
             icon_url: None,
             banner_url: None,
+            trading_access: vec![],
+            engine_id: None,
+            forked_from: None,
+            locale: None,
         };
 
         let settlement_price = Price::new(150, 0); // payoff 50 per unit
@@ -583,7 +1013,7 @@ mod tests {
                     series_id: series_id.clone(),
                     outcome_id: None,
                     net_qty: 1,
-                    reserved_margin_usd: 10,
+                    reserved_margin_usd: 100_000,
                 },
             );
         });
@@ -612,7 +1042,10 @@ mod tests {
         // fees are in USD base units (`USD_DECIMALS`).
         assert_eq!(plan.insurance_fee_usd, 500);
         assert_eq!(plan.fee_usd, 250);
-        assert_eq!(plan.positions[0].cashflow_usd, 500_000 - 500 - 250);
+        assert_eq!(
+            plan.positions[0].cashflow_usd,
+            500_000 - 100_000 - 500 - 250
+        );
 
         // Verify position WAS REMOVED
         POSITIONS.with(|pos: &RefCell<BTreeMap<_, _>>| {
@@ -654,6 +1087,63 @@ mod tests {
 
         // Cleanup
         SETTLEMENT_PLANS.with(|m| m.borrow_mut().remove(&series_id));
+    }
+
+    /// The batch settlement-status read returns one entry per requested id, in
+    /// request order: `Some(status)` for series with a plan, `None` for series
+    /// that are still open or unknown, collapsing N `get_settlement_status`
+    /// calls into one.
+    #[test]
+    fn list_series_settlement_statuses_batches_lookups() {
+        let settled = SeriesId::from("batch_settled".to_owned());
+        let open = SeriesId::from("batch_open".to_owned());
+        let unknown = SeriesId::from("batch_unknown".to_owned());
+
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+
+        // Only `settled` has a plan.
+        let _plan = SettlementPlan::get_or_create(SettlementPlanParams {
+            series_id: settled.clone(),
+            settlement: SettlementInput::Price(Price::new(100, 0)),
+            oracle_source: "oracle".to_owned(),
+            fee: 7,
+            insurance_fee: 3,
+            positions: vec![],
+            balance_domain: BalanceDomain::Settlement,
+        });
+
+        // Request order deliberately interleaves the three cases; results must
+        // come back aligned to the input.
+        let result = list_series_settlement_statuses(ListSeriesSettlementStatusesParams {
+            series_ids: vec![open.clone(), settled.clone(), unknown.clone()],
+        });
+
+        assert_eq!(result.len(), 3, "one entry per requested id");
+
+        assert_eq!(result[0].series_id, open);
+        assert!(result[0].status.is_none(), "open series has no plan");
+
+        assert_eq!(result[1].series_id, settled);
+        let status = result[1]
+            .status
+            .as_ref()
+            .expect("settled series has a plan");
+        assert_eq!(status.series_id, settled);
+        assert_eq!(status.fee_usd, 7);
+        assert_eq!(status.insurance_fee_usd, 3);
+        assert_eq!(status.status, PlanStatus::Planned);
+
+        assert_eq!(result[2].series_id, unknown);
+        assert!(result[2].status.is_none(), "unknown series has no plan");
+
+        // An empty request yields an empty response.
+        let empty = list_series_settlement_statuses(ListSeriesSettlementStatusesParams {
+            series_ids: vec![],
+        });
+        assert!(empty.is_empty());
+
+        // Cleanup
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().remove(&settled));
     }
 
     #[test]
@@ -833,7 +1323,7 @@ mod tests {
             balance_domain: BalanceDomain::Settlement,
         });
 
-        // Plan is returned unchanged — the original price (100) is preserved
+        // Plan is returned unchanged: the original price (100) is preserved
         if let SettlementInput::Price(p) = plan2.settlement {
             assert_eq!(p, Price::new(100, 0));
         } else {
@@ -857,11 +1347,14 @@ mod tests {
         let series_id = SeriesId::from("net_payoff_test".to_owned());
 
         let series = Series {
+            resolution: Resolution::new("Resolved per oracle at expiry"),
             series_id: series_id.clone(),
             underlying: "BTC".to_owned(),
             expiry_ns: 2_000_000_000,
+            start_ns: None,
             payoff_type: PayoffType::Call,
             strike: Some(Price::new(100, 0)),
+            settlement_cap: None,
             price_precision: 0,
             payout_unit: PayoutUnit::usd(),
             oracle_source: "oracle".to_owned(),
@@ -873,6 +1366,10 @@ mod tests {
             icon_url: None,
             banner_url: None,
             balance_domain: BalanceDomain::Settlement,
+            trading_access: vec![],
+            engine_id: None,
+            forked_from: None,
+            locale: None,
         };
 
         // Settlement price 200 → gross payoff = 200 - 100 = 100 USD (4-decimal units)
@@ -888,7 +1385,7 @@ mod tests {
                     series_id: series_id.clone(),
                     outcome_id: None,
                     net_qty: 1,
-                    reserved_margin_usd: 10,
+                    reserved_margin_usd: 100_000,
                 },
             );
         });
@@ -926,7 +1423,7 @@ mod tests {
         assert_eq!(plan.fee_usd, 10_000); // 1% of 1_000_000
         assert_eq!(
             plan.positions[0].cashflow_usd,
-            1_000_000 - 10_000 - 10_000 // 980_000
+            1_000_000 - 100_000 - 10_000 - 10_000 // Payoff - Margin - Fees = 880,000
         );
 
         // Cleanup
@@ -1007,8 +1504,7 @@ mod tests {
         }
 
         // Also verify that a payoff within post-settlement equity passes.
-        let result_ok =
-            check_settlement_solvency(BalanceDomain::Settlement, 1_050_000, &positions);
+        let result_ok = check_settlement_solvency(BalanceDomain::Settlement, 1_050_000, &positions);
         assert!(
             result_ok.is_ok(),
             "Expected success when net payoff equals post-settlement equity"
@@ -1016,5 +1512,478 @@ mod tests {
 
         // Cleanup
         ACCOUNT_STATES.with(|acc| acc.borrow_mut().clear());
+    }
+
+    /// The structured `InconsistentSettlement` variant preserves both the
+    /// originally-locked settlement input and the conflicting attempt, so a
+    /// second `settle_series` call with a different price or outcome does not
+    /// lose information the way the previous generic `InvalidInput` did.
+    #[test]
+    fn inconsistent_settlement_variant_preserves_both_inputs() {
+        use crate::api::settlement::errors::SettlementError;
+
+        let original = SettlementInput::Price(Price::new(100, 0));
+        let requested = SettlementInput::Outcome("YES".to_owned().into());
+
+        let err = SettlementError::InconsistentSettlement {
+            existing: Box::new(original.clone()),
+            requested: Box::new(requested.clone()),
+        };
+
+        match err {
+            SettlementError::InconsistentSettlement {
+                existing,
+                requested: req,
+            } => {
+                assert_eq!(*existing, original);
+                assert_eq!(*req, requested);
+            }
+            other => panic!("expected InconsistentSettlement, got {other:?}"),
+        }
+    }
+
+    /// `prepare_settlement_impl` must cancel every open limit order on the
+    /// series being settled and refund the blocked margin to each maker, so
+    /// that a settled series leaves no live book and no stuck collateral.
+    #[test]
+    fn prepare_settlement_cancels_open_limit_orders_and_refunds_margin() {
+        use shared::types::OutcomeId;
+
+        use crate::{
+            memory::LIMIT_ORDERS,
+            types::trade::{LimitOrder, OrderId, Side},
+        };
+
+        let maker_p = Principal::from_slice(&[7]);
+        let maker = User(maker_p);
+        let other_maker_p = Principal::from_slice(&[8]);
+        let other_maker = User(other_maker_p);
+        let series_id = SeriesId::from("cleanup_test".to_owned());
+        let other_series_id = SeriesId::from("untouched_series".to_owned());
+
+        let series = Series {
+            resolution: Resolution::new("Resolved per oracle at expiry"),
+            series_id: series_id.clone(),
+            underlying: "BTC".to_owned(),
+            expiry_ns: 2_000_000_000,
+            start_ns: None,
+            payoff_type: PayoffType::Call,
+            strike: Some(Price::new(100, 0)),
+            settlement_cap: None,
+            price_precision: 0,
+            payout_unit: PayoutUnit::usd(),
+            outcomes: None,
+            balance_domain: BalanceDomain::Settlement,
+            oracle_source: "oracle".to_owned(),
+            creator: Principal::anonymous(),
+            created_at_ns: 1_000_000_000,
+            title: "Test".to_owned(),
+            description: Description::plain("Cleanup test"),
+            icon_url: None,
+            banner_url: None,
+            trading_access: vec![],
+            engine_id: None,
+            forked_from: None,
+            locale: None,
+        };
+
+        POSITIONS.with(|pos| pos.borrow_mut().clear());
+
+        // Seed two orders on the series under settlement and one order on an
+        // unrelated series that MUST be left alone.
+        let order_ids = [
+            (
+                OrderId::from("o1".to_owned()),
+                maker,
+                series_id.clone(),
+                40_000_u128,
+            ),
+            (
+                OrderId::from("o2".to_owned()),
+                maker,
+                series_id.clone(),
+                60_000_u128,
+            ),
+            (
+                OrderId::from("o3".to_owned()),
+                other_maker,
+                other_series_id.clone(),
+                25_000_u128,
+            ),
+        ];
+
+        LIMIT_ORDERS.with(|orders| {
+            let mut orders = orders.borrow_mut();
+            orders.clear();
+            for (id, creator, sid, blocked) in &order_ids {
+                orders.insert(
+                    id.clone(),
+                    LimitOrder {
+                        order_id: id.clone(),
+                        creator: *creator,
+                        series_id: sid.clone(),
+                        outcome_id: None::<OutcomeId>,
+                        side: Side::Buy,
+                        qty: 1,
+                        price: Price::new(50, 0),
+                        blocked_margin_usd: *blocked,
+                        balance_domain: BalanceDomain::Settlement,
+                    },
+                );
+            }
+        });
+
+        ACCOUNT_STATES.with(|acc| {
+            let mut acc = acc.borrow_mut();
+            acc.clear();
+            let mut a = AccountState::new(maker);
+            a.set_cash_balance_usd(BalanceDomain::Settlement, 10_000_000);
+            // Maker has 100_000 reserved for both orders (40_000 + 60_000).
+            a.set_reserved_margin_usd(BalanceDomain::Settlement, 100_000);
+            acc.insert(maker, a);
+
+            let mut b = AccountState::new(other_maker);
+            b.set_cash_balance_usd(BalanceDomain::Settlement, 10_000_000);
+            b.set_reserved_margin_usd(BalanceDomain::Settlement, 25_000);
+            acc.insert(other_maker, b);
+        });
+
+        let result = prepare_settlement_impl(
+            &series,
+            &series_id,
+            &SettlementInput::Price(Price::new(150, 0)),
+            0,
+            0,
+        );
+        assert!(result.is_ok(), "settlement prep failed: {result:?}");
+
+        // Both orders on the settled series are gone; the unrelated order stays.
+        LIMIT_ORDERS.with(|orders| {
+            let orders = orders.borrow();
+            assert!(orders.get(&OrderId::from("o1".to_owned())).is_none());
+            assert!(orders.get(&OrderId::from("o2".to_owned())).is_none());
+            assert!(orders.get(&OrderId::from("o3".to_owned())).is_some());
+        });
+
+        // Maker's reserved margin is refunded (100_000 → 0). The other maker
+        // on the untouched series keeps their reservation.
+        ACCOUNT_STATES.with(|acc| {
+            let acc = acc.borrow();
+            assert_eq!(
+                acc.get(&maker)
+                    .unwrap()
+                    .get_reserved_margin_usd(BalanceDomain::Settlement),
+                0,
+                "maker's margin should be fully released after cancellation"
+            );
+            assert_eq!(
+                acc.get(&other_maker)
+                    .unwrap()
+                    .get_reserved_margin_usd(BalanceDomain::Settlement),
+                25_000,
+                "unrelated series' maker should not be touched"
+            );
+        });
+
+        // Cleanup
+        LIMIT_ORDERS.with(|orders| orders.borrow_mut().clear());
+        ACCOUNT_STATES.with(|acc| acc.borrow_mut().clear());
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().remove(&series_id));
+    }
+
+    /// Backfill emits one Settled event per finalized-plan position and is
+    /// idempotent on re-run. Non-finalized plans are skipped. Synthesized
+    /// timestamps reflect the plan's original `idempotency_ns`.
+    #[test]
+    fn backfill_settlement_events_emits_and_is_idempotent() {
+        use crate::{
+            api::settlement::{backfill_settlement_events, params::BackfillSettlementEventsParams},
+            memory::EVENTS,
+            types::event::EventType,
+        };
+
+        // Reset shared state to a known baseline so the test is hermetic.
+        EVENTS.with(|e| e.borrow_mut().clear());
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+
+        let series_finalised = SeriesId::from("backfill_finalised".to_owned());
+        let series_executing = SeriesId::from("backfill_executing".to_owned());
+
+        let users: Vec<User> = (0..3_u32)
+            .map(|i| User(Principal::from_slice(&i.to_be_bytes())))
+            .collect();
+
+        let positions: Vec<SettlementPosition> = users
+            .iter()
+            .enumerate()
+            .map(|(i, u)| SettlementPosition {
+                user: *u,
+                outcome_id: None,
+                net_qty: 1,
+                reserved_margin_usd: 1_000,
+                // Mix of winners and losers so the test exercises the signed
+                // qty semantic: first two positive, last one negative.
+                cashflow_usd: if i < 2 { 5_000 } else { -3_000 },
+            })
+            .collect();
+
+        // Two plans: one Finalised (should be backfilled), one Executing
+        // (should be skipped: its events will be emitted naturally when
+        // accounting completes).
+        let finalised_plan = SettlementPlan {
+            series_id: series_finalised.clone(),
+            settlement: SettlementInput::Outcome("YES".to_owned().into()),
+            oracle_source: "test".to_owned(),
+            fee_usd: 0,
+            insurance_fee_usd: 0,
+            positions: positions.clone(),
+            accounting_cursor: positions.len(),
+            accounting_applied: true,
+            status: PlanStatus::Finalised,
+            idempotency_ns: 1_700_000_000_000_000_000_u64.into(),
+            balance_domain: BalanceDomain::Settlement,
+        };
+
+        let executing_plan = SettlementPlan {
+            series_id: series_executing.clone(),
+            settlement: SettlementInput::Outcome("NO".to_owned().into()),
+            oracle_source: "test".to_owned(),
+            fee_usd: 0,
+            insurance_fee_usd: 0,
+            positions: positions.clone(),
+            accounting_cursor: 0,
+            accounting_applied: false,
+            status: PlanStatus::Executing,
+            idempotency_ns: 1_700_000_000_000_000_000_u64.into(),
+            balance_domain: BalanceDomain::Settlement,
+        };
+
+        SETTLEMENT_PLANS.with(|m| {
+            let mut m = m.borrow_mut();
+            m.insert(series_finalised.clone(), finalised_plan);
+            m.insert(series_executing.clone(), executing_plan);
+        });
+
+        let first = backfill_settlement_events(BackfillSettlementEventsParams::default());
+        assert_eq!(first.plans_scanned, 1, "only the Finalised plan is visited");
+        assert_eq!(
+            first.events_emitted, 3,
+            "one Settled event per SettlementPosition"
+        );
+        assert_eq!(first.events_skipped, 0);
+        assert!(first.next_cursor.is_none(), "single chunk completes");
+
+        // Verify the events actually landed in EVENTS with the right shape.
+        let emitted: Vec<_> = EVENTS.with(|e| {
+            e.borrow()
+                .iter()
+                .filter(|ev| {
+                    matches!(ev.event_type, EventType::Settled) && ev.series_id == series_finalised
+                })
+                .cloned()
+                .collect()
+        });
+        assert_eq!(emitted.len(), 3);
+        assert!(emitted
+            .iter()
+            .all(|e| e.timestamp == 1_700_000_000_000_000_000));
+        // Two winners, one loser; qty carries signed cashflow.
+        let winners = emitted.iter().filter(|e| e.qty > 0).count();
+        let losers = emitted.iter().filter(|e| e.qty < 0).count();
+        assert_eq!(winners, 2);
+        assert_eq!(losers, 1);
+
+        // Idempotency: second invocation emits nothing and skips all 3.
+        let second = backfill_settlement_events(BackfillSettlementEventsParams::default());
+        assert_eq!(second.plans_scanned, 1);
+        assert_eq!(second.events_emitted, 0);
+        assert_eq!(second.events_skipped, 3);
+
+        // Cleanup
+        EVENTS.with(|e| e.borrow_mut().clear());
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+    }
+
+    /// Seeds an empty-positions settlement plan for `series_id` in `domain`, so
+    /// the series is registered as settled/resolved.
+    fn seed_settled(series_id: &str, domain: BalanceDomain) {
+        let _ = SettlementPlan::get_or_create(SettlementPlanParams {
+            series_id: SeriesId::from(series_id.to_owned()),
+            settlement: SettlementInput::Price(Price::new(1, 0)),
+            oracle_source: "oracle".to_owned(),
+            fee: 0,
+            insurance_fee: 0,
+            positions: vec![],
+            balance_domain: domain,
+        });
+    }
+
+    #[test]
+    fn list_settled_series_returns_ids_ascending_and_filters_by_domain() {
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+
+        // Insert out of order to prove the BTreeMap yields ascending ids.
+        seed_settled("s_c", BalanceDomain::Settlement);
+        seed_settled("s_a", BalanceDomain::ViciXp);
+        seed_settled("s_b", BalanceDomain::Settlement);
+
+        // No filter → every settled id, ascending.
+        let all = list_settled_series(ListSettledSeriesParams::default());
+        assert_eq!(
+            all.items,
+            vec![
+                SeriesId::from("s_a".to_owned()),
+                SeriesId::from("s_b".to_owned()),
+                SeriesId::from("s_c".to_owned()),
+            ]
+        );
+        assert!(all.next_cursor.is_none());
+
+        // Domain filter → only matching plans.
+        let settlement_only = list_settled_series(ListSettledSeriesParams {
+            balance_domain: Some(BalanceDomain::Settlement),
+            ..Default::default()
+        });
+        assert_eq!(
+            settlement_only.items,
+            vec![
+                SeriesId::from("s_b".to_owned()),
+                SeriesId::from("s_c".to_owned()),
+            ]
+        );
+
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+    }
+
+    #[test]
+    fn list_settled_series_paginates_stably() {
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+
+        for id in ["s1", "s2", "s3", "s4", "s5"] {
+            seed_settled(id, BalanceDomain::Settlement);
+        }
+
+        // First page of 2. `next_cursor` is the last id returned (exclusive
+        // resume point), set because more ids remain.
+        let page1 = list_settled_series(ListSettledSeriesParams {
+            limit: Some(2),
+            ..Default::default()
+        });
+        assert_eq!(
+            page1.items,
+            vec![
+                SeriesId::from("s1".to_owned()),
+                SeriesId::from("s2".to_owned()),
+            ]
+        );
+        assert_eq!(page1.next_cursor, Some(SeriesId::from("s2".to_owned())));
+
+        // Resume after the cursor → next page, with no id dropped or repeated.
+        let page2 = list_settled_series(ListSettledSeriesParams {
+            start_after: page1.next_cursor,
+            limit: Some(2),
+            ..Default::default()
+        });
+        assert_eq!(
+            page2.items,
+            vec![
+                SeriesId::from("s3".to_owned()),
+                SeriesId::from("s4".to_owned()),
+            ]
+        );
+        assert_eq!(page2.next_cursor, Some(SeriesId::from("s4".to_owned())));
+
+        // Final page → last id, no further cursor.
+        let page3 = list_settled_series(ListSettledSeriesParams {
+            start_after: page2.next_cursor,
+            limit: Some(2),
+            ..Default::default()
+        });
+        assert_eq!(page3.items, vec![SeriesId::from("s5".to_owned())]);
+        assert!(page3.next_cursor.is_none());
+
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+    }
+
+    #[test]
+    fn list_settled_series_empty_when_nothing_settled() {
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+
+        let page = list_settled_series(ListSettledSeriesParams::default());
+        assert!(page.items.is_empty());
+        assert!(page.next_cursor.is_none());
+    }
+
+    #[test]
+    fn list_settled_series_clamps_zero_limit_to_make_progress() {
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+        for id in ["s1", "s2", "s3"] {
+            seed_settled(id, BalanceDomain::Settlement);
+        }
+
+        // limit = 0 is clamped to 1: returns a single id plus a cursor rather
+        // than an empty page that would strand the caller.
+        let page = list_settled_series(ListSettledSeriesParams {
+            limit: Some(0),
+            ..Default::default()
+        });
+        assert_eq!(page.items, vec![SeriesId::from("s1".to_owned())]);
+        assert_eq!(page.next_cursor, Some(SeriesId::from("s1".to_owned())));
+
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+    }
+
+    #[test]
+    fn pending_settlement_params_selects_only_unfinalised_plans() {
+        use crate::api::settlement::api::pending_settlement_params;
+
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
+
+        let plan = |id: &str, status: PlanStatus| SettlementPlan {
+            series_id: SeriesId::from(id.to_owned()),
+            settlement: SettlementInput::Price(Price::new(1, 0)),
+            oracle_source: "oracle".to_owned(),
+            fee_usd: 0,
+            insurance_fee_usd: 0,
+            positions: vec![],
+            accounting_cursor: 0,
+            accounting_applied: false,
+            status,
+            idempotency_ns: 1_700_000_000_000_000_000_u64.into(),
+            balance_domain: BalanceDomain::Settlement,
+        };
+
+        SETTLEMENT_PLANS.with(|m| {
+            let mut m = m.borrow_mut();
+            m.insert(
+                "planned".to_owned().into(),
+                plan("planned", PlanStatus::Planned),
+            );
+            m.insert(
+                "executing".to_owned().into(),
+                plan("executing", PlanStatus::Executing),
+            );
+            m.insert(
+                "finalised".to_owned().into(),
+                plan("finalised", PlanStatus::Finalised),
+            );
+        });
+
+        let mut ids: Vec<SeriesId> = pending_settlement_params()
+            .into_iter()
+            .map(|p| p.series_id)
+            .collect();
+        ids.sort();
+
+        // Planned and Executing plans are re-driven; Finalised is skipped.
+        assert_eq!(
+            ids,
+            vec![
+                SeriesId::from("executing".to_owned()),
+                SeriesId::from("planned".to_owned()),
+            ]
+        );
+
+        SETTLEMENT_PLANS.with(|m| m.borrow_mut().clear());
     }
 }

@@ -1,6 +1,7 @@
 use candid::Principal;
 use shared::types::{
-    BalanceDomain, Description, Outcome, OutcomeId, PayoffType, PayoutUnit, Price, Series, SeriesId,
+    BalanceDomain, Description, Outcome, OutcomeId, PayoffType, PayoutUnit, Price, Resolution,
+    Series, SeriesId,
 };
 
 use crate::{
@@ -19,11 +20,14 @@ fn categorical_arbitrage_validation() {
     let outcome_no = OutcomeId::from("No".to_owned());
 
     let series = Series {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         series_id: series_id.clone(),
         underlying: "ARB_TEST".to_owned(),
         expiry_ns: 2_000_000_000,
+        start_ns: None,
         payoff_type: PayoffType::Categorical,
         strike: None,
+        settlement_cap: None,
         price_precision: 6,
         payout_unit: PayoutUnit::usd(),
         outcomes: Some(vec![
@@ -48,6 +52,10 @@ fn categorical_arbitrage_validation() {
         icon_url: None,
         banner_url: None,
         balance_domain: BalanceDomain::Settlement,
+        trading_access: vec![],
+        engine_id: None,
+        forked_from: None,
+        locale: None,
     };
 
     LIMIT_ORDERS.with(|m| m.borrow_mut().clear());
@@ -116,11 +124,14 @@ fn categorical_arbitrage_validation() {
 fn binary_arbitrage_validation() {
     let series_id = SeriesId::from("binary_arb".to_owned());
     let series = Series {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         series_id: series_id.clone(),
         underlying: "BTC".to_owned(),
         expiry_ns: 2_000_000_000,
+        start_ns: None,
         payoff_type: PayoffType::Binary,
         strike: Some(Price::new(50_000, 0)),
+        settlement_cap: None,
         price_precision: 6,
         payout_unit: PayoutUnit::usd(),
         outcomes: None,
@@ -132,6 +143,10 @@ fn binary_arbitrage_validation() {
         icon_url: None,
         banner_url: None,
         balance_domain: BalanceDomain::Settlement,
+        trading_access: vec![],
+        engine_id: None,
+        forked_from: None,
+        locale: None,
     };
 
     // Price $1.10 (Violation)
@@ -145,4 +160,58 @@ fn binary_arbitrage_validation() {
     };
     let result = validate_no_arbitrage(&series, &params);
     assert!(result.is_err());
+}
+
+#[test]
+fn linear_order_price_cap_validation() {
+    let series_id = SeriesId::from("linear_cap".to_owned());
+    let series = Series {
+        resolution: Resolution::new("Settles to oracle spot at expiry"),
+        series_id: series_id.clone(),
+        underlying: "USDBRL".to_owned(),
+        expiry_ns: 2_000_000_000,
+        start_ns: None,
+        payoff_type: PayoffType::Linear,
+        strike: None,
+        settlement_cap: Some(Price::new(20_000_000, 6)), // $20.00 cap
+        price_precision: 6,
+        payout_unit: PayoutUnit::usd(),
+        outcomes: None,
+        oracle_source: "oracle".to_owned(),
+        creator: Principal::anonymous(),
+        created_at_ns: 1_000_000_000,
+        title: "USD/BRL NDF".to_owned(),
+        description: Description::plain("Linear cap test"),
+        icon_url: None,
+        banner_url: None,
+        balance_domain: BalanceDomain::Settlement,
+        trading_access: vec![],
+        engine_id: None,
+        forked_from: None,
+        locale: None,
+    };
+
+    let order = |id: &str, side: Side, price_6dp: u128| SubmitLimitOrderParams {
+        order_id: OrderId::from(id.to_owned()),
+        series_id: series_id.clone(),
+        outcome_id: None,
+        side,
+        qty: 5,
+        price: Price::new(price_6dp, 6),
+    };
+
+    // Short within the band is accepted.
+    assert!(validate_no_arbitrage(&series, &order("lin_sell_ok", Side::Sell, 8_000_000)).is_ok());
+
+    // Short above the cap is rejected (would under-collateralize the short leg).
+    assert!(matches!(
+        validate_no_arbitrage(&series, &order("lin_sell_over", Side::Sell, 25_000_000)),
+        Err(TradeError::PriceExceedsSettlementCap { .. })
+    ));
+
+    // Buy above the cap is likewise rejected: the cap is enforced on both sides.
+    assert!(matches!(
+        validate_no_arbitrage(&series, &order("lin_buy_over", Side::Buy, 25_000_000)),
+        Err(TradeError::PriceExceedsSettlementCap { .. })
+    ));
 }

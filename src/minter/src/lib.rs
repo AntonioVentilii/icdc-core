@@ -2,34 +2,56 @@ pub mod guards;
 pub mod state;
 pub mod utils;
 
-use ic_cdk::{call, export_candid, storage};
+use ic_cdk::{call::Call, export_candid, storage, trap};
 use ic_cdk_macros::{init, post_upgrade, pre_upgrade, query, update};
 use icrc_ledger_types::icrc1::transfer::{BlockIndex, TransferArg, TransferError};
-use shared::types::minter::{Config, ConfigResult, MintParams, MintResult};
+use shared::types::minter::{Config, ConfigResult, MintParams, MintResult, MinterArg};
 
 use crate::{
     guards::{caller_is_authorized, caller_is_controller, caller_is_not_anonymous},
-    state::{memory::CONFIG, read_config, set_config},
+    state::{apply_upgrade, memory::CONFIG, read_config, set_config},
     utils::to_account,
 };
 
 #[init]
-fn init(config: Config) {
-    set_config(config);
+fn init(arg: MinterArg) {
+    match arg {
+        MinterArg::Init(config) => set_config(config),
+        MinterArg::Upgrade(_) => {
+            trap("cannot install minter with an Upgrade argument; expected Init")
+        }
+    }
 }
 
 #[pre_upgrade]
 fn pre_upgrade() {
     let config = CONFIG.with(|c| return c.borrow().clone());
 
+    #[expect(
+        clippy::expect_used,
+        reason = "baseline of the quality gate: trapping in an upgrade hook rolls the upgrade back, which is the intended failure"
+    )]
     storage::stable_save((config,)).expect("Failed to save state");
 }
 
 #[post_upgrade]
-fn post_upgrade() {
+fn post_upgrade(arg: MinterArg) {
+    #[expect(
+        clippy::expect_used,
+        reason = "baseline of the quality gate: trapping in an upgrade hook rolls the upgrade back, which is the intended failure"
+    )]
     let (config,): (Option<Config>,) = storage::stable_restore().expect("Failed to restore state");
 
+    if config.is_none() {
+        trap("no persisted config restored on upgrade; refusing to upgrade into an unconfigured state");
+    }
     CONFIG.with(|c| *c.borrow_mut() = config);
+
+    match arg {
+        MinterArg::Upgrade(Some(upgrade)) => apply_upgrade(upgrade),
+        MinterArg::Upgrade(None) => {}
+        MinterArg::Init(_) => trap("cannot upgrade minter with an Init argument; expected Upgrade"),
+    }
 }
 
 #[query(guard = "caller_is_not_anonymous")]
@@ -45,10 +67,14 @@ pub fn update_config(config: Config) {
 
 #[update(guard = "caller_is_authorized")]
 pub async fn mint(params: MintParams) -> MintResult {
-    let config = match read_config() {
-        Ok(config) => config,
-        Err(err) => return MintResult::Err(err.clone()),
-    };
+    match mint_impl(params).await {
+        Ok(outcome) => outcome,
+        Err(msg) => MintResult::Err(msg),
+    }
+}
+
+async fn mint_impl(params: MintParams) -> Result<MintResult, String> {
+    let config = read_config()?;
 
     let arg = TransferArg {
         from_subaccount: None,
@@ -59,15 +85,16 @@ pub async fn mint(params: MintParams) -> MintResult {
         created_at_time: None,
     };
 
-    let (res,): (Result<BlockIndex, TransferError>,) =
-        match call(config.ledger_canister, "icrc1_transfer", (arg,)).await {
-            Ok(v) => v,
-            Err((code, msg)) => {
-                return MintResult::Err(format!("Ledger call failed: {code:?} - {msg}"));
-            }
-        };
+    let response = Call::bounded_wait(config.ledger_canister, "icrc1_transfer")
+        .with_args(&(arg,))
+        .await
+        .map_err(|e| format!("Ledger call failed: {e}"))?;
 
-    res.into()
+    let (res,) = response
+        .candid_tuple::<(Result<BlockIndex, TransferError>,)>()
+        .map_err(|e| format!("Ledger response decode failed: {e}"))?;
+
+    Ok(res.into())
 }
 
 export_candid!();

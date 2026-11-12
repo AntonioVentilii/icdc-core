@@ -10,6 +10,7 @@ The project is divided into two main functional areas:
 - **[Clearing Engine](src/clearing/README.md)**: The risk and margin engine that acts as a Central Counterparty (CCP) for trades.
 - **[Shared Library](src/shared/)**: Common types and constants used across all canisters.
 - **[Architecture Flows](docs/architecture/flows.md)**: Visual schematics of the core system processes.
+- **[Balance domains](docs/architecture/balance-domains.md)**: Core vs app-specific balance domains (settlement, playground, optional branded domains).
 
 ## 🚀 Key Features
 

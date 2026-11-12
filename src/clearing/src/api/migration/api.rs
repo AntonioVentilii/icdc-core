@@ -1,7 +1,7 @@
 use core::cell::RefCell;
 use std::collections::BTreeMap;
 
-use ic_cdk::caller;
+use ic_cdk::api::msg_caller;
 use ic_cdk_macros::update;
 use shared::types::BalanceDomain;
 
@@ -33,7 +33,7 @@ use crate::{
 #[update(guard = "caller_is_not_anonymous")]
 #[must_use]
 pub fn migrate_domain(params: MigrateDomainParams) -> MigrateDomainResult {
-    let user: User = caller().into();
+    let user: User = msg_caller().into();
 
     let result: Result<(), MigrationError> = migrate_domain_impl(user, params);
 
@@ -271,7 +271,7 @@ fn check_no_inflight_plans(user: User, domain: BalanceDomain) -> Result<(), Migr
 mod tests {
     use candid::Principal;
     use shared::types::{
-        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId,
+        BalanceDomain, Description, PayoffType, PayoutUnit, Price, Resolution, Series, SeriesId,
     };
 
     use crate::{
@@ -287,11 +287,14 @@ mod tests {
 
     fn setup_test_series(series_id: &SeriesId, domain: BalanceDomain) {
         let series = Series {
+            resolution: Resolution::new("Resolved per oracle at expiry"),
             series_id: series_id.clone(),
             underlying: "BTC".to_owned(),
             expiry_ns: 2_000_000_000,
+            start_ns: None,
             payoff_type: PayoffType::Binary,
             strike: Some(Price::new(50_000, 6)),
+            settlement_cap: None,
             price_precision: 6,
             payout_unit: PayoutUnit::usd(),
             oracle_source: "oracle".to_owned(),
@@ -303,6 +306,10 @@ mod tests {
             icon_url: None,
             banner_url: None,
             balance_domain: domain,
+            trading_access: vec![],
+            engine_id: None,
+            forked_from: None,
+            locale: None,
         };
         SERIES.with(|s| s.borrow_mut().insert(series_id.clone(), series));
     }

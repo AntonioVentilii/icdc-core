@@ -1,175 +1,1156 @@
+// Input parameters for registering a new price oracle.
 type AddOracleParams = record {
+	// Initial information about the oracle.
 	metadata : OracleMetadata;
+	// Initial list of authorised principals.
 	authorized_principals : vec principal;
+	// Unique identifier for the oracle (e.g., "COINGECKO").
 	oracle_id : text
 };
+// Input parameters for registering a new derivative series.
 type AddSeriesParams = record {
+	// A short, descriptive title for the series.
 	title : text;
+	// The option strike price, if applicable.
 	strike : opt Price;
+	// The payoff model for the series.
 	payoff_type : PayoffType;
+	// The Engine on whose behalf this series is created.
+	// Controllers may omit this (`None`). Non-controller callers must provide
+	// a valid `EngineId` on which they hold the `Creator` role.
+	engine_id : opt text;
+	// The unit in which the contract payoff is expressed.
 	payout_unit : PayoutUnit;
+	// Expiry timestamp in nanoseconds since UNIX epoch.
 	expiry_ns : nat64;
+	// An optional banner URL for the market.
 	banner_url : opt text;
+	// Optional timestamp at which trading opens. See [`Series::start_ns`].
+	//
+	// Omit (`None`) for a series that is tradeable immediately. When set, it
+	// must be strictly in the future and strictly before `expiry_ns`.
+	start_ns : opt nat64;
+	// Upper settlement bound for `Linear` series (forwards/NDF/futures).
+	// Compulsory for `Linear`, `None` otherwise. See `Series::settlement_cap`.
+	settlement_cap : opt Price;
+	// The underlying asset ticker (case-insensitive, e.g., "ICP").
 	underlying : text;
+	// Optional [BCP 47](https://www.rfc-editor.org/info/bcp47) locale tag for
+	// `title`, `description`, and any `outcomes[].title`/`description`.
+	//
+	// When `None`, consumers should assume the default locale `"en"`.
+	// Translations are never stored on-chain and are the responsibility of
+	// the consumer.
+	locale : opt text;
+	// A detailed description of the series.
 	description : Description;
+	// The settlement terms describing how this market resolves.
+	// Compulsory: every new series must state how it settles.
+	resolution : Resolution;
+	// The defined outcomes for categorical markets (ordered).
 	outcomes : opt vec Outcome;
+	// An optional icon URL for the market.
 	icon_url : opt text;
+	// Initial trading access policies for the new series.
+	// **Must not be empty**: pass at least `[Open]`.
+	//
+	// Controls who may submit orders on this market once it is registered.
+	// Pass `[Restricted { groups: [g1, g2, ...] }]` to limit trading to
+	// members of those groups.
+	//
+	// If the caller passes an empty list, `add_series` will fill it with `[Open]`.
+	// Policies can be updated after creation via `update_trading_access`.
+	trading_access : vec TradingAccess;
+	// The number of decimals used for prices and strikes in this series.
 	price_precision : nat8;
+	// The balance domain this series belongs to.
 	balance_domain : BalanceDomain;
+	// The price oracle identifier (case-insensitive, e.g., "Coingecko").
 	oracle_source : text
 };
-type AddSeriesResult = variant { Ok : text; Err : SeriesError };
+// The result of an [`add_series`] operation.
+type AddSeriesResult = variant {
+	// Successfully registered the series with the returned [`SeriesId`].
+	Ok : text;
+	// Failed to register the series.
+	Err : SeriesError
+};
+// Represents a supported asset in the ICDC ecosystem.
 type Asset = variant {
+	// An ERC-20 token on an EVM-compatible chain.
 	Erc20 : ErcToken;
+	// An ICRC-compliant token identified by its canister [`Principal`].
 	Icrc : principal;
+	// A native asset on an EVM-compatible chain.
 	NativeEvm : NativeEvmAsset
 };
-type BalanceDomain = variant { Playground; Settlement };
-type DecimalValue = record { decimals : nat8; value : nat };
+// Represents a distinct domain for balances and trading logic.
+type BalanceDomain = variant {
+	// VICI XP (loyalty points), segregated from Playground test assets.
+	ViciXp;
+	// Non-monetary social bets (e.g., betting a pizza).
+	Social;
+	// Testnet / sandbox collateral (e.g. TESTICP, Sepolia), not real funds.
+	Playground;
+	// Real collateralized trading (e.g., using ckUSDC, ICP).
+	Settlement
+};
+// Input parameters for creating a new trading group.
+//
+// The caller's principal is automatically recorded as the group creator,
+// added as the first member, and treated as an implicit admin.
+type CreateGroupParams = record {
+	// A human-readable name for the group. Must not exceed 128 characters.
+	name : text;
+	// An optional longer description of the group's purpose.
+	description : opt text;
+	// An optional icon/avatar URL for the group.
+	icon_url : opt text
+};
+// The result of a [`create_group`] operation.
+//
+// Returns the newly assigned [`GroupId`] on success.
+type CreateGroupResult = variant {
+	// The group was created successfully.
+	Ok : text;
+	// The group creation failed.
+	Err : GroupError
+};
+// A generic representation of a decimal value with fixed precision.
+// This decouples numeric logic from domain-specific types like Price or Quantity.
+type DecimalValue = record {
+	// The number of decimal places (exponent).
+	decimals : nat8;
+	// The numeric value (mantissa).
+	value : nat
+};
+// A multiformat description.
+// Provides multiple versions of the same content for different rendering environments.
 type Description = record {
+	// Optional HTML version of the description.
 	html : opt text;
+	// Optional markdown version of the description.
 	markdown : opt text;
+	// The mandatory plain text description.
 	plain : text
 };
+// A multi-tenant organizational entity for dApps using the clearing layer.
+//
+// Engines allow dApps to autonomously manage their own creators, oracle
+// admins, and other roles without being canister controllers. Each Engine
+// has a set of admins who can grant roles to principals, subject to the
+// `allowed_roles` constraint set by the canister controllers at registration.
+type Engine = record {
+	// The principal that performed the last mutation.
+	updated_by : principal;
+	// The principal that registered this Engine (a canister controller).
+	creator : principal;
+	// Unique identifier assigned at creation.
+	engine_id : text;
+	// A human-readable name for the Engine (e.g., "Vici App").
+	name : text;
+	// An optional description of the Engine's purpose.
+	description : opt text;
+	// Timestamp of the last mutation in nanoseconds since UNIX epoch.
+	updated_at_ns : nat64;
+	// Timestamp of engine creation in nanoseconds since UNIX epoch.
+	created_at_ns : nat64;
+	// An optional icon/avatar URL for the Engine.
+	icon_url : opt text;
+	// Principals with administrative privileges on this Engine.
+	// Admins can grant/revoke roles and manage other admins.
+	// The creator is implicitly an admin.
+	admins : vec principal;
+	// The subset of [`EngineRole`] variants this Engine is allowed to grant.
+	// Set by the canister controller at registration time. Admins cannot
+	// grant roles outside this set.
+	allowed_roles : vec EngineRole;
+	// Audit trail of all active role grants.
+	role_grants : vec RoleGrant;
+	// Optional per-engine override for social market rate limits.
+	social_limits : opt SocialLimits
+};
+// Errors that can occur during Engine-related operations.
+type EngineError = variant {
+	// The principal already has this role in this Engine.
+	RoleAlreadyGranted;
+	// The specified Engine ID does not exist.
+	EngineNotFound;
+	// An Engine with this name already exists.
+	EngineAlreadyExists;
+	// Cannot remove the Engine creator as an admin.
+	CannotRemoveCreator;
+	// The requested role is not in the Engine's `allowed_roles`.
+	RoleNotAllowed;
+	// The principal does not have this role in this Engine.
+	RoleNotGranted;
+	// The caller is not authorized for this operation.
+	Unauthorized;
+	// The Engine name exceeds the maximum allowed length.
+	NameTooLong
+};
+// The result of an Engine mutation operation.
+type EngineResult = variant { Ok; Err : EngineError };
+// Roles that can be granted to principals within an Engine.
+//
+// This is a fixed enum extended over time at the protocol level.
+// Engines declare which subset of roles they are allowed to grant
+// via [`Engine::allowed_roles`].
+type EngineRole = variant {
+	// Can register oracles and manage their metadata and principals
+	// **registry-wide** (not scoped to a specific engine).
+	//
+	// Oracles are shared infrastructure consumed by series across multiple
+	// engines, so `OracleAdmin` intentionally grants global oracle management.
+	// Engine-scoped oracle ownership can be added later by introducing an
+	// `engine_id` field on the `Oracle` struct if needed.
+	OracleAdmin;
+	// Can create series via `add_series` and fork series via `fork_series`.
+	//
+	// Series creation/forking requires the caller to specify the `engine_id`
+	// on which they hold this role.
+	Creator
+};
+// Represents an ERC-20 token on a specific EVM chain.
 type ErcToken = record {
+	// The number of decimals the token uses (e.g., 18 for ETH, 6 for USDC).
 	decimals : nat8;
+	// The contract address of the token.
 	token_address : text;
+	// The ID of the EVM chain where the token is deployed.
 	chain_id : nat64
 };
 type FiatUnit = variant { Chf; Eur; Gbp; Usd };
+// Input parameters for forking (cloning) an existing series into a restricted circle.
+//
+// The forked series inherits all defining parameters from the source series but
+// gets a distinct ID (via the `forked_from` hash component) and carries a reference
+// back to the original.
+type ForkSeriesParams = record {
+	// The source series to fork.
+	source_series_id : text;
+	// Optional title override. Falls back to the source series title.
+	title : opt text;
+	// The Engine on whose behalf this fork is created.
+	// Controllers may omit this (`None`). Non-controller callers must provide
+	// a valid `EngineId` on which they hold the `Creator` role.
+	engine_id : opt text;
+	// Optional locale override. Falls back to the source series locale when
+	// `None`. See `Series.locale` for the full semantics.
+	locale : opt text;
+	// Optional description override. Falls back to the source series description.
+	description : opt Description;
+	// Optional resolution override. Falls back to the source series resolution.
+	resolution : opt Resolution;
+	// Trading access policies for the forked series. Must be `Restricted`.
+	trading_access : vec TradingAccess
+};
+// Input parameters for granting a role within an Engine.
+//
+// Only Engine admins or canister controllers may grant roles.
+type GrantEngineRoleParams = record {
+	// The Engine in which to grant the role.
+	engine_id : text;
+	// The role to grant.
+	role : EngineRole;
+	// The principal receiving the role.
+	grantee : principal
+};
+// A trading group (closed circle).
+//
+// Groups are the building blocks of restricted trading access.
+// A group has three roles:
+//
+// - **Creator**: immutable, recorded at creation, always treated as an admin.
+// - **Admins**: can manage other admins, manage members, update metadata, and delete the group.
+// - **Members**: can trade on series restricted to this group, nothing else.
+//
+// The `admins` and `members` sets are independent: an admin is NOT automatically
+// a member. If an admin should also trade, they must appear in both sets.
+type Group = record {
+	// The principal that performed the last mutation.
+	updated_by : principal;
+	// The principal that created this group. Immutable, always treated
+	// as an admin even if not explicitly in the `admins` set.
+	creator : principal;
+	// The set of principals who are members of this group.
+	// Members are authorized to trade on any series restricted to this group.
+	members : vec principal;
+	// A human-readable display name for the group (max 128 chars).
+	name : text;
+	// An optional longer description of the group's purpose.
+	description : opt text;
+	// Timestamp of the last mutation in nanoseconds since UNIX epoch.
+	// Set on every write operation (create, update metadata, add/remove
+	// admins/members, etc.).
+	updated_at_ns : nat64;
+	// Timestamp of group creation in nanoseconds since UNIX epoch.
+	created_at_ns : nat64;
+	// An optional icon/avatar URL for the group.
+	icon_url : opt text;
+	// The unique identifier assigned at creation.
+	group_id : text;
+	// Principals with administrative privileges on this group.
+	// Admins can manage other admins, manage members, update metadata,
+	// and delete the group. The creator is implicitly an admin and does
+	// not need to be in this set.
+	admins : vec principal
+};
+// Errors that can occur during group-related operations.
+type GroupError = variant {
+	// The specified group ID does not exist in the registry.
+	GroupNotFound;
+	// The provided `trading_access` list is empty.
+	// Every series must have at least one policy (e.g. `[Open]`).
+	EmptyTradingAccess;
+	// The caller does not have permission for this operation.
+	// Typically means the caller is neither a group admin, the creator,
+	// nor a canister controller.
+	Unauthorized;
+	// A group with this name already exists for this creator.
+	GroupAlreadyExists;
+	// The provided group name exceeds the maximum allowed length (128 chars).
+	NameTooLong;
+	// The referenced series ID does not exist in the registry.
+	// Returned by `update_trading_access` when the target series is missing.
+	SeriesNotFound
+};
+// The result of a group mutation operation (add/remove members, delete, update access).
+//
+// Returns `true` on success.
+type GroupResult = variant {
+	// The operation succeeded.
+	Ok : bool;
+	// The operation failed.
+	Err : GroupError
+};
+// Parameters for filtering the list of registered derivative series.
 type ListSeriesParams = record {
+	// When `Some(true)`, return only series that are **due for resolution**: at
+	// or past `expiry_ns`, carrying a non-empty resolution clause, and with a
+	// payoff model that has the data required to settle (see
+	// [`Series::has_resolvable_payoff`]). `Some(false)` and `None` apply no
+	// filtering.
+	//
+	// This is the exact candidate set a resolution solver iterates: markets that
+	// have expired but not yet settled and can actually be resolved. It is the
+	// mirror image of [`Self::tradeable_now`] on the expiry axis (expired rather
+	// than live) and lets the caller fetch only the due subset instead of paging
+	// the whole registry and discarding most of it. Settlement state itself is
+	// owned by the clearing canister, so a caller still subtracts the
+	// already-settled ids (see `clearing.list_settled_series`) from this set.
+	//
+	// Like the other clock-dependent filters, the expiry cutoff uses the
+	// canister's own server-side `time()`.
+	due : opt bool;
+	// Filter by the strike price.
 	strike : opt Price;
+	// Filter by the principal identifier of the creator.
 	creator : opt principal;
+	// Filter by the payoff model.
 	payoff_type : opt PayoffType;
+	// Filter by the payout unit.
 	payout_unit : opt PayoutUnit;
+	// When `Some(true)`, return only series that are inside their trading
+	// window right now: at or past `start_ns` (when set) *and* strictly before
+	// `expiry_ns`. `Some(false)` and `None` apply no filtering.
+	//
+	// This is strictly narrower than [`Self::only_unexpired`], which admits
+	// scheduled series whose start has not arrived yet. `only_unexpired` is
+	// deliberately left alone rather than redefined: callers that already rely
+	// on it keep their exact current results, and a frontend that wants to show
+	// an "upcoming" tab needs both answers, not one merged into the other.
+	//
+	// Like the expiry cutoff, the clock is the canister's own server-side
+	// `time()`.
+	tradeable_now : opt bool;
+	// Optional pagination parameters.
 	pagination : opt PaginationParams;
+	// Filter by the underlying asset ticker (case-insensitive).
 	underlying : opt text;
+	// When `Some(true)`, exclude series whose `expiry_ns` is at or before the
+	// registry's current time, i.e. return only series that are still open
+	// for trading. `Some(false)` and `None` are equivalent and apply no expiry
+	// filtering (the historical behavior).
+	//
+	// The cutoff is the canister's own `time()` evaluated server-side, so the
+	// caller cannot widen the window with a stale or forged clock. This is the
+	// expiry half of the "currently-tradeable" predicate; resolution/settlement
+	// state is owned by the clearing canister and is filtered separately by the
+	// caller (see `clearing.list_settled_series`).
+	only_unexpired : opt bool;
+	// Filter by a search term in the title or description (case-insensitive, partial match).
 	search_term : opt text;
+	// Filter by balance domain.
 	balance_domain : opt BalanceDomain;
+	// Filter by the price oracle identifier (case-insensitive, partial match).
 	oracle_source : opt text
 };
+// Input parameters for managing authorised principals of an oracle.
 type ManageOraclePrincipalsParams = record {
+	// Principals to be added to the authorised list.
 	add_principals : vec principal;
+	// Principals to be removed from the authorised list.
 	remove_principals : vec principal;
+	// The unique identifier of the oracle.
 	oracle_id : text
 };
-type NativeEvmAsset = record { decimals : nat8; chain_id : nat64 };
-type NonMonetaryUnit = variant { Points };
+// Represents a native asset on an EVM-compatible chain
+// (for example ETH on Ethereum/Base, POL on Polygon, or BNB on BSC).
+type NativeEvmAsset = record {
+	// The number of decimals the native asset uses.
+	decimals : nat8;
+	// The EVM chain where this native asset is used.
+	chain_id : nat64
+};
+type NonMonetaryUnit = variant { Points; Social : SocialReward };
+// Represents an authorised price oracle group.
 type Oracle = record {
+	// The principal identifier of the oracle's manager (defaults to creator).
 	manager : principal;
+	// Timestamp of oracle registration in nanoseconds since UNIX epoch.
 	registered_at_ns : nat64;
+	// Metadata about the oracle.
 	metadata : OracleMetadata;
+	// The set of principals authorised to push settlement data for this oracle.
 	authorized_principals : vec principal;
+	// Unique identifier for the oracle (e.g., "COINGECKO").
 	oracle_id : text
 };
+// Errors that can occur during oracle-related operations.
 type OracleError = variant {
+	// Returned when the caller is not authorised to manage the oracle.
 	UnauthorizedOracleManager;
+	// Returned when attempting to add an oracle that already exists.
 	OracleAlreadyExists;
+	// Returned when the specified oracle does not exist.
 	OracleNotFound
 };
+// Metadata about a price oracle entity.
 type OracleMetadata = record {
+	// The human-readable name of the oracle.
 	name : text;
+	// A short description of the oracle's methodology or data sources.
 	description : opt Description;
+	// Optional URL to the oracle's website.
 	website : opt text
 };
+// The result of an oracle-related operation.
 type OracleResult = variant { Ok; Err : OracleError };
+// Metadata for a specific outcome in a categorical market.
 type Outcome = record {
+	// The unique identifier of the outcome.
 	id : text;
+	// A short title for the outcome (e.g., "Yes", "No", "Team A").
 	title : text;
+	// An optional detailed description of the outcome.
 	description : opt Description;
+	// An optional icon URL for the outcome.
 	icon_url : opt text
 };
-type PaginationParams = record { cursor : opt text; limit : opt nat64 };
-type PayoffType = variant { Put; Binary; Call; Categorical };
+// Parameters for paginating results.
+type PaginationParams = record {
+	// Return items strictly *after* this series id (exclusive).
+	cursor : opt text;
+	// Maximum number of items to return.
+	limit : opt nat64
+};
+// Defines the payoff structure for a derivative contract.
+type PayoffType = variant {
+	// Payoff based on the positive difference between strike and underlying price.
+	Put;
+	// A linear (delta-one) payoff `net_qty · (S_T − F)`: outright forwards,
+	// non-deliverable forwards (NDFs), and dated futures. The agreed forward
+	// rate `F` is the trade price (captured in reserved margin, like an option
+	// premium); settlement is bounded to `[0, settlement_cap]` to keep the
+	// system solvent without a running liquidation engine. See ADR 0001.
+	Linear;
+	// A fixed payoff if the condition is met (all-or-nothing).
+	Binary;
+	// Payoff based on the positive difference between underlying price and strike.
+	Call;
+	// A categorical market with multiple mutually exclusive outcomes.
+	Categorical
+};
 type PayoutUnit = variant {
 	Fiat : FiatUnit;
 	Asset : Asset;
 	NonMonetary : NonMonetaryUnit
 };
+// Encapsulates a price with its numerical value and domain-specific metadata.
+// Decouples the mathematical representation (`DecimalValue`) from the
+// reporting context (timestamp, oracle Source).
 type Price = record {
+	// Optional timestamp when this price was generated/observed.
 	timestamp : opt nat64;
+	// Optional identifier for the oracle source.
 	oracle_id : opt text;
+	// The numeric component of the price.
 	decimal : DecimalValue
 };
-type Series = record {
-	title : text;
-	strike : opt Price;
-	creator : principal;
-	payoff_type : PayoffType;
-	payout_unit : PayoutUnit;
-	expiry_ns : nat64;
-	banner_url : opt text;
-	series_id : text;
-	underlying : text;
-	description : Description;
-	outcomes : opt vec Outcome;
-	created_at_ns : nat64;
+// Input parameters for registering a new Engine.
+//
+// Only canister controllers may call `register_engine`.
+type RegisterEngineParams = record {
+	// A human-readable name for the Engine.
+	name : text;
+	// An optional description.
+	description : opt text;
+	// An optional icon URL.
 	icon_url : opt text;
+	// Initial admin principals. The caller is always added as an admin.
+	admins : vec principal;
+	// The set of roles this Engine is allowed to grant.
+	allowed_roles : vec EngineRole
+};
+// The result of a `register_engine` operation.
+type RegisterEngineResult = variant { Ok : text; Err : EngineError };
+// Settlement terms for a series. Compulsory on every market.
+//
+// Modeled as a struct (not a bare `String`) so it can grow without a breaking
+// candid change: future fields (for example structured `rules`: named source +
+// settle date + day-count, see issue #64) are added as `opt` fields, which
+// candid can decode against records persisted before the field existed.
+// Variants were considered and rejected: adding an enum variant risks decode
+// failures in already-deployed consumers, whereas appending `opt` record
+// fields is forward-compatible.
+type Resolution = record {
+	// Human-readable clause describing how the market settles.
+	clause : text
+};
+// An audit record of a role grant within an Engine.
+type RoleGrant = record {
+	// The granted role.
+	role : EngineRole;
+	// Timestamp of the grant in nanoseconds since UNIX epoch.
+	granted_at_ns : nat64;
+	// The principal that received the role.
+	grantee : principal;
+	// The principal that performed the grant.
+	granted_by : principal
+};
+// Defines a specific derivative series (contract).
+type Series = record {
+	// A short, descriptive title for the series.
+	title : text;
+	// Target price for options, if applicable.
+	strike : opt Price;
+	// The principal identifier of the series creator.
+	creator : principal;
+	// The mathematical payoff model used for this series.
+	payoff_type : PayoffType;
+	// The Engine that created this series, if any.
+	// `None` for series created directly by a canister controller.
+	engine_id : opt text;
+	// The unit in which the contract payoff is expressed.
+	payout_unit : PayoutUnit;
+	// Expiry timestamp in nanoseconds since UNIX epoch.
+	expiry_ns : nat64;
+	// An optional banner URL for the market.
+	banner_url : opt text;
+	// Optional timestamp in nanoseconds since UNIX epoch at which trading opens.
+	//
+	// `None` means the series is tradeable from the moment it is registered:
+	// the historical behavior, and the canonical way to express "live now".
+	// `Some(t)` schedules the series: it is listed and discoverable immediately
+	// but trading is rejected until `t`. The window is inclusive at the open
+	// (`now >= start_ns` is live) and exclusive at the close (`now < expiry_ns`
+	// is unexpired), so a series is tradeable over `[start_ns, expiry_ns)`.
+	//
+	// Participates in `series_id` hashing (see [`Series::generate_id`]): two
+	// series that differ only in their trading window are distinct contracts,
+	// so a scheduled series can never silently collide with an already-live one
+	// and inherit a start date its creator did not ask for. To keep that
+	// guarantee meaningful, `None` is the only encoding of "already live":
+	// `add_series` rejects a `start_ns` at or before the current time, so the
+	// same market cannot exist under two ids.
+	start_ns : opt nat64;
+	// Unique identifier computed from series parameters.
+	series_id : text;
+	// Upper settlement bound for `Linear` series (forwards/NDF/futures): the
+	// fixing is clamped to `[0, settlement_cap]` at settlement and short margin
+	// is reserved as `cap − entry`. Compulsory for `Linear`, `None` otherwise.
+	// Additive `opt` field, so no state migration is required (see ADR 0001).
+	settlement_cap : opt Price;
+	// The underlying asset ticker or identifier (e.g., "ICP/USD").
+	underlying : text;
+	// Optional [BCP 47](https://www.rfc-editor.org/info/bcp47) language tag
+	// describing the language of `title`, `description`, and any
+	// `outcomes[].title` / `outcomes[].description`.
+	//
+	// Examples: `"en"`, `"en-US"`, `"es"`, `"zh-Hant-HK"`.
+	//
+	// `locale` is metadata: it does NOT participate in `series_id` hashing,
+	// so the same economic contract written in different languages must
+	// collide on the same id (otherwise liquidity would fragment across
+	// localized clones of the same market).
+	//
+	// When `None`, consumers should assume the default locale `"en"` and are
+	// responsible for translating into the user's preferred locale; the
+	// canister never stores translations on-chain.
+	locale : opt text;
+	// A detailed description of the series.
+	description : Description;
+	// The settlement terms describing how this market resolves.
+	//
+	// Compulsory metadata: every series carries resolution terms. Like
+	// `title`/`description`/`locale`, it does NOT participate in `series_id`
+	// hashing (see [`Series::generate_id`]), so the same economic contract
+	// keeps a single id regardless of its resolution wording.
+	resolution : Resolution;
+	// The defined outcomes for categorical markets (ordered).
+	outcomes : opt vec Outcome;
+	// Timestamp of series creation in nanoseconds since UNIX epoch.
+	created_at_ns : nat64;
+	// An optional icon URL for the market.
+	icon_url : opt text;
+	// The set of trading access policies governing who may trade this series.
+	// **Must never be empty**: every series carries at least one policy.
+	//
+	// Evaluated as a logical OR: a caller is authorized if **any** policy
+	// in the list grants them access.
+	//
+	// - `[Open]` → explicitly unrestricted (default).
+	// - `[Restricted { groups }]` → only group members may trade.
+	// - Multiple policies can coexist (e.g. `[Open, Restricted { groups }]`).
+	trading_access : vec TradingAccess;
+	// The canonical number of decimals used for prices and strikes in this series.
 	price_precision : nat8;
+	// The domain this market belongs to (e.g. Playground, Settlement).
 	balance_domain : BalanceDomain;
-	oracle_source : text
+	// The identifier of the oracle providing the settlement data.
+	oracle_source : text;
+	// If this series was forked from another, the source series ID.
+	forked_from : opt text
 };
+// Errors that can occur during series-related operations.
 type SeriesError = variant {
+	// The provided `settlement_cap` is not strictly positive.
+	InvalidSettlementCap;
+	// Social reward description exceeds limit.
+	RewardDescriptionTooLong;
+	// The caller has reached the maximum number of social markets allowed per user.
+	SocialMaxPerUserReached;
+	// Returned when the provided description exceeds the maximum allowed length.
 	DescriptionTooLong;
+	// The provided `start_ns` is at or after `expiry_ns`, leaving no window in
+	// which the series could ever be traded.
+	StartNotBeforeExpiry;
+	// A `Linear` series requires a `settlement_cap`.
+	LinearRequiresSettlementCap;
+	// Returned when the provided title exceeds the maximum allowed length.
 	TitleTooLong;
+	// Social reward icon URL exceeds limit.
+	RewardIconUrlTooLong;
+	// Social markets require a `NonMonetary` payout unit.
+	SocialMarketRequiresNonMonetaryPayout;
+	// The caller has reached the maximum number of forks for this source series.
+	ForkLimitReached;
+	// Social markets must have `Restricted` trading access.
+	SocialMarketMustBeRestricted;
+	// Non-controller callers must specify an `engine_id` for non-social markets.
+	EngineIdRequired;
+	// Returned when the caller is not authorized to add a series.
 	Unauthorized;
+	// `settlement_cap` was provided on a non-`Linear` series.
+	SettlementCapOnlyForLinear;
+	// Forked series must have `Restricted` trading access.
+	ForkMustBeRestricted;
+	// Returned when the provided payout unit is not supported by the protocol.
 	UnsupportedPayoutUnit;
-	SeriesAlreadyExists
+	// The provided locale tag is not a valid BCP 47 shape or exceeds the length limit.
+	InvalidLocale;
+	// Returned when the resolution clause is empty (a non-empty clause is compulsory).
+	ResolutionClauseEmpty;
+	// The caller has exceeded the hourly social market creation limit.
+	SocialRateLimitExceeded;
+	// Returned when the resolution clause exceeds the maximum allowed length.
+	ResolutionClauseTooLong;
+	// Returned when attempting to add a series that already exists.
+	SeriesAlreadyExists;
+	// The source series specified in a fork does not exist.
+	SourceSeriesNotFound;
+	// The provided `start_ns` is at or before the registry's current time.
+	//
+	// A series that is already live must be registered with `start_ns: None`,
+	// which is the single canonical encoding of "tradeable immediately".
+	// Allowing a past start would let the same market exist under two ids.
+	StartNotInFuture;
+	// Social reward title exceeds limit.
+	RewardTitleTooLong;
+	// Returned when the targeted series does not exist.
+	SeriesNotFound;
+	// The specified Engine does not exist or the caller does not hold the required role on it.
+	EngineRoleNotHeld;
+	// A `Linear` series must not define categorical `outcomes`.
+	LinearRejectsOutcomes;
+	// A `Linear` series must not define a `strike`: the forward rate is the
+	// trade price, not a series-fixed strike.
+	LinearRejectsStrike
 };
-type SeriesPage = record { next_cursor : opt text; items : vec Series };
+// A paginated page of registered series.
+type SeriesPage = record {
+	// The cursor to be used for the next request, if any.
+	next_cursor : opt text;
+	// The list of series in this page.
+	items : vec Series
+};
+// Where a series sits in its trading window at a given instant.
+//
+// Derived from `start_ns`/`expiry_ns` rather than stored, so it can never drift
+// out of sync with the timestamps it describes. Settlement state is deliberately
+// absent: it is owned by the clearing canister, and folding it in here would
+// make the registry's answer depend on state it does not hold.
+type SeriesStatus = variant {
+	// Inside the trading window: at or past `start_ns`, strictly before `expiry_ns`.
+	Live;
+	// At or past `expiry_ns`.
+	Expired;
+	// `start_ns` is set and still in the future: listed, but not yet tradeable.
+	Upcoming
+};
+// Configurable rate limits for social (non-monetary) market creation.
+type SocialLimits = record {
+	// Maximum social markets any single user may create within a rolling hour.
+	max_per_hour : nat64;
+	// Maximum total social markets any single user may create (lifetime).
+	max_per_user : nat64
+};
+type SocialReward = record {
+	// A short title for the reward (e.g., "Pizza 🍕").
+	title : text;
+	// An optional detailed description of the reward.
+	description : opt text;
+	// An optional icon URL for the reward.
+	icon_url : opt text
+};
+// A single trading access policy attached to a derivative series.
+//
+// A [`Series`](super::series::Series) holds a `Vec<TradingAccess>`.
+// Authorization is evaluated as a logical **OR** across all policies:
+// if *any* policy in the list grants access to the caller, the caller
+// may trade.
+//
+// # Invariant
+//
+// The `trading_access` vector on a [`Series`](super::series::Series) **must
+// never be empty**. Every series must carry at least one policy. The default
+// is `[Open]`. This invariant is enforced at the API level: `add_series`
+// fills `[Open]` if empty, and `update_trading_access` rejects empty lists.
+//
+// # Combining policies
+//
+// A series may carry multiple policies simultaneously. For example:
+// - `[Open]`: open to everyone (default).
+// - `[Restricted { groups: [g1, g2] }]`: only members of g1 or g2.
+// - `[Open, Restricted { groups: [g1] }]`: open to everyone *and* additionally tagged as belonging
+// to g1 (useful for discovery/UI filtering).
+//
+// # Extensibility
+//
+// New variants (e.g. `TokenGated`, `ReputationBased`) can be added in
+// the future without breaking existing policies or on-chain state.
+type TradingAccess = variant {
+	// Unrestricted: any authenticated (non-anonymous) caller can trade.
+	Open;
+	// Restricted to members of the specified groups.
+	// The caller is authorized if they belong to **at least one** of the
+	// listed groups.
+	Restricted : record {
+		// The group IDs whose members are allowed to trade.
+		groups : vec text
+	}
+};
+// Input parameters for managing Engine admins (adding or removing).
+type UpdateEngineAdminsParams = record {
+	// The Engine to modify.
+	engine_id : text;
+	// Principals to add or remove as admins.
+	principals : vec principal
+};
+// Input parameters for updating the allowed roles of an Engine.
+//
+// Only canister controllers may call this.
+type UpdateEngineAllowedRolesParams = record {
+	// The Engine to update.
+	engine_id : text;
+	// The new set of allowed roles. Replaces the existing set entirely.
+	allowed_roles : vec EngineRole
+};
+// Input parameters for updating an existing Engine's metadata.
+//
+// Only Engine admins or canister controllers may call `update_engine`.
+type UpdateEngineParams = record {
+	// The Engine to update.
+	engine_id : text;
+	// New name, or `None` to keep the current name.
+	name : opt text;
+	// New description: `None` = keep, `Some(None)` = clear, `Some(Some(..))` = set.
+	description : opt opt text;
+	// New icon URL: `None` = keep, `Some(None)` = clear, `Some(Some(..))` = set.
+	icon_url : opt opt text
+};
+// Input parameters for adding or removing group admins.
+//
+// Used by both `add_group_admins` and `remove_group_admins`.
+// Only existing group admins (including the creator) or canister controllers
+// may call these.
+type UpdateGroupAdminsParams = record {
+	// The group to modify.
+	group_id : text;
+	// The principals to add or remove as admins.
+	principals : vec principal
+};
+// Input parameters for updating a group's metadata (name, description, icon).
+//
+// Only group admins (including the creator) or canister controllers may call
+// `update_group`. Fields set to `None` are left unchanged.
+//
+// For `description` and `icon_url`, the double-`Option` distinguishes
+// "don't change" (`None`) from "set to null" (`Some(None)`).
+type UpdateGroupParams = record {
+	// New name, or `None` to keep the current name.
+	name : opt text;
+	// New description: `None` = keep, `Some(None)` = clear, `Some(Some(..))` = set.
+	description : opt opt text;
+	// New icon URL: `None` = keep, `Some(None)` = clear, `Some(Some(..))` = set.
+	icon_url : opt opt text;
+	// The group to update.
+	group_id : text
+};
+// Input parameters for updating an existing oracle's metadata.
 type UpdateOracleMetadataParams = record {
+	// The updated metadata.
 	metadata : OracleMetadata;
+	// The unique identifier of the oracle to update.
 	oracle_id : text
 };
+// Input parameters for [`update_series_metadata`](../../registry/index.html).
+//
+// Edits only **non-critical, non-identity** fields of an existing series.
+// `title`, `resolution`, and every field that feeds the `series_id` hash
+// (underlying, expiry, payoff, strike, precision, payout unit, outcomes,
+// oracle source, balance domain) are intentionally **not** editable: changing
+// them would either break the series' identity or rewrite the terms a market
+// already trades on.
+//
+// Each field follows a tri-state convention so a single call can leave some
+// fields untouched, set others, and clear nullable ones:
+//
+// - `None` → leave the current value unchanged.
+// - `Some(value)` → replace with `value`.
+// - For the `Option<Option<_>>` fields, `Some(None)` → clear the field to `null` (e.g. remove a
+// banner).
+type UpdateSeriesMetadataParams = record {
+	// New banner URL. `None` leaves it unchanged; `Some(None)` clears it.
+	banner_url : opt opt text;
+	// The series to update.
+	series_id : text;
+	// New [BCP 47](https://www.rfc-editor.org/info/bcp47) locale tag. `None`
+	// leaves it unchanged; `Some(None)` clears it; `Some(Some(tag))` validates
+	// and sets it.
+	locale : opt opt text;
+	// New plain/markdown/html description. `None` leaves it unchanged.
+	description : opt Description;
+	// New icon URL. `None` leaves it unchanged; `Some(None)` clears it.
+	icon_url : opt opt text
+};
+// The result of an `update_series_metadata` operation.
+//
+// The success payload is boxed because [`Series`] is far larger than
+// [`SeriesError`]; candid serializes `Box<Series>` identically to `Series`.
+type UpdateSeriesResult = variant {
+	// Successfully updated; returns the series in its new state.
+	Ok : Series;
+	// Failed to update the series.
+	Err : SeriesError
+};
+// Input parameters for replacing the trading access policies on a series.
+//
+// Only canister controllers (admins) may call `update_trading_access`.
+// The entire policy list is replaced atomically.
+type UpdateTradingAccessParams = record {
+	// The series whose trading access policies will be replaced.
+	series_id : text;
+	// The new set of trading access policies. **Must not be empty.**
+	// Pass `[Open]` to make the series unrestricted.
+	trading_access : vec TradingAccess
+};
 service : {
-	// Authorizes a list of principals to create new derivative series.
+	// Adds admin principals to an Engine. Engine admins or controllers may call this.
+	add_engine_admins : (UpdateEngineAdminsParams) -> (EngineResult);
+	// Adds one or more principals to an existing group's admin set.
 	//
-	// This method is gated to canister controllers.
-	add_authorized_creators : (vec principal) -> ();
+	// Duplicate principals are silently ignored (the admin set is a `BTreeSet`).
+	//
+	// # Errors
+	//
+	// * [`GroupError::GroupNotFound`]: the `group_id` does not exist.
+	// * [`GroupError::Unauthorized`]: the caller is not a group admin.
+	//
+	// # Access
+	//
+	// Group admin (creator, explicit admin, or canister controller).
+	add_group_admins : (UpdateGroupAdminsParams) -> (GroupResult);
+	// Adds one or more principals to an existing group's member list.
+	//
+	// Duplicate principals are silently ignored (the member set is a `BTreeSet`).
+	//
+	// # Errors
+	//
+	// * [`GroupError::GroupNotFound`]: the `group_id` does not exist.
+	// * [`GroupError::Unauthorized`]: the caller is not a group admin.
+	//
+	// # Access
+	//
+	// Group admin (creator, explicit admin, or canister controller).
+	add_group_members : (UpdateGroupAdminsParams) -> (GroupResult);
 	// Registers a new price oracle in the registry.
+	//
+	// Controllers and Engine `OracleAdmin` role holders may register oracles.
 	add_oracle : (AddOracleParams) -> (OracleResult);
 	// Adds a new derivative series to the registry.
 	//
-	// This method generates a canonical [`SeriesId`] for the provided parameters.
-	// If the series already exists, it returns an error.
+	// Authorization is tiered:
 	//
-	// # Arguments
-	// * `params` - The defining parameters for the new series.
-	//
-	// # Returns
-	// * [`AddSeriesResult::Ok`] containing the new [`SeriesId`] on success.
-	// * [`AddSeriesResult::Err`] with [`SeriesError::SeriesAlreadyExists`] if the series is already
-	// registered.
+	// 1. **Controllers**: may create any series with or without `engine_id`.
+	// 2. **Engine Creators**: must provide `engine_id` referencing an Engine where they hold the
+	// `Creator` role.
+	// 3. **Any authenticated user**: may create **social** markets (`BalanceDomain::Social` +
+	// `NonMonetary` payout) with `Restricted` trading access, subject to per-user rate limits.
 	add_series : (AddSeriesParams) -> (AddSeriesResult);
+	// Creates a new trading group (closed circle).
+	//
+	// The caller's principal is recorded as the group creator and is automatically
+	// inserted as the first member. The creator is implicitly an admin and does
+	// not need to be in the `admins` set. A monotonically increasing ID
+	// (`grp_0`, `grp_1`, ...) is assigned.
+	//
+	// # Errors
+	//
+	// * [`GroupError::NameTooLong`]: if `params.name` exceeds [`MAX_GROUP_NAME_LEN`] chars.
+	//
+	// # Access
+	//
+	// Any authenticated (non-anonymous) caller.
+	create_group : (CreateGroupParams) -> (CreateGroupResult);
+	// Permanently deletes a group and all its membership data.
+	//
+	// **Note:** deleting a group does not automatically update series that
+	// reference it in their `trading_access`. Those series will simply fail
+	// the membership check for the deleted group (the group ID will not
+	// resolve to any members).
+	//
+	// # Errors
+	//
+	// * [`GroupError::GroupNotFound`]: the `group_id` does not exist.
+	// * [`GroupError::Unauthorized`]: the caller is not a group admin.
+	//
+	// # Access
+	//
+	// Group admin (creator, explicit admin, or canister controller).
+	delete_group : (text) -> (GroupResult);
+	// Forks (clones) an existing series into a new restricted-access market.
+	//
+	// The forked series inherits all defining parameters from the source but gets a
+	// distinct ID and carries a `forked_from` reference back to the original.
+	//
+	// Authorization is tiered, mirroring [`add_series`]:
+	//
+	// 1. **Controllers**: may fork any series.
+	// 2. **Engine Creators**: must provide an `engine_id` on which they hold the `Creator` role.
+	// 3. **Any authenticated user**: may fork **social** source markets (`BalanceDomain::Social` +
+	// `NonMonetary` payout) into their own closed circle, subject to the same per-user rate limits
+	// as social market creation. This is the "Challenge your friends" flow.
+	//
+	// In all cases the fork's `trading_access` must be fully `Restricted`: a fork
+	// never widens access.
+	fork_series : (ForkSeriesParams) -> (AddSeriesResult);
+	// Retrieves an Engine by its ID.
+	get_engine : (text) -> (opt Engine) query;
+	// Retrieves a group by its ID, returning `None` if it does not exist.
+	//
+	// # Access
+	//
+	// Public query, open to any caller.
+	get_group : (text) -> (opt Group) query;
 	// Retrieves the details of a specific oracle by its ID.
 	get_oracle : (text) -> (opt Oracle) query;
 	// Retrieves a specific [`Series`] by its [`SeriesId`].
-	//
-	// # Arguments
-	// * `series_id` - The unique identifier of the series to retrieve.
-	//
-	// # Returns
-	// * `Some(Series)` if the series exists in the registry.
-	// * `None` otherwise.
 	get_series : (text) -> (opt Series) query;
-	// Checks if a principal is authorized to create derivative series.
-	is_authorized_creator : (principal) -> (bool) query;
+	// Returns where a series currently sits in its trading window, or `None` if the
+	// series is not registered.
+	//
+	// Clients could derive this from `start_ns`/`expiry_ns` themselves, but only
+	// against their own clock. This evaluates the window with the canister's
+	// `time()`, which is the same clock the trading gate uses, so a countdown built
+	// on it cannot disagree with whether an order will actually be accepted.
+	//
+	// Settlement state is not folded in: it lives in the clearing canister. A series
+	// reported [`SeriesStatus::Expired`] here may or may not be settled yet.
+	get_series_status : (text) -> (opt SeriesStatus) query;
+	// Returns the current rate limits for social market creation.
+	get_social_limits : () -> (SocialLimits) query;
+	// Grants a role to a principal within an Engine.
+	//
+	// The role must be in the Engine's `allowed_roles` set. Only Engine admins
+	// or controllers may grant roles.
+	grant_engine_role : (GrantEngineRoleParams) -> (EngineResult);
+	// Checks whether a principal is a member of a specific group.
+	//
+	// Returns `false` if the group does not exist or if the principal is not a member.
+	//
+	// # Access
+	//
+	// Public query, open to any caller.
+	is_group_member : (text, principal) -> (bool) query;
 	// Checks if a principal is authorized to push settlement data for a given oracle.
 	is_oracle_authorized : (text, principal) -> (bool) query;
-	// Returns a list of all principals currently authorized to create series.
+	// Determines whether a principal is authorized to trade on a given series.
 	//
-	// This method is gated to canister controllers.
-	list_authorized_creators : () -> (vec principal) query;
-	// Returns a paginated page of all registered derivative series.
+	// This is the central authorization query used by the clearing canister
+	// (via inter-canister call) before accepting an order on a restricted series.
+	//
+	// # Authorization rules (evaluated in order)
+	//
+	// 1. **Controllers** are always authorized, regardless of policies.
+	// 2. If the series does not exist, returns `false`.
+	// 3. Each policy in the list is evaluated as a logical OR:
+	// - [`TradingAccess::Open`] → immediately `true`.
+	// - [`TradingAccess::Restricted`] → `true` if the principal is a member of **at least one** of
+	// the referenced groups.
+	// 4. If no policy grants access, returns `false`.
+	//
+	// **Note:** `trading_access` must never be empty; the API layer enforces this.
+	//
+	// # Access
+	//
+	// Public query, open to any caller. Called by the clearing canister during
+	// `submit_limit_order` / `submit_market_order` for restricted series.
+	is_trading_authorized : (principal, text) -> (bool) query;
+	// Lists all registered Engines.
+	list_engines : () -> (vec Engine) query;
+	// Lists all registered groups, optionally filtered by creator principal.
+	//
+	// # Arguments
+	//
+	// * `creator`: if `Some`, only groups created by this principal are returned. If `None`, all
+	// groups are returned.
+	//
+	// # Access
+	//
+	// Public query, open to any caller.
+	list_groups : (opt principal) -> (vec Group) query;
+	// Returns a paginated page of all registered derivative series visible to the caller.
 	list_series : (PaginationParams) -> (SeriesPage) query;
 	// Returns a paginated page of registered derivative series, optionally filtered.
+	//
+	// # Visibility
+	//
+	// Results are scoped to what the caller is allowed to see. Restricted series
+	// are omitted unless the caller is a controller, the series creator, or a
+	// member of at least one group referenced by the series' `trading_access`.
+	// See [`can_principal_see_series`] for the full predicate.
 	list_series_with : (ListSeriesParams) -> (SeriesPage) query;
 	// Adds or removes authorised principals for an oracle.
+	//
+	// Controllers, the oracle's manager, and Engine `OracleAdmin` role holders may manage principals.
 	manage_oracle_principals : (ManageOraclePrincipalsParams) -> (OracleResult);
-	// Removes authorization from a list of principals, preventing them from creating new series.
+	// Registers a new Engine. Only canister controllers may call this.
+	register_engine : (RegisterEngineParams) -> (RegisterEngineResult);
+	// Removes admin principals from an Engine. Engine admins or controllers may call this.
+	//
+	// The Engine creator cannot be removed as an admin.
+	remove_engine_admins : (UpdateEngineAdminsParams) -> (EngineResult);
+	// Removes one or more principals from an existing group's admin set.
+	//
+	// Principals that are not currently admins are silently ignored.
+	// The group creator cannot be removed from admins (they are implicitly
+	// always an admin).
+	//
+	// # Errors
+	//
+	// * [`GroupError::GroupNotFound`]: the `group_id` does not exist.
+	// * [`GroupError::Unauthorized`]: the caller is not a group admin.
+	//
+	// # Access
+	//
+	// Group admin (creator, explicit admin, or canister controller).
+	remove_group_admins : (UpdateGroupAdminsParams) -> (GroupResult);
+	// Removes one or more principals from an existing group's member list.
+	//
+	// Principals that are not currently members are silently ignored.
+	//
+	// # Errors
+	//
+	// * [`GroupError::GroupNotFound`]: the `group_id` does not exist.
+	// * [`GroupError::Unauthorized`]: the caller is not a group admin.
+	//
+	// # Access
+	//
+	// Group admin (creator, explicit admin, or canister controller).
+	remove_group_members : (UpdateGroupAdminsParams) -> (GroupResult);
+	// Revokes a role from a principal within an Engine.
+	//
+	// Only Engine admins or controllers may revoke roles.
+	revoke_engine_role : (GrantEngineRoleParams) -> (EngineResult);
+	// Updates the rate limits for social (non-monetary) market creation.
 	//
 	// This method is gated to canister controllers.
-	remove_authorized_creators : (vec principal) -> ();
+	set_social_limits : (SocialLimits) -> ();
+	// Updates an Engine's metadata. Engine admins or controllers may call this.
+	update_engine : (UpdateEngineParams) -> (EngineResult);
+	// Updates the allowed roles for an Engine. Only controllers may call this.
+	update_engine_allowed_roles : (UpdateEngineAllowedRolesParams) -> (
+		EngineResult
+	);
+	// Updates a group's metadata (name, description, icon URL).
+	//
+	// Fields set to `None` are left unchanged. For `description` and `icon_url`,
+	// `Some(None)` clears the value while `Some(Some(..))` sets it.
+	//
+	// # Errors
+	//
+	// * [`GroupError::GroupNotFound`]: the `group_id` does not exist.
+	// * [`GroupError::Unauthorized`]: the caller is not a group admin.
+	// * [`GroupError::NameTooLong`]: if a new name exceeds [`MAX_GROUP_NAME_LEN`] chars.
+	//
+	// # Access
+	//
+	// Group admin (creator, explicit admin, or canister controller).
+	update_group : (UpdateGroupParams) -> (GroupResult);
 	// Updates the metadata of an existing oracle.
-	update_oracle_metadata : (UpdateOracleMetadataParams) -> (OracleResult)
+	//
+	// Controllers, the oracle's manager, and Engine `OracleAdmin` role holders may update metadata.
+	update_oracle_metadata : (UpdateOracleMetadataParams) -> (OracleResult);
+	// Updates **non-critical** metadata on an existing series.
+	//
+	// Only `description`, `icon_url`, `banner_url`, and `locale` can be changed.
+	// The series' identity-bearing economic fields, `title`, and `resolution` are
+	// immutable here by design (see [`UpdateSeriesMetadataParams`]).
+	//
+	// # Authorization
+	//
+	// Controllers, the series' `creator`, and admins of the series' Engine may
+	// update metadata. All other callers receive [`SeriesError::Unauthorized`].
+	update_series_metadata : (UpdateSeriesMetadataParams) -> (UpdateSeriesResult);
+	// Atomically replaces the trading access policies on an existing series.
+	//
+	// The entire `trading_access` vector is overwritten. To make a series open,
+	// pass `[Open]`. To restrict it, pass one or more `Restricted { groups }` entries.
+	//
+	// **Important:** the clearing canister caches series data. After updating
+	// trading access, the clearing cache will pick up the change on the next
+	// `ensure_series_registered` cache miss for that series.
+	//
+	// # Errors
+	//
+	// * [`GroupError::EmptyTradingAccess`]: the provided list is empty.
+	// * [`GroupError::Unauthorized`]: the caller is not a canister controller.
+	// * [`GroupError::SeriesNotFound`]: the series ID does not exist.
+	//
+	// # Access
+	//
+	// Canister controller only.
+	update_trading_access : (UpdateTradingAccessParams) -> (GroupResult)
 }

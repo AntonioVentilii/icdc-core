@@ -1,23 +1,33 @@
-//! The Series Registry canister provides a centralised directory for derivative contract series.
-//! It allows for registration and discovery of [`Series`] by their canonical identifiers.
-
 pub mod api;
 pub mod guards;
 pub mod memory;
+pub mod migrations;
 pub mod utils;
 
 use candid::Principal;
 use ic_cdk::export_candid;
 use ic_cdk_macros::{post_upgrade, pre_upgrade};
 pub use shared::types::{
+    engine::{
+        Engine, EngineError, EngineId, EngineResult, EngineRole, GrantEngineRoleParams,
+        RegisterEngineParams, RegisterEngineResult, RevokeEngineRoleParams, RoleGrant,
+        UpdateEngineAdminsParams, UpdateEngineAllowedRolesParams, UpdateEngineParams,
+    },
+    groups::{
+        CreateGroupParams, CreateGroupResult, Group, GroupError, GroupId, GroupResult,
+        UpdateGroupAdminsParams, UpdateGroupMembersParams, UpdateGroupParams,
+        UpdateTradingAccessParams,
+    },
     oracle::{
         AddOracleParams, ManageOraclePrincipalsParams, Oracle, OracleError, OracleResult,
         UpdateOracleMetadataParams,
     },
     series::{
-        AddSeriesParams, AddSeriesResult, ListSeriesParams, PaginationParams, Series, SeriesError,
-        SeriesId, SeriesPage,
+        AddSeriesParams, AddSeriesResult, ForkSeriesParams, ListSeriesParams, PaginationParams,
+        Series, SeriesError, SeriesId, SeriesPage, SeriesStatus, SocialLimits,
+        UpdateSeriesMetadataParams, UpdateSeriesResult,
     },
+    TradingAccess,
 };
 
 #[pre_upgrade]

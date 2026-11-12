@@ -1,4 +1,4 @@
-use shared::types::Asset;
+use shared::types::{Asset, AssetId};
 
 use crate::{assets::types::AssetAmount, types::account::AssetAccount};
 
@@ -14,6 +14,9 @@ pub struct AssetBalanceOfParams<'a> {
 pub struct AssetTransferParams<'a> {
     /// The asset to transfer.
     pub asset: &'a Asset,
+    /// The identifier of the asset, used to read and self-heal the cached
+    /// transfer fee (see [`crate::assets::icrc::IcrcHandler::transfer`]).
+    pub asset_id: &'a AssetId,
     /// The source account.
     pub from: AssetAccount,
     /// The destination account.

@@ -47,6 +47,20 @@ pub(crate) fn verify_cash_balance(user: User, expected_usd: u128) {
     });
 }
 
+pub(crate) fn verify_reserved_margin(user: User, expected_usd: u128) {
+    ACCOUNT_STATES.with(|acc| {
+        let acc = acc.borrow();
+        let actual = acc
+            .get(&user)
+            .expect("User account not found")
+            .get_reserved_margin_usd(BalanceDomain::Settlement);
+        assert_eq!(
+            actual, expected_usd,
+            "Reserved margin mismatch for user {user:?}. Expected {expected_usd}, got {actual}"
+        );
+    });
+}
+
 pub(crate) fn verify_position_qty(
     user: User,
     series_id: &SeriesId,

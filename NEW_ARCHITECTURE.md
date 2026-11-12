@@ -475,11 +475,11 @@ Therefore:
 
 Possible policies:
 
-#### Option A — Pro-rata by vault composition
+#### Option A: Pro-rata by vault composition
 
 Most self-sustaining and neutral.
 
-#### Option B — Stable-first waterfall
+#### Option B: Stable-first waterfall
 
 Example priority:
 
@@ -487,7 +487,7 @@ Example priority:
 2. other approved stablecoins
 3. non-stable collateral assets
 
-#### Option C — User preference with deterministic fallback
+#### Option C: User preference with deterministic fallback
 
 Best UX:
 
@@ -630,14 +630,14 @@ Vici does not need to implement settlement logic.
 
 ## Recommended Phase Plan
 
-### Phase 1 — already available / current base
+### Phase 1: already available / current base
 
 - registry + clearing
 - per-product payout model
 - simple execution inside clearing if needed
 - single accounting unit concept
 
-### Phase 2 — next target
+### Phase 2: next target
 
 - replace per-series `settlement_asset` with `payout_unit`
 - add multi-asset collateral configs
@@ -646,7 +646,7 @@ Vici does not need to implement settlement logic.
 - add vault-backed withdrawal policy
 - optionally add ghost ICRC token for internal USD accounting
 
-### Phase 3 — later
+### Phase 3: later
 
 - separate execution canisters from clearing
 - shard order books

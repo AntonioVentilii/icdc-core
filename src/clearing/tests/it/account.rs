@@ -1,6 +1,9 @@
 use candid::Principal;
 use clearing::{
-    api::account::{params::GetPositionParams, results::GetAccountStateResult},
+    api::account::{
+        params::{AggregateLeanParams, GetPositionParams},
+        results::{AggregateLean, GetAccountStateResult},
+    },
     types::{event::Event, margin::Position},
 };
 
@@ -86,4 +89,43 @@ fn get_trade_history_empty() {
         .expect("get_trade_history failed");
 
     assert!(history.is_empty(), "New user should have no trade history");
+}
+
+#[test]
+fn aggregate_lean_empty_for_fresh_state() {
+    let env = TestSetup::default();
+    let user = test_user(50);
+
+    let params = AggregateLeanParams {
+        series_id: "some_series".to_owned().into(),
+        principals: vec![test_user(51), test_user(52)],
+    };
+
+    let lean: AggregateLean = env
+        .clearing
+        .query::<AggregateLean, _>(user, "aggregate_lean", (params,))
+        .expect("aggregate_lean failed");
+
+    assert_eq!(lean.series_id.as_str(), "some_series");
+    assert_eq!(lean.total, 0);
+    assert!(
+        lean.outcomes.is_empty(),
+        "No supplied principal holds a position yet"
+    );
+}
+
+#[test]
+fn aggregate_lean_rejects_anonymous() {
+    let env = TestSetup::default();
+
+    let params = AggregateLeanParams {
+        series_id: "some_series".to_owned().into(),
+        principals: vec![],
+    };
+
+    let result =
+        env.clearing
+            .query::<AggregateLean, _>(Principal::anonymous(), "aggregate_lean", (params,));
+
+    assert_unauthorized(&result);
 }

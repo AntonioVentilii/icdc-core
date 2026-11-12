@@ -98,7 +98,8 @@ mod tests {
         CollateralAssetConfig,
     };
 
-    fn both_domains() -> Vec<BalanceDomain> {
+    /// Matches default collateral domain allowlists: core domains only (not app-specific).
+    fn default_domain_allowlist() -> Vec<BalanceDomain> {
         vec![BalanceDomain::Settlement, BalanceDomain::Playground]
     }
 
@@ -123,7 +124,7 @@ mod tests {
                 decimals: 8,
                 is_enabled: true,
                 oracle_id: None,
-                allowed_balance_domains: both_domains(),
+                allowed_balance_domains: default_domain_allowlist(),
             },
         );
 
@@ -180,7 +181,7 @@ mod tests {
                 decimals: 18,
                 is_enabled: true,
                 oracle_id: None,
-                allowed_balance_domains: both_domains(),
+                allowed_balance_domains: default_domain_allowlist(),
             },
         );
 
@@ -228,7 +229,7 @@ mod tests {
                 decimals: 6,
                 is_enabled: true,
                 oracle_id: None,
-                allowed_balance_domains: both_domains(),
+                allowed_balance_domains: default_domain_allowlist(),
             },
         );
 
@@ -277,7 +278,7 @@ mod tests {
                 decimals: 8,
                 is_enabled: true,
                 oracle_id: None,
-                allowed_balance_domains: both_domains(),
+                allowed_balance_domains: default_domain_allowlist(),
             },
         );
 

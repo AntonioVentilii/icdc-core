@@ -1,51 +1,202 @@
-type AcceptPositionTransferResult = variant { Ok : bool; Err : TradeError };
+// Outcome of a position transfer acceptance.
+type AcceptPositionTransferResult = variant {
+	// Returns `true` if the transfer was successfully accepted and processed.
+	Ok : bool;
+	// Failed to accept the position transfer.
+	Err : TradeError
+};
+// Represents a user's account state in the clearing system.
 type AccountState = record {
+	// The owner of the account.
 	user : principal;
+	// The total required margin reserved for current activity, scoped by domain.
 	reserved_margins_usd : vec record { BalanceDomain; nat };
+	// Internal realised `PnL` / debt / credits, scoped by domain.
 	cash_balances_usd : vec record { BalanceDomain; int };
+	// Real deposited collateral assets and their balances, scoped by domain.
 	balances : vec record { BalanceDomain; vec record { text; nat } }
 };
+// Errors related to account state retrieval or state.
 type AccountStateError = variant {
+	// Overflow during account state calculation.
 	MathOverflow;
+	// An error occurred while interacting with the asset.
 	Asset : AssetError;
+	// No account state exists for the specified user.
 	NoAccountStateFound
 };
+// Enhanced response for account state with calculated USD values.
 type AccountStateResponse = record {
+	// Detailed worth of each collateral asset.
 	assets : vec AssetWorth;
+	// The raw account state.
 	state : AccountState;
+	// Total equity in USD (cash balance + sum of collateral values).
 	total_equity_usd : nat;
+	// Available equity in USD (total equity - reserved margin).
 	available_margin_usd : int
 };
+// Aggregate long/short lean of a supplied set of principals on a series,
+// broken down per outcome.
+//
+// Privacy-safe by construction: it exposes only aggregate counts over the
+// supplied set, never individual identities, sides, amounts, or P&L.
+type AggregateLean = record {
+	// Number of distinct supplied principals holding a non-flat position
+	// anywhere on the series (a principal long on two outcomes counts once).
+	total : nat64;
+	// The series this lean was computed for.
+	series_id : text;
+	// Per-outcome aggregate lean, one entry per outcome on which at least one
+	// supplied principal holds a non-flat position, ordered by outcome.
+	outcomes : vec OutcomeLean
+};
+// Input parameters for the `aggregate_lean` query.
+type AggregateLeanParams = record {
+	// The derivative series to aggregate the lean over.
+	series_id : text;
+	// The set of principals to aggregate over. The set is caller-supplied and
+	// scanned in full, so it is capped: any list longer than the cap is
+	// truncated. Duplicate principals are de-duplicated and never affect the
+	// counts. The clearing layer ascribes no meaning to the set; how it is
+	// chosen is entirely a consumer concern.
+	principals : vec principal
+};
+// Input parameters for
+// [`aggregate_settlement_accuracy`](super::aggregate_settlement_accuracy).
+//
+// Aggregates each supplied principal's settled-position win/total counts over
+// an arbitrary half-open time window `[from_ts, to_ts)`. Unlike
+// [`ListLeaderboardParams`], which ranks over fixed calendar windows backed
+// by the maintained `SETTLEMENT_LEADERBOARD` index, this scans the raw event
+// log so a consumer can score a cohort over a bespoke window (e.g. a league
+// "battle" running an arbitrary 7-day span that does not align to a calendar
+// week). The clearing layer ascribes no meaning to the set or the window; how
+// they are chosen is entirely a consumer concern.
+type AggregateSettlementAccuracyParams = record {
+	// Exclusive upper bound on a settlement's `timestamp` (ns). `None` runs
+	// through the latest settlement. The window is half-open `[from_ts,
+	// to_ts)` so two adjacent windows that share an endpoint never both count
+	// the same settlement.
+	to_ts : opt nat64;
+	// The principals to aggregate over (e.g. a league's member set). The set
+	// is caller-controlled and scanned in full, so it is capped at 10,000.
+	// Any realistic cohort is well under this; a longer list is truncated to
+	// the first 10,000. Duplicate principals are de-duplicated and never
+	// double-count.
+	members : vec principal;
+	// Inclusive lower bound on a settlement's `timestamp` (ns since the Unix
+	// epoch). `None` starts from the earliest settlement.
+	from_ts : opt nat64;
+	// Optional series allow-list. `None` counts settlements on every series;
+	// `Some(set)` counts only settlements whose `series_id` is in the set, so
+	// a consumer can scope a cohort's accuracy to a market category (e.g. a
+	// battle scoped to one tag passes that tag's series). An empty `Some(vec)`
+	// therefore matches nothing. The clearing layer ascribes no meaning to the
+	// set; how it is chosen is entirely a consumer concern.
+	series_ids : opt vec text
+};
+// Represents a supported asset in the ICDC ecosystem.
 type Asset = variant {
+	// An ERC-20 token on an EVM-compatible chain.
 	Erc20 : ErcToken;
+	// An ICRC-compliant token identified by its canister [`Principal`].
 	Icrc : principal;
+	// A native asset on an EVM-compatible chain.
 	NativeEvm : NativeEvmAsset
 };
+// Errors related to Asset interactions.
 type AssetError = variant {
+	// Failed to transfer tokens/assets.
 	TransferError : text;
-	InsufficientBalance : record { balance : nat; required : nat };
+	// The account has insufficient funds for the operation.
+	InsufficientBalance : record {
+		// The current balance of the account.
+		balance : nat;
+		// The amount required for the operation.
+		required : nat
+	};
+	// Overflow during internal balance calculations.
 	MathOverflow;
+	// The asset identifier is invalid or incorrectly formatted.
 	InvalidAssetId : text;
-	CallError : record { method : text; code : int32; message : text };
+	// A cross-canister or RPC call failed.
+	CallError : record {
+		// The name of the method that failed.
+		method : text;
+		// The rejection code from the IC or error code from RPC.
+		code : int32;
+		// The rejection/error message.
+		message : text
+	};
+	// The asset variant is incompatible with the current handler.
 	InvalidAssetForHandler;
+	// The specified asset is not supported.
 	UnsupportedAsset
 };
+// Dynamic metrics and risk parameters for a collateral asset.
 type AssetMetrics = record {
+	// Haircut in basis points (e.g., 1000 = 10% haircut, 90% value).
 	haircut_bps : nat16;
+	// Latest known transfer fee for the asset.
 	latest_transfer_fee : opt nat;
+	// Optional asset-specific insurance fund fee ratio in basis points.
 	insurance_fee_ratio : opt nat16;
+	// Last time the asset metrics were updated (in nanoseconds).
 	last_updated_ns : opt nat64;
+	// Optional asset-specific protocol fee ratio in basis points.
 	protocol_fee_ratio : opt nat16;
+	// Oracle-updated price in USD (canonical accounting unit).
 	price_usd : DecimalValue
 };
+// Represents the worth of a specific asset in the user's account.
 type AssetWorth = record {
+	// The USD value of the balance (before haircut).
 	pre_haircut_value_usd : nat;
+	// The applied haircut in basis points.
 	haircut_bps : nat16;
+	// The raw balance of the asset.
 	balance : nat;
+	// The USD value of the balance (including haircut).
 	value_usd : nat;
+	// The unique identifier of the asset.
 	asset_id : text
 };
-type BalanceDomain = variant { Playground; Settlement };
+// Input parameters for the one-shot settlement-event backfill. Synthesizes
+// `EventType::Settled` events for finalized plans that resolved before the
+// per-user event emission was added to settlement.
+type BackfillSettlementEventsParams = record {
+	// Resume after this series id (exclusive). `None` starts from the lowest
+	// series id. Callers re-invoke with the previous response's `next_cursor`
+	// until it comes back as `None`.
+	start_after : opt text
+};
+// Outcome of one chunk of the settlement-event backfill.
+type BackfillSettlementEventsResult = record {
+	// Number of finalized plans visited in this chunk.
+	plans_scanned : nat64;
+	// Number of `Settled` events newly written in this chunk.
+	events_emitted : nat64;
+	// Number of `SettlementPosition`s skipped because their series already has
+	// at least one pre-existing `Settled` event (idempotent skip). Counted
+	// per-position to mirror the live emission contract, which writes one
+	// event per position.
+	events_skipped : nat64;
+	// When `Some`, pass back as `start_after` to continue. `None` means the
+	// backfill is complete.
+	next_cursor : opt text
+};
+// Represents a distinct domain for balances and trading logic.
+type BalanceDomain = variant {
+	// VICI XP (loyalty points), segregated from Playground test assets.
+	ViciXp;
+	// Non-monetary social bets (e.g., betting a pizza).
+	Social;
+	// Testnet / sandbox collateral (e.g. TESTICP, Sepolia), not real funds.
+	Playground;
+	// Real collateralized trading (e.g., using ckUSDC, ICP).
+	Settlement
+};
 type CancelFundWithdrawalError = variant {
 	PlanNotFound;
 	InvalidPlanStatus;
@@ -56,121 +207,426 @@ type CancelFundWithdrawalResult = variant {
 	Ok;
 	Err : CancelFundWithdrawalError
 };
-type CancelLimitOrderParams = record { order_id : text };
+// Input parameters for cancelling a limit order.
+type CancelLimitOrderParams = record {
+	// Unique identifier for the order to cancel.
+	order_id : text
+};
+// Configuration for a supported collateral asset.
 type CollateralAssetConfig = record {
+	// The number of decimal places defined by the underlying ledger.
 	decimals : nat8;
+	// The underlying configuration required to interact with the asset's ledger.
 	asset : Asset;
+	// Whether the asset is currently enabled for deposits.
 	is_enabled : bool;
+	// Balance domains where this asset may be deposited or withdrawn.
 	allowed_balance_domains : vec BalanceDomain;
+	// Identifier of the oracle responsible for updating this asset's metrics.
 	oracle_id : opt text;
+	// The canonical identifier for this asset within the clearing protocol.
 	asset_id : text;
+	// The ticker symbol used for display purposes.
 	symbol : text
 };
+// Combined structure for public consumption of asset information.
 type CollateralAssetInfo = record {
 	metrics : opt AssetMetrics;
 	config : CollateralAssetConfig
 };
+// Generic errors that can occur across multiple modules.
 type CommonError = variant {
+	// An unexpected internal error occurred.
 	Internal : text;
+	// The input provided for the request is invalid.
 	InvalidInput : text;
+	// A mathematical calculation resulted in an overflow or underflow.
 	MathOverflow;
+	// The caller does not have permission to perform this action.
 	Unauthorized;
+	// The registry canister principal has not been configured.
 	RegistryNotSet
 };
+// Global configuration for the Clearing canister.
 type Config = record {
+	// The global insurance fund fee ratio in basis points (1 bp = 0.01%).
 	insurance_fund_fee_ratio : nat16;
+	// The comprehensive configuration for the internal accounting ledger (vUSD).
 	internal_ledger : CollateralAssetConfig;
+	// The principal of the Chain Fusion Signer canister.
 	signer_canister : principal;
+	// The economic epoch version.
 	version : nat32;
+	// The principal of the EVM RPC canister.
 	evm_rpc : principal;
+	// The global protocol fee ratio (Treasury) in basis points.
 	protocol_fee_ratio : nat16
 };
-type DecimalValue = record { decimals : nat8; value : nat };
-type DepositCollateralError = variant {
-	DomainNotAllowed : record { domain : BalanceDomain; asset_id : text };
-	MathOverflow;
-	Asset : AssetError
+// A generic representation of a decimal value with fixed precision.
+// This decouples numeric logic from domain-specific types like Price or Quantity.
+type DecimalValue = record {
+	// The number of decimal places (exponent).
+	decimals : nat8;
+	// The numeric value (mantissa).
+	value : nat
 };
+// Errors occurring during collateral deposit.
+type DepositCollateralError = variant {
+	// The asset is not permitted in this balance domain.
+	DomainNotAllowed : record { domain : BalanceDomain; asset_id : text };
+	// Overflow during collateral calculation.
+	MathOverflow;
+	// An error occurred while interacting with the asset.
+	Asset : AssetError;
+	// The caller's account is being reassigned to another principal; deposits
+	// would land in a custody subaccount that is being drained.
+	AccountUnderReassignment : record {
+		// The principal whose account is being reassigned.
+		user : principal
+	}
+};
+// Input parameters for depositing collateral.
 type DepositCollateralParams = record {
+	// Unique identifier for the deposit operation.
 	deposit_id : text;
+	// The specific balance domain to deposit into (defaults to Settlement).
 	domain : opt BalanceDomain;
+	// The unique identifier of the asset to deposit.
 	asset_id : text;
+	// The amount of the asset to deposit.
 	amount : nat
 };
-type DepositCollateralResult = variant { Ok; Err : DepositCollateralError };
+// Outcome of a collateral deposit operation.
+type DepositCollateralResult = variant {
+	// Deposit was successfully planned or executed.
+	Ok;
+	// Failed to process deposit.
+	Err : DepositCollateralError
+};
+// A multiformat description.
+// Provides multiple versions of the same content for different rendering environments.
 type Description = record {
+	// Optional HTML version of the description.
 	html : opt text;
+	// Optional markdown version of the description.
 	markdown : opt text;
+	// The mandatory plain text description.
 	plain : text
 };
+// Configurable policy for a balance domain.
+//
+// Controls domain-specific behavior such as fee ratios and feature flags.
+// Domains default to identical policies so risk enforcement is uniform unless overridden.
 type DomainPolicy = record {
+	// Whether deposits of real collateral assets are accepted in this domain.
 	deposits_enabled : bool;
+	// Optional override for the protocol fee ratio (bps).
+	// When `None`, the global `Config` value is used.
 	protocol_fee_ratio_override : opt nat16;
+	// Human-readable label for this domain.
 	label : text;
+	// Whether withdrawals of real collateral assets are allowed from this domain.
 	withdrawals_enabled : bool;
+	// Optional override for the insurance fund fee ratio (bps).
+	// When `None`, the global `Config` value is used.
 	insurance_fund_fee_ratio_override : opt nat16
 };
+// Represents an ERC-20 token on a specific EVM chain.
 type ErcToken = record {
+	// The number of decimals the token uses (e.g., 18 for ETH, 6 for USDC).
 	decimals : nat8;
+	// The contract address of the token.
 	token_address : text;
+	// The ID of the EVM chain where the token is deployed.
 	chain_id : nat64
 };
+// A recorded event in the clearing system.
 type Event = record {
+	// The quantity involved in the event.
 	qty : int;
+	// The series ID associated with the event.
 	series_id : text;
+	// The user associated with the event.
 	user : principal;
+	// Timestamp in nanoseconds since UNIX epoch.
 	timestamp : nat64;
+	// Unique identifier for the event.
 	event_id : nat64;
+	// The price at which the event occurred (if applicable).
 	price : Price;
+	// The type of the event.
 	event_type : EventType;
+	// The principal of the clearing canister.
 	clearing_id : principal
 };
-type EventType = variant { OrderPlaced; Executed; Liquidated; Settled };
+// Categories of significant events in the clearing system.
+type EventType = variant {
+	// A new order was recorded.
+	OrderPlaced;
+	// A trade was matched and executed.
+	Executed;
+	// A position was liquidated due to insufficient margin.
+	Liquidated;
+	// A series was settled.
+	Settled
+};
 type FiatUnit = variant { Chf; Eur; Gbp; Usd };
+// Input parameters for freezing a position to prepare for a cross-canister transfer.
 type FreezePositionForTransferParams = record {
+	// The specific outcome for categorical markets.
 	outcome_id : opt text;
+	// The derivative series identifier.
 	series_id : text;
+	// The user whose position is being frozen.
 	user : principal;
+	// Unique identifier for the transfer operation.
 	transfer_id : text;
+	// Optional valuation price to include in the proof.
 	valuation_price : opt Price
 };
 type FundType = variant { Insurance; Treasury };
+// Input parameters for retrieving an account state.
 type GetAccountStateParams = record {
+	// The specific balance domain to query (defaults to Settlement if not provided).
 	domain : opt BalanceDomain;
+	// Whether to force a recalculation of the margin status (e.g. refresh from ledgers).
 	refresh : opt bool
 };
+// Outcome of an account state retrieval request.
 type GetAccountStateResult = variant {
+	// Successfully retrieved the account state details.
 	Ok : AccountStateResponse;
+	// Failed to retrieve the account state.
 	Err : AccountStateError
 };
 type GetFundsResult = record {
 	insurance_fund : vec record { text; nat };
 	treasury : vec record { text; nat }
 };
-type GetPositionParams = record { outcome_id : opt text; series_id : text };
+// Input parameters for retrieving a user's position in a series.
+type GetPositionParams = record {
+	// Optional outcome identifier for categorical markets.
+	outcome_id : opt text;
+	// The derivative series identifier.
+	series_id : text
+};
+// Input parameters for
+// [`get_series_price_history`](super::get_series_price_history).
+//
+// Returns a series' executed trades aggregated into fixed-width
+// [`PriceHistoryInterval`] time buckets (OHLC + volume + trade count), so a
+// front end can render a time-scoped consensus/price chart directly instead of
+// fetching and re-bucketing the raw per-trade tape. The optional time bounds
+// let the caller request just the window it draws (e.g. the last day) and the
+// `interval` picks the resolution (hourly for short windows, daily for long).
+type GetSeriesPriceHistoryParams = record {
+	// Bucket width: one candle per hour or per day.
+	interval : PriceHistoryInterval;
+	// The derivative series whose executed trades to aggregate.
+	series_id : text;
+	// Exclusive upper bound on a trade's timestamp (ns). `None` runs through
+	// the series' latest trade.
+	end_time : opt nat64;
+	// Inclusive lower bound on a trade's timestamp (ns). `None` starts from the
+	// series' earliest trade.
+	start_time : opt nat64
+};
+// Represents an incoming HTTP request to the canister.
 type HttpRequest = record {
+	// The URL of the request.
 	url : text;
+	// The HTTP method (e.g., "GET", "POST").
 	method : text;
+	// The request body.
 	body : blob;
+	// The request headers.
 	headers : vec record { text; text }
 };
+// Represents an HTTP response from the canister.
 type HttpResponse = record {
+	// The response body.
 	body : blob;
+	// The response headers.
 	headers : vec record { text; text };
+	// The HTTP status code.
 	status_code : nat16
 };
+// One principal's standing within a leaderboard window.
+//
+// The shape is intentionally an **aggregate**: it exposes only window totals
+// (net realized `PnL` plus the settled / win counts a front end needs for an
+// accuracy figure) and the principal's rank, never the per-series or
+// per-settlement breakdown.
+type LeaderboardEntry = record {
+	// The ranked principal.
+	"principal" : principal;
+	// The principal's rank in the immediately preceding period (last week /
+	// last month), for ↑/↓ movement. `None` when the window has no prior
+	// period (all-time) or the principal did not appear in it.
+	prior_rank : opt nat64;
+	// 1-based rank in the requested window, by net realized `PnL` descending.
+	// Competition ranking: principals with equal `PnL` share a rank, and the
+	// next distinct `PnL` skips the tied positions (e.g. `1, 2, 2, 4`).
+	rank : nat64;
+	// Net realized `PnL` over the window, in internal USD (`vUSD`) base units:
+	// the signed sum of the principal's settlement cashflows.
+	realized_pnl : int;
+	// Number of those settlements that were net positive. `win_count /
+	// settled_count` is the window accuracy.
+	win_count : nat64;
+	// Number of settled positions in the window.
+	settled_count : nat64
+};
+// A page of ranked leaderboard standings.
+type LeaderboardPage = record {
+	// Total number of ranked principals in this window (after any `members`
+	// filter), so a front end can show "rank X of `total`" without paging to
+	// the end.
+	total : nat64;
+	// When `Some`, pass back as `start_after` to fetch the next page. `None`
+	// means the last page has been returned.
+	next_cursor : opt nat64;
+	// Entries for this page, in ascending rank (ties broken by principal for a
+	// stable order).
+	items : vec LeaderboardEntry
+};
+// The time window a leaderboard aggregates over.
+//
+// Windows are **fixed calendar periods**, not rolling spans, so each window
+// has a well-defined immediately-preceding period (the "prior window") for the
+// ↑/↓ rank deltas the front end renders:
+//
+// - [`Week`](LeaderboardWindow::Week): an ISO week, Monday 00:00:00 UTC through the following
+// Sunday. (Unix epoch day 0, 1970-01-01, was a Thursday, hence the `+ 3` Monday alignment
+// below.)
+// - [`Month`](LeaderboardWindow::Month): a calendar month in UTC.
+// - [`AllTime`](LeaderboardWindow::AllTime): a single, unbounded period covering every settlement.
+// Has no prior window.
+//
+// Calendar (rather than rolling) buckets were chosen because the prior-window
+// rank only has an unambiguous meaning against a discrete preceding period,
+// and because fixed buckets let the [`SETTLEMENT_LEADERBOARD`] index key on a
+// stable `(window, period_id)` pair maintained on the settlement write path.
+//
+// [`SETTLEMENT_LEADERBOARD`]: crate::memory::SETTLEMENT_LEADERBOARD
+type LeaderboardWindow = variant {
+	// All settlements ever, in one period.
+	AllTime;
+	// Current ISO week (Monday–Sunday, UTC).
+	Week;
+	// Current calendar month (UTC).
+	Month
+};
+// Represents a limit order stored in the clearing canister.
 type LimitOrder = record {
+	// Number of Series Units (contracts), where 1 unit represents exposure to 1.0 of the
+	// underlying asset. This value must always be positive; the direction (buy/long vs
+	// sell/short) is determined by the `side` field.
 	qty : int;
 	creator : principal;
 	outcome_id : opt text;
+	// Amount blocked in collateral (denominated in USD base units, see `USD_DECIMALS`).
 	blocked_margin_usd : nat;
 	series_id : text;
 	side : Side;
 	order_id : text;
+	// Limit price in the precision defined by the associated series (`series.price_precision`).
 	price : Price;
+	// The balance domain this order belongs to.
 	balance_domain : BalanceDomain
 };
-type ListOrdersParams = record { series_id : opt text };
+// Input parameters for [`list_leaderboard`](super::list_leaderboard).
+type ListLeaderboardParams = record {
+	// When set, rank **only** within this set of principals (a league /
+	// affiliation member set) instead of the whole population, and include
+	// every listed member (even those with no settlements in the window)
+	// with a zeroed aggregate, so the result covers the full league. When
+	// `None`, the global standings are returned and only principals that
+	// settled at least one position in the window appear.
+	//
+	// The set is caller-controlled and ranked in full, so it is capped at
+	// 10,000 principals. Any realistic league is well under this; a longer
+	// list is truncated to the first 10,000.
+	members : opt vec principal;
+	// Which calendar window to rank: current week, current month, or all time.
+	window : LeaderboardWindow;
+	// Exclusive pagination cursor: the number of leading entries already
+	// returned (i.e. the previous page's `next_cursor`). `None` starts from
+	// the top-ranked entry. Pagination is a snapshot over the window's ranked
+	// order, which is deterministic for a fixed underlying aggregate.
+	start_after : opt nat64;
+	// Maximum number of entries to return. `None` returns all remaining
+	// entries; `0` is clamped to `1` so a paging caller always makes forward
+	// progress, mirroring the other clearing list queries.
+	limit : opt nat64
+};
+// Input parameters for listing active limit orders.
+type ListOrdersParams = record {
+	// Optional series identifier to filter orders.
+	series_id : opt text
+};
+// Input parameters for
+// [`list_series_settlement_statuses`](super::list_series_settlement_statuses).
+//
+// Batches the per-series settlement check a resolution solver would otherwise
+// make one call at a time. Callers pass the (bounded) set of series they care
+// about (typically the "due" candidates from the registry) and receive one
+// status per id in request order. Unknown or still-open series come back with a
+// `None` status. The read looks each id up in `SETTLEMENT_PLANS`, so the work is
+// `O(#series_ids)` regardless of how many plans exist. Mirrors
+// [`ListSeriesTradedVolumesParams`](crate::api::trade::params::ListSeriesTradedVolumesParams).
+type ListSeriesSettlementStatusesParams = record {
+	// The series to check. Results are returned one per id, in this order.
+	series_ids : vec text
+};
+// Input parameters for
+// [`list_series_trade_history`](super::list_series_trade_history).
+//
+// Returns the market-wide executed-trade history for a single series so a
+// front end can derive a price-history series (e.g. a YES-probability
+// sparkline) from the per-trade `price`/`timestamp`. Unlike `get_trade_history`
+// the result is not caller-scoped.
+type ListSeriesTradeHistoryParams = record {
+	// The derivative series whose executed trades to return.
+	series_id : text;
+	// Resume after this trade's `event_id` (exclusive). `None` starts from the
+	// earliest executed trade. Pass the previous response's `next_cursor` to
+	// continue. Executed-trade `event_id`s are strictly increasing in
+	// execution order, so the bare id is a stable cursor.
+	start_after : opt nat64;
+	// Maximum number of trades to return. `None` returns all remaining trades.
+	limit : opt nat64
+};
+// Input parameters for
+// [`list_series_traded_volumes`](super::list_series_traded_volumes).
+//
+// Totals each series' market-wide traded volume in one call so a front end can
+// label a page of market cards without a per-card round-trip. Unknown or
+// untraded ids simply total zero. Callers should request a bounded page of
+// series (the set they render): the read sums each series' trade tape, so the
+// work scales with the trades on the requested series.
+type ListSeriesTradedVolumesParams = record {
+	// The series to total. Results are returned one per id, in this order.
+	series_ids : vec text
+};
+// Input parameters for [`list_settled_series`](super::list_settled_series).
+//
+// A series is considered settled the moment a settlement plan is opened for it
+// (any [`PlanStatus`](crate::types::plans::PlanStatus)), which is also when it
+// stops being tradeable. Front ends use this to subtract the resolved set from
+// the registry's open/unexpired catalog page.
+type ListSettledSeriesParams = record {
+	// Resume after this series id (exclusive). `None` starts from the lowest
+	// series id. Settled series ids are returned in ascending order, so paging
+	// with the previous response's `next_cursor` is stable.
+	start_after : opt text;
+	// Maximum number of ids to return. `None` returns all remaining ids.
+	limit : opt nat64;
+	// When set, only return settled series whose plan recorded this balance
+	// domain. Lets a caller scoped to one domain (e.g. a flow deck) shrink the
+	// response to the relevant subset.
+	balance_domain : opt BalanceDomain
+};
 type MigrateDomainParams = record {
 	from_domain : BalanceDomain;
 	migration_id : text;
@@ -183,45 +639,198 @@ type MigrationError = variant {
 	InFlightPlansExist;
 	Common : CommonError
 };
-type NativeEvmAsset = record { decimals : nat8; chain_id : nat64 };
-type NonMonetaryUnit = variant { Points };
+// Represents a native asset on an EVM-compatible chain
+// (for example ETH on Ethereum/Base, POL on Polygon, or BNB on BSC).
+type NativeEvmAsset = record {
+	// The number of decimals the native asset uses.
+	decimals : nat8;
+	// The EVM chain where this native asset is used.
+	chain_id : nat64
+};
+type NonMonetaryUnit = variant { Points; Social : SocialReward };
+// Metadata for a specific outcome in a categorical market.
 type Outcome = record {
+	// The unique identifier of the outcome.
 	id : text;
+	// A short title for the outcome (e.g., "Yes", "No", "Team A").
 	title : text;
+	// An optional detailed description of the outcome.
 	description : opt Description;
+	// An optional icon URL for the outcome.
 	icon_url : opt text
 };
-type PaymentIdempotency = variant { IcrcCreatedAtTimeNs : nat64 };
-type PayoffType = variant { Put; Binary; Call; Categorical };
+// Aggregate lean of the supplied principal set on a single outcome of a
+// series.
+//
+// Carries **counts only**: no principal identities, sides, quantities, or
+// P&L. Long is the number of net-long holders, short the number of net-short
+// holders; flat (zero net) positions are excluded from both.
+type OutcomeLean = record {
+	// `long + short`, the number of supplied principals with a non-flat
+	// position on this outcome.
+	total : nat64;
+	// The outcome this lean is for. `None` is the series' binary payoff (long
+	// vs short); `Some` identifies a categorical outcome.
+	outcome_id : opt text;
+	// Number of supplied principals net long on this outcome.
+	long : nat64;
+	// Number of supplied principals net short on this outcome.
+	short : nat64
+};
+// Mechanism for ensuring idempotency in ledger payments.
+type PaymentIdempotency = variant {
+	// Uses the ICRC `created_at_time` field to prevent duplicate transfers.
+	IcrcCreatedAtTimeNs : nat64
+};
+// Defines the payoff structure for a derivative contract.
+type PayoffType = variant {
+	// Payoff based on the positive difference between strike and underlying price.
+	Put;
+	// A linear (delta-one) payoff `net_qty · (S_T − F)`: outright forwards,
+	// non-deliverable forwards (NDFs), and dated futures. The agreed forward
+	// rate `F` is the trade price (captured in reserved margin, like an option
+	// premium); settlement is bounded to `[0, settlement_cap]` to keep the
+	// system solvent without a running liquidation engine. See ADR 0001.
+	Linear;
+	// A fixed payoff if the condition is met (all-or-nothing).
+	Binary;
+	// Payoff based on the positive difference between underlying price and strike.
+	Call;
+	// A categorical market with multiple mutually exclusive outcomes.
+	Categorical
+};
 type PayoutUnit = variant {
 	Fiat : FiatUnit;
 	Asset : Asset;
 	NonMonetary : NonMonetaryUnit
 };
-type PlanStatus = variant { Finalised; Planned; Executing };
+// The execution status of a background operation plan.
+type PlanStatus = variant {
+	// The plan has been successfully completed.
+	Finalised;
+	// The plan is created but execution has not started.
+	Planned;
+	// The plan is currently being executed.
+	Executing
+};
+// Represents an open position in a derivative series for a specific user.
 type Position = record {
+	// The specific outcome for categorical markets.
 	outcome_id : opt text;
+	// The unique identifier of the derivative series.
 	series_id : text;
+	// The net quantity of the position (positive for Long, negative for Short).
 	net_qty : int;
+	// The user who owns the position.
 	user : principal;
+	// The amount of margin reserved for this specific position in USD.
 	reserved_margin_usd : nat
 };
+// A cryptographically signed proof of an open position, used for cross-canister transfers.
 type PositionProof = record {
+	// The quantity of the position.
 	qty : int;
+	// The cryptographic signature of the proof data.
 	signature : blob;
+	// The specific outcome for categorical markets.
 	outcome_id : opt text;
+	// The unique identifier of the derivative series.
 	series_id : text;
+	// The user whose position is being proven.
 	user : principal;
+	// Unique identifier for the transfer operation.
 	transfer_id : text;
+	// Optional valuation price for the position.
 	valuation_price : opt Price;
+	// The principal of the clearing canister that issued the proof.
 	clearing_id : principal
 };
+// Encapsulates a price with its numerical value and domain-specific metadata.
+// Decouples the mathematical representation (`DecimalValue`) from the
+// reporting context (timestamp, oracle Source).
 type Price = record {
+	// Optional timestamp when this price was generated/observed.
 	timestamp : opt nat64;
+	// Optional identifier for the oracle source.
 	oracle_id : opt text;
+	// The numeric component of the price.
 	decimal : DecimalValue
 };
+// The fixed-width time bucket a [`get_series_price_history`] call aggregates a
+// series' executed trades into.
+//
+// Buckets are **fixed-width and epoch-aligned** (each bucket is `[k * width,
+// (k + 1) * width)` ns since the Unix epoch), not rolling spans, so the same
+// instant always falls in the same bucket regardless of when the query runs:
+// two calls over an overlapping range return byte-identical candles for the
+// shared buckets. Hourly resolution backs the short windows the front end
+// renders (1d / 7d) and daily resolution the long ones (30d / all) without the
+// caller having to fetch and re-bucket the raw per-trade tape.
+//
+// [`get_series_price_history`]: crate::api::trade::get_series_price_history
+type PriceHistoryInterval = variant {
+	// One candle per UTC day.
+	Day;
+	// One candle per UTC hour.
+	Hour
+};
+type ReassignAccountError = variant {
+	// `old_owner` has no clearing account to reassign.
+	AccountNotFound;
+	// `new_owner` already has clearing state; this primitive reassigns, it never merges.
+	TargetAccountNotEmpty;
+	// A custody sweep did not settle. The re-key already happened and the plan
+	// is still pending: replay the same `reassignment_id` to resume the sweep.
+	CustodyTransferFailed : record { error : AssetError; asset_id : text };
+	// The `reassignment_id` is already in use for `old_owner` with a different
+	// `new_owner`.
+	ReassignmentIdReused;
+	// `old_owner` has positions frozen for cross-canister transfer; the signed
+	// `PositionProof`s are bound to the old principal and cannot be reassigned.
+	PendingPositionTransfersExist;
+	// `old_owner` or `new_owner` has non-finalised deposit, withdrawal, settlement,
+	// or domain-migration plans that would act on the wrong owner mid-flight.
+	InFlightPlansExist;
+	// The account holds an asset whose custody this canister cannot move
+	// on-chain, so the funds would be stranded under the old principal.
+	UnsupportedCustodyAsset : record { asset_id : text };
+	// One of the two principals is anonymous. Every account, position, deposit,
+	// and withdrawal API rejects the anonymous caller, so an account assigned to
+	// it would be permanently unreachable.
+	AnonymousOwner;
+	// Another reassignment touching one of the two principals has not finalised.
+	// Replay that one's `reassignment_id` to resume it.
+	ReassignmentInProgress;
+	// `old_owner` has resting limit orders; they must be cancelled first so the
+	// book's ownership assumptions are never mutated behind its back.
+	OpenOrdersExist;
+	// `old_owner` and `new_owner` are the same principal.
+	SameOwner;
+	Common : CommonError
+};
+type ReassignAccountParams = record {
+	// The principal the account is moved away from.
+	old_owner : principal;
+	// Controller-provided unique identifier. Replaying a call with the same id
+	// resumes that reassignment (and returns `Ok` once it is complete) instead
+	// of starting a second one.
+	reassignment_id : text;
+	// The principal the account is moved to.
+	new_owner : principal
+};
+type ReassignAccountResult = variant { Ok; Err : ReassignAccountError };
+type RefreshIcrcAssetMetadataError = variant {
+	AssetNotFound;
+	NotAnIcrcAsset;
+	Common : CommonError
+};
+type RefreshIcrcAssetMetadataParams = record { asset_id : text };
+type RefreshIcrcAssetMetadataResult = variant {
+	Ok;
+	Err : RefreshIcrcAssetMetadataError
+};
 type RegisterIcrcAssetError = variant {
+	// `allowed_balance_domains` was empty or could not be normalized.
 	InvalidAllowedBalanceDomains;
 	AssetAlreadyExists;
 	VusdCannotBeCollateral;
@@ -230,59 +839,317 @@ type RegisterIcrcAssetError = variant {
 type RegisterIcrcAssetParams = record {
 	haircut_bps : nat16;
 	is_enabled : bool;
+	// Non-empty. Duplicates are removed. Order is normalized for stable storage.
 	allowed_balance_domains : vec BalanceDomain;
 	ledger_id : principal;
 	oracle_id : opt text;
 	asset_id : text
 };
 type RegisterIcrcAssetResult = variant { Ok; Err : RegisterIcrcAssetError };
-type Series = record {
-	title : text;
-	strike : opt Price;
-	creator : principal;
-	payoff_type : PayoffType;
-	payout_unit : PayoutUnit;
-	expiry_ns : nat64;
-	banner_url : opt text;
-	series_id : text;
-	underlying : text;
-	description : Description;
-	outcomes : opt vec Outcome;
-	created_at_ns : nat64;
-	icon_url : opt text;
-	price_precision : nat8;
-	balance_domain : BalanceDomain;
-	oracle_source : text
+// Settlement terms for a series. Compulsory on every market.
+//
+// Modeled as a struct (not a bare `String`) so it can grow without a breaking
+// candid change: future fields (for example structured `rules`: named source +
+// settle date + day-count, see issue #64) are added as `opt` fields, which
+// candid can decode against records persisted before the field existed.
+// Variants were considered and rejected: adding an enum variant risks decode
+// failures in already-deployed consumers, whereas appending `opt` record
+// fields is forward-compatible.
+type Resolution = record {
+	// Human-readable clause describing how the market settles.
+	clause : text
 };
-type SettleSeriesParams = record {
+// Defines a specific derivative series (contract).
+type Series = record {
+	// A short, descriptive title for the series.
+	title : text;
+	// Target price for options, if applicable.
+	strike : opt Price;
+	// The principal identifier of the series creator.
+	creator : principal;
+	// The mathematical payoff model used for this series.
+	payoff_type : PayoffType;
+	// The Engine that created this series, if any.
+	// `None` for series created directly by a canister controller.
+	engine_id : opt text;
+	// The unit in which the contract payoff is expressed.
+	payout_unit : PayoutUnit;
+	// Expiry timestamp in nanoseconds since UNIX epoch.
+	expiry_ns : nat64;
+	// An optional banner URL for the market.
+	banner_url : opt text;
+	// Optional timestamp in nanoseconds since UNIX epoch at which trading opens.
+	//
+	// `None` means the series is tradeable from the moment it is registered:
+	// the historical behavior, and the canonical way to express "live now".
+	// `Some(t)` schedules the series: it is listed and discoverable immediately
+	// but trading is rejected until `t`. The window is inclusive at the open
+	// (`now >= start_ns` is live) and exclusive at the close (`now < expiry_ns`
+	// is unexpired), so a series is tradeable over `[start_ns, expiry_ns)`.
+	//
+	// Participates in `series_id` hashing (see [`Series::generate_id`]): two
+	// series that differ only in their trading window are distinct contracts,
+	// so a scheduled series can never silently collide with an already-live one
+	// and inherit a start date its creator did not ask for. To keep that
+	// guarantee meaningful, `None` is the only encoding of "already live":
+	// `add_series` rejects a `start_ns` at or before the current time, so the
+	// same market cannot exist under two ids.
+	start_ns : opt nat64;
+	// Unique identifier computed from series parameters.
 	series_id : text;
+	// Upper settlement bound for `Linear` series (forwards/NDF/futures): the
+	// fixing is clamped to `[0, settlement_cap]` at settlement and short margin
+	// is reserved as `cap − entry`. Compulsory for `Linear`, `None` otherwise.
+	// Additive `opt` field, so no state migration is required (see ADR 0001).
+	settlement_cap : opt Price;
+	// The underlying asset ticker or identifier (e.g., "ICP/USD").
+	underlying : text;
+	// Optional [BCP 47](https://www.rfc-editor.org/info/bcp47) language tag
+	// describing the language of `title`, `description`, and any
+	// `outcomes[].title` / `outcomes[].description`.
+	//
+	// Examples: `"en"`, `"en-US"`, `"es"`, `"zh-Hant-HK"`.
+	//
+	// `locale` is metadata: it does NOT participate in `series_id` hashing,
+	// so the same economic contract written in different languages must
+	// collide on the same id (otherwise liquidity would fragment across
+	// localized clones of the same market).
+	//
+	// When `None`, consumers should assume the default locale `"en"` and are
+	// responsible for translating into the user's preferred locale; the
+	// canister never stores translations on-chain.
+	locale : opt text;
+	// A detailed description of the series.
+	description : Description;
+	// The settlement terms describing how this market resolves.
+	//
+	// Compulsory metadata: every series carries resolution terms. Like
+	// `title`/`description`/`locale`, it does NOT participate in `series_id`
+	// hashing (see [`Series::generate_id`]), so the same economic contract
+	// keeps a single id regardless of its resolution wording.
+	resolution : Resolution;
+	// The defined outcomes for categorical markets (ordered).
+	outcomes : opt vec Outcome;
+	// Timestamp of series creation in nanoseconds since UNIX epoch.
+	created_at_ns : nat64;
+	// An optional icon URL for the market.
+	icon_url : opt text;
+	// The set of trading access policies governing who may trade this series.
+	// **Must never be empty**: every series carries at least one policy.
+	//
+	// Evaluated as a logical OR: a caller is authorized if **any** policy
+	// in the list grants them access.
+	//
+	// - `[Open]` → explicitly unrestricted (default).
+	// - `[Restricted { groups }]` → only group members may trade.
+	// - Multiple policies can coexist (e.g. `[Open, Restricted { groups }]`).
+	trading_access : vec TradingAccess;
+	// The canonical number of decimals used for prices and strikes in this series.
+	price_precision : nat8;
+	// The domain this market belongs to (e.g. Playground, Settlement).
+	balance_domain : BalanceDomain;
+	// The identifier of the oracle providing the settlement data.
+	oracle_source : text;
+	// If this series was forked from another, the source series ID.
+	forked_from : opt text
+};
+// One aggregated price-history candle: every executed trade on a series whose
+// timestamp falls in a single fixed-width bucket, summarized into the
+// open/high/low/close + volume a chart plots.
+//
+// `close` is the bucket's consensus the front end maps to a 0..1 YES
+// probability (the last trade price in the bucket); `open`/`high`/`low` let it
+// draw candles. Prices on one series share the series' precision, so `high` and
+// `low` are the per-bucket max and min by numeric value.
+type SeriesPriceCandle = record {
+	// Lowest trade price in the bucket.
+	low : Price;
+	// Highest trade price in the bucket.
+	high : Price;
+	// Price of the last trade in the bucket (latest timestamp, ties broken by
+	// execution order): the consensus a sparkline/chart plots.
+	close : Price;
+	// Price of the first trade in the bucket (earliest timestamp, ties broken
+	// by execution order).
+	open : Price;
+	// Total traded quantity in the bucket (sum of each trade's positive `qty`).
+	volume : int;
+	// Number of executed trades in the bucket.
+	trade_count : nat64;
+	// Start of the bucket (ns since the Unix epoch); see
+	// [`PriceHistoryInterval::bucket_start`]. Candles are returned ascending by
+	// this field.
+	bucket_start_ns : nat64
+};
+// A series' executed-trade history aggregated into fixed-width time buckets.
+type SeriesPriceHistory = record {
+	// Buckets that contain at least one trade, ascending by `bucket_start_ns`.
+	// Empty buckets are omitted (the series simply had no trades then), so a
+	// young or untraded market returns an empty vector rather than fabricated
+	// points.
+	candles : vec SeriesPriceCandle
+};
+// One series' settlement status, paired with the id it was requested for.
+//
+// `status` is `Some` when a settlement plan exists for the series (in any
+// [`PlanStatus`](crate::types::plans::PlanStatus); a plan is opened the moment
+// settlement begins) and `None` otherwise. A `None` covers both a still-open
+// series and an unknown id; the two are not distinguished here. The `series_id`
+// is echoed on each entry so callers can align results with their requested ids
+// and attribute a `None`, which carries no id of its own.
+type SeriesSettlementStatus = record {
+	// The settlement progress, or `None` if the series has no settlement plan
+	// yet (still open / not being settled).
+	status : opt SettlementStatusView;
+	// The series this status is for (echoes the requested id).
+	series_id : text
+};
+// A page of executed trades scoped to a single series.
+type SeriesTradeHistoryPage = record {
+	// When `Some`, pass back as `start_after` to fetch the next page (it is the
+	// `event_id` of the last trade returned). `None` means the last page has
+	// been returned.
+	next_cursor : opt nat64;
+	// Executed trades for the series in this page, one point per trade, ordered
+	// by `event_id` ascending (i.e. execution order).
+	items : vec SeriesTradePoint
+};
+// A single executed trade on a series, as surfaced by the market-wide
+// price-history query.
+//
+// Each executed trade emits two [`Event`] rows (one per counterparty) that
+// share the same `event_id`, `price`, and `timestamp`. A price history needs
+// only one point per trade, so this collapses the pair to the trade-level
+// facts a front end plots (`price`/`timestamp` for the sparkline, `qty` for
+// optional volume) without exposing either counterparty's principal in a
+// market-wide read.
+type SeriesTradePoint = record {
+	// Traded quantity (positive).
+	qty : int;
+	// Execution timestamp in nanoseconds since UNIX epoch.
+	timestamp : nat64;
+	// Id of the trade's [`Event`] rows. Strictly increasing in execution
+	// order, so it doubles as the pagination cursor.
+	event_id : nat64;
+	// Execution price of the trade.
+	price : Price
+};
+// One series' cumulative market-wide traded volume.
+//
+// `volume` is the traded *notional*, i.e. the sum over executed trades of
+// `qty · price` (the value that changed hands), in USD base units (the
+// `USD_DECIMALS` scale), not a contract count. `trade_count` is the number of
+// executed trades. An untraded or unknown series totals zero on both.
+type SeriesTradedVolume = record {
+	// The series these totals are for (echoes the requested id).
+	series_id : text;
+	// Cumulative traded notional (sum of `qty · price`) in USD base units.
+	volume : int;
+	// Number of executed trades on the series.
+	trade_count : nat64
+};
+// Input parameters for initiating a series settlement.
+type SettleSeriesParams = record {
+	// The derivative series identifier.
+	series_id : text;
+	// The final settlement data from the oracle.
 	settlement : SettlementInput
 };
-type SettleSeriesResult = variant { Ok; Err : SettlementError; Processing };
+// Outcome of a derivative series settlement request.
+type SettleSeriesResult = variant {
+	// Settlement plan was successfully created and all processing is complete.
+	Ok;
+	// Failed to initiate settlement.
+	Err : SettlementError;
+	// The settlement is in progress but incomplete due to processing limits.
+	// The caller should call `settle_series` again to continue.
+	Processing
+};
+// A page of settled (resolved) series ids.
+type SettledSeriesPage = record {
+	// When `Some`, pass back as `start_after` to fetch the next page. `None`
+	// means the last page has been returned.
+	next_cursor : opt text;
+	// Settled series ids in this page, ascending.
+	items : vec text
+};
+// One principal's settled-position accuracy over a requested window.
+//
+// Mirrors the aggregate-only contract of [`LeaderboardEntry`]: window totals
+// (settled / win counts plus net realized `PnL`) and never a per-settlement
+// breakdown. `win_count / settled_count` is the window accuracy. Only
+// principals with at least one settlement in the window are returned: a
+// member with no settlement contributes nothing to a cohort's accuracy, and
+// the caller already knows the full set it asked for.
+type SettlementAccuracyEntry = record {
+	// The aggregated principal.
+	"principal" : principal;
+	// Net realized `PnL` over the window, in internal USD (`vUSD`) base units:
+	// the signed sum of the principal's settlement cashflows.
+	realized_pnl : int;
+	// Number of those settlements that were net positive (`cashflow_usd > 0`).
+	win_count : nat64;
+	// Number of settled positions in the window.
+	settled_count : nat64
+};
+// Errors occurring during derivative series settlement.
 type SettlementError = variant {
-	InconsistentSettlementPrice : record { requested : Price; existing : Price };
+	// A second `settle_series` call arrived with a `SettlementInput` that does
+	// not match the one already locked in by the in-flight plan.
+	//
+	// Covers both `Price` and `Outcome` settlement types: the variant that's
+	// locked is stored in `existing`, and the one just attempted is in
+	// `requested`. Callers that need to surface a human-readable diff can
+	// pattern-match on both variants without losing information.
+	InconsistentSettlement : record {
+		requested : SettlementInput;
+		existing : SettlementInput
+	};
+	// Overflow during settlement calculation.
 	MathOverflow;
+	// Total net payoffs (post-fee) exceed global system equity (system insolvency).
 	SolvencyViolation : record {
 		total_net_payoff : nat;
 		total_collateral_usd : nat
 	};
+	// An error occurred while interacting with the asset.
 	Asset : AssetError;
+	// A common error occurred.
 	Common : CommonError
 };
-type SettlementInput = variant { Price : Price; Outcome : text };
+// Input data for settling a series.
+type SettlementInput = variant {
+	// Final price for scalar markets (Binary, Call, Put).
+	Price : Price;
+	// Resolved winner for categorical markets.
+	Outcome : text
+};
+// A plan for processing a derivative series settlement in the background.
 type SettlementPlan = record {
+	// Current execution status of the plan.
 	status : PlanStatus;
+	// Base idempotency key in nanoseconds.
 	idempotency_ns : PaymentIdempotency;
+	// The unique identifier of the derivative series.
 	series_id : text;
+	// The protocol fee (in USD units).
 	fee_usd : nat;
+	// Tracks progress through accounting updates.
 	accounting_cursor : nat64;
+	// The insurance fee (in USD units).
 	insurance_fee_usd : nat;
+	// Detailed position snapshots and accounting updates.
 	positions : vec SettlementPosition;
+	// Whether all accounting updates have been applied to account states.
 	accounting_applied : bool;
+	// The domain of the series being settled.
 	balance_domain : BalanceDomain;
+	// The oracle source identifier for authorization.
 	oracle_source : text;
+	// The final settlement data.
 	settlement : SettlementInput
 };
+// Snapshot of a single user's position and its settlement accounting.
 type SettlementPosition = record {
 	outcome_id : opt text;
 	net_qty : int;
@@ -290,6 +1157,7 @@ type SettlementPosition = record {
 	reserved_margin_usd : nat;
 	cashflow_usd : int
 };
+// Public settlement progress for a derivative series.
 type SettlementStatusView = record {
 	status : PlanStatus;
 	series_id : text;
@@ -302,53 +1170,214 @@ type SettlementStatusView = record {
 	total_positions : nat64;
 	settlement : SettlementInput
 };
+// Represents the side of an order or trade.
 type Side = variant { Buy; Sell };
+type SocialReward = record {
+	// A short title for the reward (e.g., "Pizza 🍕").
+	title : text;
+	// An optional detailed description of the reward.
+	description : opt text;
+	// An optional icon URL for the reward.
+	icon_url : opt text
+};
+// Represents structured statistics for the clearing system.
 type Stats = record {
+	// Total number of unique margin accounts.
 	total_users : nat64;
+	// Total collateral balance in margin accounts per asset.
 	margin_balances : vec record { Asset; nat };
+	// Total collateral locked across all positions.
 	total_collateral_locked : nat;
+	// Total number of executed trades.
 	total_trades : nat64;
+	// Total number of derivative series.
 	total_series : nat64;
+	// Total absolute open interest across all series.
 	open_interest : nat;
+	// Total number of events per type.
 	event_counts : vec record { text; nat64 }
 };
+// Input parameters for submitting a limit order.
 type SubmitLimitOrderParams = record {
+	// The quantity of the order. Must be positive.
 	qty : int;
+	// The specific outcome for categorical markets.
 	outcome_id : opt text;
+	// The derivative series identifier.
 	series_id : text;
+	// The side of the order (Buy or Sell).
 	side : Side;
+	// Unique identifier for the order.
 	order_id : text;
+	// The limit price of the order.
 	price : Price
 };
+// Input parameters for submitting a market order (taking an existing limit order).
 type SubmitMarketOrderParams = record {
+	// Optional taker quantity. Must be positive when provided. The trade executes for
+	// `min(qty, resting order qty)` and the unfilled remainder stays on the book with
+	// proportionally reduced blocked margin. `None` fills the entire resting order.
+	qty : opt int;
+	// Unique identifier for the trade resulting from this match.
 	trade_id : text;
+	// The identifier of the limit order to be matched.
 	matching_order_id : text
 };
+// Input parameters for submitting a matched trade from an exchange.
 type SubmitMatchedTradeParams = record {
+	// The quantity of the trade. Must be positive.
 	qty : int;
+	// Unique identifier for the trade provided by the exchange.
 	trade_id : text;
+	// The specific outcome for categorical markets.
 	outcome_id : opt text;
+	// The derivative series identifier.
 	series_id : text;
+	// The user opening or increasing a Short position (seller).
 	seller : principal;
+	// Optional amount to atomically unblock for the buyer.
 	buyer_unblock_amount : opt nat;
+	// The user opening or increasing a Long position (buyer).
 	buyer : principal;
+	// The execution price of the trade.
 	price : Price;
+	// Optional amount to atomically unblock for the seller.
 	seller_unblock_amount : opt nat
 };
-type SubmitMatchedTradeResult = variant { Ok : bool; Err : TradeError };
+// Outcome of a matched trade submission.
+type SubmitMatchedTradeResult = variant {
+	// Returns `true` if the trade was successfully processed.
+	Ok : bool;
+	// Failed to submit or match the trade.
+	Err : TradeError
+};
+// Errors occurring during trade submission or matching.
 type TradeError = variant {
+	// A user tried to trade with themselves.
 	SelfTradingNotAllowed;
+	// The specified order was not found.
 	OrderNotFound : text;
-	ArbitrageLimitExceeded : record { limit_usd : nat; sum_usd : nat };
+	// A `Linear` (forward/NDF/future) order price exceeds the series
+	// settlement cap. The agreed forward rate must stay within `[0, cap]` so
+	// the short leg is fully collateralized under the bounded-linear model.
+	PriceExceedsSettlementCap : record {
+		// The series settlement cap, scaled to USD base units.
+		cap_usd : nat;
+		// The submitted order price, scaled to USD base units.
+		price_usd : nat
+	};
+	// The series is scheduled and its trading window has not opened yet, so no
+	// trades, orders, or transfers can be initiated on it.
+	//
+	// Returned whenever a trade-initiating path sees a series whose `start_ns`
+	// is still in the future. Carries the open so the caller can render a
+	// countdown or retry at the right moment instead of polling blindly.
+	SeriesNotStarted : record {
+		// The timestamp (nanoseconds since the UNIX epoch) at which it opens.
+		start_ns : nat64;
+		// The series that is not yet open.
+		series_id : text
+	};
+	// The trade would violate the no-arbitrage principle (e.g., sum of outcome prices > 1.0).
+	ArbitrageLimitExceeded : record {
+		// The hard limit (usually 1.0 USD).
+		limit_usd : nat;
+		// The current sum of best bids across all outcomes.
+		sum_usd : nat
+	};
+	// Failed to communicate with the registry canister.
 	RegistryError : text;
+	// The series' trading window has closed, so no new exposure can be opened
+	// on it.
+	//
+	// Returned to exposure-opening paths only. Redeeming a complete set and
+	// accepting a transferred position stay available after expiry, because they
+	// only release exposure that already exists and settlement may not run for
+	// some time after the window closes.
+	SeriesExpired : record {
+		// The timestamp (nanoseconds since the UNIX epoch) at which it closed.
+		expiry_ns : nat64;
+		// The series whose window has closed.
+		series_id : text
+	};
+	// The user has insufficient margin to open or maintain the position.
 	InsufficientMargin : record {
+		// Current margin balance.
 		balance : nat;
+		// The user whose margin is insufficient.
 		user : principal;
+		// Required margin for the trade.
 		required : nat
 	};
+	// The caller is not the creator of the order.
 	NotOrderCreator;
+	// The account this call would mutate is being, or has just been, reassigned
+	// to another principal.
+	//
+	// Returned when a call that was suspended at an await straddles an
+	// `admin_reassign_account`: resuming it would recreate state under a
+	// principal whose account has moved. The caller should retry with the
+	// principal that now owns the account.
+	AccountUnderReassignment : record {
+		// The principal whose account is being, or has just been, reassigned.
+		user : principal
+	};
+	// The specified series was not found in the registry.
 	SeriesNotFound : text;
+	// The series has an active or finalised settlement plan, so no new
+	// trades, orders, or transfers can be initiated on it.
+	//
+	// Returned whenever a trade-initiating path sees an entry in
+	// `SETTLEMENT_PLANS` for the series. Once a series is settled it is
+	// economically closed: positions are gone, winners' cash is booked,
+	// and opening a new position could only create unbacked exposure.
+	SeriesAlreadySettled : text;
+	// The caller is not authorized to trade on this restricted series.
+	//
+	// Returned when a series carries `TradingAccess::Restricted` policies
+	// and the caller is not a member of any of the referenced groups.
+	// The caller should check `is_trading_authorized` on the registry
+	// or contact the group creator to be added as a member.
+	NotAuthorizedToTrade;
+	// A common error occurred.
 	Common : CommonError
+};
+// A single trading access policy attached to a derivative series.
+//
+// A [`Series`](super::series::Series) holds a `Vec<TradingAccess>`.
+// Authorization is evaluated as a logical **OR** across all policies:
+// if *any* policy in the list grants access to the caller, the caller
+// may trade.
+//
+// # Invariant
+//
+// The `trading_access` vector on a [`Series`](super::series::Series) **must
+// never be empty**. Every series must carry at least one policy. The default
+// is `[Open]`. This invariant is enforced at the API level: `add_series`
+// fills `[Open]` if empty, and `update_trading_access` rejects empty lists.
+//
+// # Combining policies
+//
+// A series may carry multiple policies simultaneously. For example:
+// - `[Open]`: open to everyone (default).
+// - `[Restricted { groups: [g1, g2] }]`: only members of g1 or g2.
+// - `[Open, Restricted { groups: [g1] }]`: open to everyone *and* additionally tagged as belonging
+// to g1 (useful for discovery/UI filtering).
+//
+// # Extensibility
+//
+// New variants (e.g. `TokenGated`, `ReputationBased`) can be added in
+// the future without breaking existing policies or on-chain state.
+type TradingAccess = variant {
+	// Unrestricted: any authenticated (non-anonymous) caller can trade.
+	Open;
+	// Restricted to members of the specified groups.
+	// The caller is authorized if they belong to **at least one** of the
+	// listed groups.
+	Restricted : record {
+		// The group IDs whose members are allowed to trade.
+		groups : vec text
+	}
 };
 type UpdateAssetMetricsParams = record {
 	metrics : AssetMetrics;
@@ -379,21 +1408,51 @@ type UpdateDomainPolicyParams = record {
 	domain : BalanceDomain;
 	policy : DomainPolicy
 };
+// Errors occurring during collateral withdrawal.
 type WithdrawCollateralError = variant {
-	InsufficientExcessMargin : record { requested : nat; available : nat };
+	// The user does not have enough excess margin to withdraw the requested amount.
+	InsufficientExcessMargin : record {
+		// The amount requested to be withdrawn.
+		requested : nat;
+		// Current excess margin available for withdrawal.
+		available : nat
+	};
+	// The asset is not permitted in this balance domain.
 	DomainNotAllowed : record { domain : BalanceDomain; asset_id : text };
+	// Overflow during collateral calculation.
 	MathOverflow;
-	Asset : AssetError
+	// An error occurred while interacting with the asset.
+	Asset : AssetError;
+	// The caller's account is being reassigned to another principal; its
+	// custody subaccount is mid-move and cannot pay out.
+	AccountUnderReassignment : record {
+		// The principal whose account is being reassigned.
+		user : principal
+	}
 };
+// Input parameters for withdrawing collateral.
 type WithdrawCollateralParams = record {
+	// The specific balance domain to withdraw from (defaults to Settlement).
 	domain : opt BalanceDomain;
+	// Unique identifier for the withdrawal operation.
 	withdrawal_id : text;
+	// The unique identifier of the asset to withdraw.
 	asset_id : text;
+	// The amount of the asset to withdraw.
 	amount : nat
 };
-type WithdrawCollateralResult = variant { Ok; Err : WithdrawCollateralError };
+// Outcome of a collateral withdrawal operation.
+type WithdrawCollateralResult = variant {
+	// Withdrawal was successfully planned or executed.
+	Ok;
+	// Failed to process withdrawal.
+	Err : WithdrawCollateralError
+};
 type WithdrawFundError = variant {
 	TransferFailed : text;
+	// The insurance fund backs the default waterfall and is never withdrawn
+	// through an administrative path; only the waterfall draws on it.
+	InsuranceFundLocked;
 	InsufficientFunds;
 	Common : CommonError
 };
@@ -411,6 +1470,81 @@ service : (Config) -> {
 	// This method validates the series and increases the target user's position based on the provided
 	// proof. This method is gated to canister controllers.
 	accept_position_transfer : (PositionProof) -> (AcceptPositionTransferResult);
+	// Reassigns the entire clearing account of `old_owner` to `new_owner`.
+	//
+	// Moves the full [`AccountState`](crate::types::margin::AccountState) (collateral
+	// balances across all assets and balance domains, internal cash balances (USD), and
+	// reserved margins per domain), every open position keyed by the old principal, and
+	// the on-ledger custody funds held in the old principal's derived subaccounts. The
+	// generic use case is an account-ownership handover, e.g. a custodial key rotation
+	// where an operator starts signing for the same logical account with a newly derived
+	// principal.
+	//
+	// The historical event log (and the leaderboard / accuracy projections derived
+	// from it) is left untouched: it is an audit trail of what happened under the old
+	// principal. Finalised plans likewise stay under their original keys as records.
+	//
+	// See [`crate::account::reassignment`] for the guard rails, the ordering
+	// guarantee, and how an interrupted reassignment is resumed.
+	//
+	// This method is gated to canister controllers.
+	admin_reassign_account : (ReassignAccountParams) -> (ReassignAccountResult);
+	// Aggregates, for a series, the long/short lean of a supplied set of
+	// principals, broken down per outcome.
+	//
+	// The clearing layer ascribes no meaning to the set: it is just a list of
+	// principals the caller passes in; how it is assembled is a concern of the
+	// consuming layer-2 / application, not of clearing.
+	//
+	// Returns **counts only**: per outcome, how many of the supplied principals
+	// are net long vs net short, plus the number of distinct principals with any
+	// non-flat position on the series. It never exposes individual identities,
+	// sides, quantities, or P&L, so no single principal's own side is ever singled
+	// out.
+	//
+	// The supplied set is de-duplicated and capped at `MAX_AGGREGATE_PRINCIPALS`.
+	// Guarded by `caller_is_not_anonymous`, matching the other position reads.
+	aggregate_lean : (AggregateLeanParams) -> (AggregateLean) query;
+	// Aggregates each supplied principal's settled-position win/total counts (and
+	// net realized `PnL`) over an arbitrary half-open window `[from_ts, to_ts)`.
+	//
+	// `win_count / settled_count` per entry is that principal's window accuracy,
+	// the same metric [`list_leaderboard`] exposes, but over a caller-chosen span
+	// rather than a fixed calendar bucket. A consumer scoring a cohort (e.g. one
+	// league side of a "battle") sums the entries it gets back for that side's
+	// members.
+	//
+	// Unlike [`list_leaderboard`], the arbitrary window cannot use the
+	// `(window, period)` index, so this scans the raw `EVENTS` log once:
+	// `O(events)`, the same cost class as [`get_trade_history`] and the
+	// post-upgrade leaderboard rebuild. Only `Settled` events count; a `Settled`
+	// event's `qty` is the position's signed `cashflow_usd`, so a win is
+	// `qty > 0`, matching the leaderboard's rule exactly. Pass `series_ids` to
+	// scope the count to a set of series (e.g. one market category); `None`
+	// counts every series. Guarded by `caller_is_not_anonymous`, matching the
+	// other settlement-derived reads.
+	//
+	// [`get_trade_history`]: crate::api::trade::get_trade_history
+	aggregate_settlement_accuracy : (AggregateSettlementAccuracyParams) -> (
+		vec SettlementAccuracyEntry
+	) query;
+	// One-shot, idempotent backfill of `Settled` events for plans finalized
+	// before per-user event emission was added to `apply_settlement_accounting_logic`.
+	//
+	// Iterates `SETTLEMENT_PLANS` in sorted order starting after
+	// `params.start_after`. For each `Finalised` plan it synthesizes one
+	// `EventType::Settled` event per `SettlementPosition` whose `(user,
+	// series_id)` pair has no pre-existing `Settled` event in `EVENTS`. The
+	// synthesized event's `timestamp` is the plan's original
+	// `idempotency_ns` so backfilled rows sort alongside the live events
+	// that would have been written at settlement time.
+	//
+	// Yields cooperatively when the instruction counter is high so a single
+	// call cannot exhaust the update budget. Callers loop until the response
+	// returns `next_cursor: None`.
+	backfill_settlement_events : (BackfillSettlementEventsParams) -> (
+		BackfillSettlementEventsResult
+	);
 	// Cancels a stuck fund withdrawal and refunds the internal ledger balance.
 	//
 	// This method is gated to canister controllers.
@@ -421,6 +1555,7 @@ service : (Config) -> {
 	//
 	// Only the creator of the order can cancel it.
 	cancel_limit_order : (CancelLimitOrderParams) -> (SubmitMatchedTradeResult);
+	// Returns the current global configuration of the Clearing canister.
 	config : () -> (Config) query;
 	// Deposits collateral into the user's account state.
 	//
@@ -445,9 +1580,6 @@ service : (Config) -> {
 	//
 	// This does not refresh balances from external ledgers.
 	get_account_state_query : () -> (GetAccountStateResult) query;
-	get_asset_metrics : () -> (vec record { text; AssetMetrics }) query;
-	// Returns a list of all supported collateral assets with their metrics.
-	get_collateral_assets : () -> (vec CollateralAssetInfo) query;
 	// Returns the current domain policies for all configured domains.
 	//
 	// This method is gated to canister controllers.
@@ -464,22 +1596,143 @@ service : (Config) -> {
 	get_position : (GetPositionParams) -> (opt Position) query;
 	// Retrieves all open positions for the caller.
 	get_positions : () -> (vec Position) query;
+	// Returns the principal of the Series Registry canister.
 	get_registry_canister : () -> (principal) query;
+	// Returns a single series' executed trades aggregated into fixed-width
+	// [`PriceHistoryInterval`] candles (open/high/low/close + volume + trade
+	// count), time-ordered, so a front end can render a time-scoped consensus/price
+	// chart without fetching and re-bucketing the raw per-trade tape that
+	// [`list_series_trade_history`] returns.
+	//
+	// `start_time`/`end_time` window the trades considered (inclusive lower,
+	// exclusive upper), letting the caller request just the window it draws; the
+	// `interval` selects hourly or daily resolution. Buckets with no trades are
+	// omitted (a young or untraded market returns an empty history rather than
+	// fabricated points), and the result is capped at [`MAX_PRICE_HISTORY_POINTS`]
+	// most-recent candles.
+	//
+	// Served from the same `SERIES_TRADE_HISTORY` index as
+	// [`list_series_trade_history`], so it adds no write-path cost and no persisted
+	// state. Aggregation scans newest-first and stops once it has filled
+	// [`MAX_PRICE_HISTORY_POINTS`] buckets, so both the work and the payload are
+	// bounded even when `start_time`/`end_time` are open-ended (see
+	// [`aggregate_price_history`]). Guarded by `caller_is_not_anonymous`, matching
+	// the other series-scoped reads.
+	get_series_price_history : (GetSeriesPriceHistoryParams) -> (
+		SeriesPriceHistory
+	) query;
 	// Returns the full settlement plan including per-position accounting details (admin only).
 	get_settlement_plan : (text) -> (opt SettlementPlan) query;
 	// Returns the public settlement progress for a derivative series without exposing user positions.
 	get_settlement_status : (text) -> (opt SettlementStatusView) query;
-	// Retrieves the trade history (executed trades) for the caller.
-	get_trade_history : () -> (vec Event) query;
-	http_request : (HttpRequest) -> (HttpResponse) query;
-	// Returns a list of all supported collateral assets.
+	// Retrieves the trade history for the caller. Returns events that move the
+	// user's economic position: executed trades, settlements, and liquidations.
+	// Order-placement events are excluded so the response is bounded to events
+	// that materially settle cashflow.
 	//
-	// This method is gated to canister controllers.
-	list_collateral_assets : () -> (vec CollateralAssetConfig) query;
+	// Results are sorted by `(timestamp, event_id)` so that backfilled rows whose
+	// timestamp reflects the original settlement time interleave chronologically
+	// with live events rather than appearing in storage-insertion order.
+	get_trade_history : () -> (vec Event) query;
+	// Returns the official number of decimals for USD accounting.
+	get_usd_decimals : () -> (nat8) query;
+	// Handles incoming HTTP requests for Prometheus metrics.
+	//
+	// This endpoint is restricted to canister controllers and serves metrics at `/metrics`.
+	http_request : (HttpRequest) -> (HttpResponse) query;
+	// Returns a list of all supported collateral assets with their metrics.
+	list_collateral_assets : () -> (vec CollateralAssetInfo) query;
+	// Returns ranked standings for a calendar window (this week / this month / all
+	// time), derived from settled-position `PnL`, with each entry's prior-window
+	// rank for ↑/↓ deltas and stable cursor pagination.
+	//
+	// Principals are ranked by net realized `PnL` (the signed sum of their
+	// settlement cashflows in the window) descending, using competition ranking
+	// (ties share a rank). Pass `members` to rank within a league / affiliation
+	// member set instead of the whole population; that set is ranked in
+	// isolation and every listed member is included even with no settlements in
+	// the window, so the front end can read a user's rank within their league.
+	//
+	// Served from the `SETTLEMENT_LEADERBOARD` index, so a call ranks only the two
+	// relevant period buckets (current + prior) rather than scanning the whole
+	// event log. Guarded by `caller_is_not_anonymous`, matching the other
+	// settlement-derived reads.
+	list_leaderboard : (ListLeaderboardParams) -> (LeaderboardPage) query;
 	// Returns a list of all active limit orders, potentially filtered by series.
 	list_orders : (ListOrdersParams) -> (vec LimitOrder) query;
 	// Returns a list of all derivative series currently cached in the clearing canister.
 	list_series : () -> (vec Series) query;
+	// Returns each requested series' settlement status in one call: the batch form
+	// of [`get_settlement_status`].
+	//
+	// A resolution solver checks "is this market already settled?" for every due
+	// market on each pass; done one id at a time that is N sequential canister
+	// calls. This collapses them into one: each id is looked up in
+	// `SETTLEMENT_PLANS` and returned with its [`SettlementStatusView`], or `None`
+	// when no plan exists yet (the series is still open / not being settled).
+	// Results are one per requested id, in request order, so the caller can zip them
+	// back against its input; the `series_id` is echoed on each entry so a `None`
+	// status is still attributable.
+	//
+	// The work is `O(#series_ids)` map lookups, bounded by the request rather than by the
+	// number of plans, so callers should pass the (already bounded) set they care
+	// about, e.g. the registry's "due" candidates. Reads the same
+	// `SETTLEMENT_PLANS` map as [`get_settlement_status`] and mirrors the
+	// aggregate-read shape of
+	// [`list_series_traded_volumes`](crate::api::trade::list_series_traded_volumes).
+	// Guarded by `caller_is_not_anonymous`, matching the other settlement reads.
+	list_series_settlement_statuses : (ListSeriesSettlementStatusesParams) -> (
+		vec SeriesSettlementStatus
+	) query;
+	// Returns the executed-trade history for a single series, with stable cursor
+	// pagination.
+	//
+	// Unlike [`get_trade_history`], which is caller-scoped, this surfaces every
+	// participant's executed trades on `series_id`, so a front end can derive a
+	// market-wide price history (e.g. a YES-probability sparkline) from the
+	// per-trade `price`/`timestamp` rather than only the viewer's own fills.
+	//
+	// Each trade is returned as a single [`SeriesTradePoint`] (the two
+	// counterparty rows are collapsed), ordered by `event_id` ascending, i.e.
+	// execution order. Served from the `SERIES_TRADE_HISTORY` index, so the read
+	// is `O(log series + page)` rather than a scan of the whole event log. The
+	// cursor is the last trade's `event_id` and is exclusive; since executed-trade
+	// `event_id`s are strictly increasing, resuming neither drops nor repeats a
+	// trade. Mirrors the pagination contract of `list_settled_series`.
+	list_series_trade_history : (ListSeriesTradeHistoryParams) -> (
+		SeriesTradeHistoryPage
+	) query;
+	// Returns each requested series' cumulative market-wide traded volume (the
+	// notional that changed hands, i.e. the sum of `qty · price`, in USD base units) plus
+	// its executed-trade count, one entry per requested id in request order.
+	//
+	// Lets a front end label a page of market cards in a single call instead of a
+	// per-card read. An unknown or untraded series totals zero. Reads the
+	// `SERIES_TRADED_VOLUME` aggregate that [`index_executed_trade`] maintains
+	// alongside the trade index, so the work is `O(#series_ids)` lookups, bounded
+	// regardless of how many trades a series has accumulated, rather than scanning
+	// each series' tape. Guarded by `caller_is_not_anonymous`, matching the other
+	// series-scoped reads.
+	//
+	// [`index_executed_trade`]: crate::memory::index_executed_trade
+	list_series_traded_volumes : (ListSeriesTradedVolumesParams) -> (
+		vec SeriesTradedVolume
+	) query;
+	// Lists the ids of series that have been settled (resolved), with stable
+	// cursor pagination.
+	//
+	// A series appears here as soon as a [`SettlementPlan`] is opened for it (in
+	// any [`PlanStatus`]), which is precisely when it stops being tradeable. This
+	// is the authoritative resolution set: the clearing canister owns settlement
+	// state, the registry does not. Front ends that build a "currently-tradeable"
+	// candidate set call the registry's `list_series_with` with `only_unexpired`
+	// for the open/unexpired catalog and subtract the ids returned here to drop the
+	// resolved markets, instead of reconstructing resolution from the activity log.
+	//
+	// Ids are returned in ascending order from `SETTLEMENT_PLANS` (a `BTreeMap`
+	// keyed by `SeriesId`), so paging with the previous response's `next_cursor`
+	// is stable as long as the underlying set is not mutated mid-traversal.
+	list_settled_series : (ListSettledSeriesParams) -> (SettledSeriesPage) query;
 	// Exports internal state as Prometheus metrics.
 	//
 	// This method is gated to canister controllers.
@@ -504,6 +1757,12 @@ service : (Config) -> {
 	//
 	// Returns 1.0 USD (vUSD) for every full set of N outcome positions provided.
 	redeem_complete_set : (text, int) -> (SubmitMatchedTradeResult);
+	// Refreshes the metadata (decimals, fee, symbol) of an already registered ICRC asset.
+	//
+	// This method is gated to canister controllers.
+	refresh_icrc_asset_metadata : (RefreshIcrcAssetMetadataParams) -> (
+		RefreshIcrcAssetMetadataResult
+	);
 	// Automatically registers an ICRC asset by fetching its metadata from the ledger.
 	//
 	// This method is gated to canister controllers.
@@ -542,7 +1801,10 @@ service : (Config) -> {
 	submit_limit_order : (SubmitLimitOrderParams) -> (SubmitMatchedTradeResult);
 	// Submits a market order to match an existing limit order.
 	//
-	// The caller is the taker.
+	// The caller is the taker. An optional `qty` caps the fill: the trade executes for
+	// `min(qty, resting order qty)` at the order's price and the unfilled remainder stays
+	// on the book with proportionally reduced blocked margin. `None` fills the entire
+	// resting order.
 	submit_market_order : (SubmitMarketOrderParams) -> (SubmitMatchedTradeResult);
 	// Submits a matched trade from an exchange for clearing.
 	//
@@ -587,7 +1849,11 @@ service : (Config) -> {
 	withdraw_collateral : (WithdrawCollateralParams) -> (
 		WithdrawCollateralResult
 	);
-	// Withdraws assets from the Insurance Fund or Treasury to an external wallet.
+	// Withdraws assets from the Treasury to an external wallet.
+	//
+	// The Insurance Fund backs the default waterfall and cannot be withdrawn:
+	// requests for it are rejected before any plan is created, and a plan left
+	// over from before this rule can only be cancelled (which refunds the fund).
 	//
 	// This method is gated to canister controllers.
 	withdraw_fund : (WithdrawFundParams) -> (WithdrawFundResult)

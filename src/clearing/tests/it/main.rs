@@ -1,8 +1,19 @@
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "integration test helpers fail the test by panicking"
+)]
+
 mod account;
 mod admin;
 mod atomicity;
 mod collateral;
+mod engine;
+mod fork;
 mod migration;
+mod oracle_engine;
+mod reassign;
 mod settlement;
 mod settlement_exhaustive;
 mod setup;

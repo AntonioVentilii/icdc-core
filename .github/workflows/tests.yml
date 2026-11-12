@@ -5,6 +5,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Incremental artifacts never get reused on a fresh runner and only bloat
+  # the cached `target/`.
+  CARGO_INCREMENTAL: 0
 
 permissions:
   contents: read
@@ -18,18 +21,51 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Prepare
-        uses: ./.github/actions/prepare
+      - name: Check Rust changes
+        id: changes
+        uses: ./.github/actions/check-rust-changes
 
-      - name: Build
-        run: npm run build
+      - name: Prepare
+        if: steps.changes.outputs.rust == 'true'
+        uses: ./.github/actions/prepare
+        with:
+          lint-tools: 'false'
+
+      # Unit tests don't depend on built wasms or downloaded canister
+      # binaries. The key is derived from the lockfile and toolchain only,
+      # and the cache is saved from `main` only: branches can read `main`'s
+      # caches but not each other's, so saving per commit or per branch just
+      # evicts the useful entries from the 10 GB repo quota.
+      - name: Restore cargo cache
+        if: steps.changes.outputs.rust == 'true'
+        id: cache-unit
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-unit-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-unit-
 
       - name: Run tests
+        if: steps.changes.outputs.rust == 'true'
         run: npm run test:unit
+
+      - name: Save cargo cache
+        if: github.ref == 'refs/heads/main' && steps.changes.outputs.rust == 'true' && steps.cache-unit.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.cache-unit.outputs.cache-primary-key }}
 
   integration:
     name: Integration Tests
@@ -39,18 +75,55 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      - name: Check Rust changes
+        id: changes
+        uses: ./.github/actions/check-rust-changes
+
       - name: Prepare
+        if: steps.changes.outputs.rust == 'true'
         uses: ./.github/actions/prepare
+        with:
+          lint-tools: 'false'
+
+      # Integration tests use both the workspace wasms (built into
+      # `target/wasm32-unknown-unknown/release/`) and the downloaded
+      # third-party canisters (extracted into `target/ic/`). Both live
+      # under `target/`, so caching it skips both rebuild and redownload.
+      # Keyed and saved like the unit cache: inputs only, `main` only.
+      - name: Restore cargo cache
+        if: steps.changes.outputs.rust == 'true'
+        id: cache-integration
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-integration-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'scripts/build.sh', 'scripts/download.ledger.sh', 'scripts/download.icp.sh', 'scripts/download-immutable.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-integration-
 
       - name: Build
+        if: steps.changes.outputs.rust == 'true'
         run: npm run build
 
       - name: Run tests
+        if: steps.changes.outputs.rust == 'true'
         run: npm run test:integration
+
+      - name: Save cargo cache
+        if: github.ref == 'refs/heads/main' && steps.changes.outputs.rust == 'true' && steps.cache-integration.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ steps.cache-integration.outputs.cache-primary-key }}
 
   tests-pass:
     name: Tests Pass
@@ -63,7 +136,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/needs_success

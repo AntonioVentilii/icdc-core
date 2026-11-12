@@ -17,7 +17,7 @@ use crate::utils::{
 
 #[test]
 fn atomicity_one_sided_insolvency() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(54);
     let user_b = test_user(55);
 
@@ -102,7 +102,7 @@ fn atomicity_one_sided_insolvency() {
 
 #[test]
 fn atomicity_self_trading() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(54);
 
     env.setup_vusd();
@@ -147,7 +147,7 @@ fn atomicity_self_trading() {
 
 #[test]
 fn atomicity_invalid_params() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(54);
     let user_b = test_user(55);
 

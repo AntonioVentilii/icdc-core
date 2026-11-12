@@ -1,7 +1,7 @@
 use candid::Principal;
 use shared::types::{
-    BalanceDomain, Description, Outcome, OutcomeId, PayoffType, PayoutUnit, Price, Series,
-    SeriesId, SettlementInput,
+    BalanceDomain, Description, Outcome, OutcomeId, PayoffType, PayoutUnit, Price, Resolution,
+    Series, SeriesId, SettlementInput,
 };
 
 use crate::{
@@ -21,11 +21,14 @@ fn categorical_mint_redeem_complete_set() {
     let outcome_b = OutcomeId::from("B".to_owned());
 
     let series = Series {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         series_id: series_id.clone(),
         underlying: "ICP".to_owned(),
         expiry_ns: 2_000_000_000,
+        start_ns: None,
         payoff_type: PayoffType::Categorical,
         strike: None,
+        settlement_cap: None,
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
         outcomes: Some(vec![
@@ -50,17 +53,21 @@ fn categorical_mint_redeem_complete_set() {
         icon_url: None,
         banner_url: None,
         balance_domain: BalanceDomain::Settlement,
+        trading_access: vec![],
+        engine_id: None,
+        forked_from: None,
+        locale: None,
     };
 
     setup_test_state(vec![(user, 100_000)]);
 
     mint_complete_set_logic(user, &series_id.clone(), &series.clone(), 5).expect("mint failed");
-    verify_cash_balance(user, 50_000);
+    verify_cash_balance(user, 100_000); // Cash stays same
     verify_position_qty(user, &series_id, Some(&outcome_a.clone()), 5);
     verify_position_qty(user, &series_id, Some(&outcome_b.clone()), 5);
 
     redeem_complete_set_logic(user, &series_id.clone(), &series, 2).expect("redeem failed");
-    verify_cash_balance(user, 70_000);
+    verify_cash_balance(user, 100_000); // Cash stays same
     verify_position_qty(user, &series_id, Some(&outcome_a.clone()), 3);
     verify_position_qty(user, &series_id, Some(&outcome_b.clone()), 3);
 }
@@ -75,11 +82,14 @@ fn categorical_lifecycle_scenario() {
     let outcome_c = OutcomeId::from("C".to_owned());
 
     let series = Series {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         series_id: series_id.clone(),
         underlying: "EVENT_2024".to_owned(),
         expiry_ns: 2_000_000_000,
+        start_ns: None,
         payoff_type: PayoffType::Categorical,
         strike: None,
+        settlement_cap: None,
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
         outcomes: Some(vec![
@@ -110,12 +120,16 @@ fn categorical_lifecycle_scenario() {
         icon_url: None,
         banner_url: None,
         balance_domain: BalanceDomain::Settlement,
+        trading_access: vec![],
+        engine_id: None,
+        forked_from: None,
+        locale: None,
     };
 
     setup_test_state(vec![(seller, 200_000), (buyer, 100_000)]);
 
     mint_complete_set_logic(seller, &series_id.clone(), &series.clone(), 10).expect("mint failed");
-    verify_cash_balance(seller, 100_000);
+    verify_cash_balance(seller, 200_000); // Cash stays same
 
     execute_trade_checked(
         &series.clone(),
@@ -132,8 +146,8 @@ fn categorical_lifecycle_scenario() {
         },
     );
 
-    verify_cash_balance(seller, 140_000);
-    verify_cash_balance(buyer, 60_000);
+    verify_cash_balance(seller, 206_667); // 200,000 + 6,667 PnL from selling A at profit
+    verify_cash_balance(buyer, 100_000); // Cash stays same
 
     verify_position_qty(seller, &series_id, Some(&outcome_a.clone()), 0);
     verify_position_qty(seller, &series_id, Some(&outcome_b.clone()), 10);
@@ -142,8 +156,8 @@ fn categorical_lifecycle_scenario() {
 
     settle_series_checked(&series, &SettlementInput::Outcome(outcome_a.clone()));
 
-    verify_cash_balance(buyer, 160_000);
-    verify_cash_balance(seller, 140_000);
+    verify_cash_balance(buyer, 160_000); // 100k initial + (100k payoff - 40k margin)
+    verify_cash_balance(seller, 140_001); // 206,667 post-trade - 66,666 margin release
 
     verify_position_qty(buyer, &series_id, Some(&outcome_a.clone()), 0);
     verify_position_qty(seller, &series_id, Some(&outcome_b.clone()), 0);
@@ -159,11 +173,14 @@ fn categorical_short_settlement() {
     let outcome_b = OutcomeId::from("B".to_owned());
 
     let series = Series {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         series_id: series_id.clone(),
         underlying: "EVENT".to_owned(),
         expiry_ns: 2_000_000_000,
+        start_ns: None,
         payoff_type: PayoffType::Categorical,
         strike: None,
+        settlement_cap: None,
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
         outcomes: Some(vec![
@@ -188,6 +205,10 @@ fn categorical_short_settlement() {
         icon_url: None,
         banner_url: None,
         balance_domain: BalanceDomain::Settlement,
+        trading_access: vec![],
+        engine_id: None,
+        forked_from: None,
+        locale: None,
     };
 
     setup_test_state(vec![(seller, 100_000), (buyer, 100_000)]);
@@ -207,18 +228,16 @@ fn categorical_short_settlement() {
         },
     );
 
-    // After trade:
-    // Buyer: 10 - 4 (margin/price) = 6
-    // Seller: 10 - 6 (margin = 1 - 0.4) = 4
-    verify_cash_balance(buyer, 60_000);
-    verify_cash_balance(seller, 40_000);
+    // After trade, cash stays same
+    verify_cash_balance(buyer, 100_000);
+    verify_cash_balance(seller, 100_000);
 
     // Settle with Outcome B winning (so A loses)
     settle_series_checked(&series, &SettlementInput::Outcome(outcome_b.clone()));
 
     // Results:
-    // Buyer (Long A): receives 0. Final = 6 + 0 = 6.
-    // Seller (Short A): receives 1.0 (collateral return). Final = 4 + 10 = 14.
+    // Buyer (Long A): receives 0. Final = 100k - 40k = 60k.
+    // Seller (Short A): receives 1.0 payoff. Final = 100k + (100k - 60k) = 140k.
     verify_cash_balance(buyer, 60_000);
     verify_cash_balance(seller, 140_000);
 }
@@ -232,11 +251,14 @@ fn categorical_short_loss() {
     let outcome_b = OutcomeId::from("B".to_owned());
 
     let series = Series {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         series_id: series_id.clone(),
         underlying: "EVENT".to_owned(),
         expiry_ns: 2_000_000_000,
+        start_ns: None,
         payoff_type: PayoffType::Categorical,
         strike: None,
+        settlement_cap: None,
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
         outcomes: Some(vec![
@@ -261,6 +283,10 @@ fn categorical_short_loss() {
         icon_url: None,
         banner_url: None,
         balance_domain: BalanceDomain::Settlement,
+        trading_access: vec![],
+        engine_id: None,
+        forked_from: None,
+        locale: None,
     };
 
     setup_test_state(vec![(seller, 100_000), (buyer, 100_000)]);
@@ -284,8 +310,8 @@ fn categorical_short_loss() {
     settle_series_checked(&series, &SettlementInput::Outcome(outcome_a.clone()));
 
     // Results:
-    // Buyer (Long A): receives 1.0. Final = 6 + 10 = 16.
-    // Seller (Short A): receives 0. Final = 4 + 0 = 4.
+    // Buyer (Long A): receives 1.0 payoff. Final = 100k + (100k - 40k) = 160k.
+    // Seller (Short A): receives 0. Final = 100k - 60k = 40k.
     verify_cash_balance(buyer, 160_000);
     verify_cash_balance(seller, 40_000);
 }

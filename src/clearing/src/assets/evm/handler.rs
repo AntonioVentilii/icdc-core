@@ -1,5 +1,5 @@
 use candid::{Nat, Principal};
-use ic_cdk::id;
+use ic_cdk::api::canister_self;
 use num_traits::ToPrimitive as _;
 use shared::types::{
     asset::errors::AssetError,
@@ -130,7 +130,7 @@ impl EvmHandler {
     async fn resolve_account(&self, account: AssetAccount) -> Result<String, AssetError> {
         match account {
             AssetAccount::UserClearing(u) => self.get_or_fetch_address(u.principal()).await,
-            AssetAccount::CanisterMain => self.get_or_fetch_address(id()).await,
+            AssetAccount::CanisterMain => self.get_or_fetch_address(canister_self()).await,
             AssetAccount::External(ExternalAssetAccount::Principal(principal)) => {
                 self.get_or_fetch_address(principal).await
             }

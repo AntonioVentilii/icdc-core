@@ -12,6 +12,7 @@ use clearing::{
         },
     },
     types::{
+        errors::CommonError,
         margin::Position,
         trade::{LimitOrder, OrderId, Side, TradeId},
         user::User,
@@ -28,7 +29,7 @@ use crate::utils::{
 
 #[test]
 fn list_orders_empty() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
 
     let params = ListOrdersParams { series_id: None };
 
@@ -43,7 +44,7 @@ fn list_orders_empty() {
 
 #[test]
 fn status_by_series_empty() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
 
     let params = ListOrdersParams {
         series_id: Some("test_series".to_owned().into()),
@@ -60,7 +61,7 @@ fn status_by_series_empty() {
 
 #[test]
 fn get_orders_empty() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user = test_user(70);
 
     let orders: Vec<LimitOrder> = assert_ok_value(env.clearing.query::<Vec<LimitOrder>, _>(
@@ -74,12 +75,13 @@ fn get_orders_empty() {
 
 #[test]
 fn submit_market_order_nonexistent_order() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user = test_user(71);
 
     let params = SubmitMarketOrderParams {
         trade_id: "trade_1".to_owned().into(),
         matching_order_id: "nonexistent_order".to_owned().into(),
+        qty: None,
     };
 
     let result: SubmitMatchedTradeResult = assert_ok_value(
@@ -97,7 +99,7 @@ fn submit_market_order_nonexistent_order() {
 
 #[test]
 fn cancel_limit_order_nonexistent() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user = test_user(72);
 
     let params = CancelLimitOrderParams {
@@ -119,7 +121,7 @@ fn cancel_limit_order_nonexistent() {
 
 #[test]
 fn submit_matched_trade_zero_qty_rejected() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let buyer = test_user(73);
     let seller = test_user(74);
 
@@ -154,7 +156,7 @@ fn submit_matched_trade_zero_qty_rejected() {
 
 #[test]
 fn submit_matched_trade_rejects_non_controller() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let random_user = test_user(75);
     let buyer = test_user(76);
     let seller = test_user(77);
@@ -181,7 +183,7 @@ fn submit_matched_trade_rejects_non_controller() {
 }
 #[test]
 fn basic_matched_trade() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(54);
     let user_b = test_user(55);
 
@@ -262,8 +264,8 @@ fn basic_matched_trade() {
         GetAccountStateResult::Ok(resp) => {
             assert_eq!(
                 resp.state.get_cash_balance_usd(BalanceDomain::Settlement),
-                -50_000_000, // Cost of trade
-                "Buyer cash should be negative $5000"
+                0, // Cost of trade
+                "Buyer cash should be zero"
             );
             assert_eq!(
                 resp.total_equity_usd, 147_000_000,
@@ -288,8 +290,8 @@ fn basic_matched_trade() {
         GetAccountStateResult::Ok(resp) => {
             assert_eq!(
                 resp.state.get_cash_balance_usd(BalanceDomain::Settlement),
-                -50_000_000, // Margin requirement (Full Collateral)
-                "Seller cash should be negative $5000"
+                0, // Margin requirement (Full Collateral)
+                "Seller cash should be zero"
             );
             assert_eq!(
                 resp.total_equity_usd, 147_000_000,
@@ -302,7 +304,7 @@ fn basic_matched_trade() {
 
 #[test]
 fn cross_limit_match() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(54);
     let user_b = test_user(55);
 
@@ -381,7 +383,7 @@ fn cross_limit_match() {
 
 #[test]
 fn insufficient_margin() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(54);
     let user_b = test_user(55);
 
@@ -468,6 +470,7 @@ fn insufficient_margin() {
             (SubmitMarketOrderParams {
                 trade_id: TradeId::from("neg_market".to_owned()),
                 matching_order_id: OrderId::from("large_maker".to_owned()),
+                qty: None,
             },),
         )
         .unwrap();
@@ -482,7 +485,7 @@ fn insufficient_margin() {
 
 #[test]
 fn limit_buy_sell() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(54);
 
     // 1. Setup vUSD
@@ -523,7 +526,7 @@ fn limit_buy_sell() {
 
 #[test]
 fn limit_market_match() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(54);
     let user_b = test_user(55);
 
@@ -568,6 +571,7 @@ fn limit_market_match() {
             (SubmitMarketOrderParams {
                 trade_id: TradeId::from("taker_trade".to_owned()),
                 matching_order_id: OrderId::from("maker_limit".to_owned()),
+                qty: None,
             },),
         )
         .unwrap();
@@ -584,8 +588,101 @@ fn limit_market_match() {
 }
 
 #[test]
+fn limit_market_partial_fill() {
+    let env = TestSetup::with_icp();
+    let user_a = test_user(56);
+    let user_b = test_user(57);
+
+    env.setup_vusd();
+
+    let series_id = env.add_binary_series("LM-PARTIAL-TEST", 1_000_000, BalanceDomain::Settlement);
+
+    let deposit_amount = Nat::from(10_000_000_000_u128);
+    env.deposit_collateral(
+        user_a,
+        "ICP",
+        deposit_amount.clone(),
+        Some(BalanceDomain::Settlement),
+    );
+    env.deposit_collateral(
+        user_b,
+        "ICP",
+        deposit_amount,
+        Some(BalanceDomain::Settlement),
+    );
+
+    // User A: Submit Limit Order (Maker, Buy 10 @ 0.5)
+    let res_maker = env.submit_limit_order(
+        user_a,
+        "partial_maker",
+        series_id.clone(),
+        Side::Buy,
+        10,
+        500_000,
+    );
+    assert!(matches!(res_maker, SubmitMatchedTradeResult::Ok(_)));
+
+    let orders: Vec<LimitOrder> = env.clearing.query(user_a, "get_orders", ()).unwrap();
+    assert_eq!(orders.len(), 1);
+    let full_blocked = orders[0].blocked_margin_usd;
+
+    // User B: Take only 4 of the 10 resting units.
+    let res_taker: SubmitMatchedTradeResult = env
+        .clearing
+        .update(
+            user_b,
+            "submit_market_order",
+            (SubmitMarketOrderParams {
+                trade_id: TradeId::from("partial_trade_1".to_owned()),
+                matching_order_id: OrderId::from("partial_maker".to_owned()),
+                qty: Some(4),
+            },),
+        )
+        .unwrap();
+    assert!(matches!(res_taker, SubmitMatchedTradeResult::Ok(_)));
+
+    let pos_a: Vec<Position> = env.clearing.query(user_a, "get_positions", ()).unwrap();
+    assert_eq!(pos_a.len(), 1);
+    assert_eq!(pos_a[0].net_qty, 4);
+
+    let pos_b: Vec<Position> = env.clearing.query(user_b, "get_positions", ()).unwrap();
+    assert_eq!(pos_b.len(), 1);
+    assert_eq!(pos_b[0].net_qty, -4);
+
+    // The remainder stays on the book with proportionally reduced blocked margin.
+    let orders: Vec<LimitOrder> = env.clearing.query(user_a, "get_orders", ()).unwrap();
+    assert_eq!(orders.len(), 1);
+    assert_eq!(orders[0].qty, 6);
+    assert_eq!(orders[0].blocked_margin_usd, full_blocked * 6 / 10);
+
+    // A second market order fills the remainder and removes the order.
+    let res_taker_2: SubmitMatchedTradeResult = env
+        .clearing
+        .update(
+            user_b,
+            "submit_market_order",
+            (SubmitMarketOrderParams {
+                trade_id: TradeId::from("partial_trade_2".to_owned()),
+                matching_order_id: OrderId::from("partial_maker".to_owned()),
+                qty: Some(6),
+            },),
+        )
+        .unwrap();
+    assert!(matches!(res_taker_2, SubmitMatchedTradeResult::Ok(_)));
+
+    let orders: Vec<LimitOrder> = env.clearing.query(user_a, "get_orders", ()).unwrap();
+    assert!(orders.is_empty(), "Fully filled order should be removed");
+
+    let pos_a: Vec<Position> = env.clearing.query(user_a, "get_positions", ()).unwrap();
+    assert_eq!(pos_a[0].net_qty, 10);
+
+    let pos_b: Vec<Position> = env.clearing.query(user_b, "get_positions", ()).unwrap();
+    assert_eq!(pos_b[0].net_qty, -10);
+}
+
+#[test]
 fn multi_user_journey() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user_a = test_user(54);
     let user_b = test_user(55);
 
@@ -636,6 +733,7 @@ fn multi_user_journey() {
             (SubmitMarketOrderParams {
                 trade_id: TradeId::from("b_match_a".to_owned()),
                 matching_order_id: OrderId::from("a_sell_1".to_owned()),
+                qty: None,
             },),
         )
         .unwrap();
@@ -659,4 +757,123 @@ fn multi_user_journey() {
         "User B should have exactly one position after match"
     );
     assert_eq!(pos_b[0].net_qty, 10); // B bought 10
+}
+
+/// A scheduled series is registered and discoverable, but every trade-initiating
+/// path is closed until its window opens. The gate lives in
+/// `ensure_series_registered`, so this covers limit orders, market orders,
+/// matched trades, transfers, and complete-set mint/redeem alike.
+#[test]
+fn scheduled_series_rejects_orders_before_its_start() {
+    let env = TestSetup::with_icp();
+    let user = test_user(71);
+
+    // Opens one hour from the current PocketIC time.
+    let series_id = env.add_scheduled_binary_series(
+        "SCHEDULED",
+        1_000_000,
+        BalanceDomain::Settlement,
+        3_600_000_000_000,
+    );
+
+    // No collateral needed: the window gate runs inside `ensure_series_registered`,
+    // which precedes the margin check, so a funded account would not change the
+    // outcome.
+    let res = env.submit_limit_order(
+        user,
+        "before_open",
+        series_id.clone(),
+        Side::Buy,
+        1,
+        500_000,
+    );
+
+    match res {
+        SubmitMatchedTradeResult::Err(TradeError::SeriesNotStarted {
+            series_id: rejected,
+            start_ns,
+        }) => {
+            assert_eq!(rejected, series_id);
+            assert!(
+                start_ns > env.pic.get_time().as_nanos_since_unix_epoch(),
+                "the reported open must still be in the future"
+            );
+        }
+        other => panic!("Expected SeriesNotStarted before the window opens, got: {other:?}"),
+    }
+}
+
+/// An expired series is closed to new exposure. `add_series` does not require a
+/// future expiry, so the series can be registered already past its close.
+#[test]
+fn expired_series_rejects_new_orders() {
+    let env = TestSetup::with_icp();
+    let user = test_user(78);
+
+    // Closed one hour before the current PocketIC time.
+    let series_id = env.add_expired_binary_series(
+        "EXPIRED",
+        1_000_000,
+        BalanceDomain::Settlement,
+        3_600_000_000_000,
+    );
+
+    let res = env.submit_limit_order(
+        user,
+        "after_close",
+        series_id.clone(),
+        Side::Buy,
+        1,
+        500_000,
+    );
+
+    match res {
+        SubmitMatchedTradeResult::Err(TradeError::SeriesExpired {
+            series_id: rejected,
+            expiry_ns,
+        }) => {
+            assert_eq!(rejected, series_id);
+            assert!(
+                expiry_ns < env.pic.get_time().as_nanos_since_unix_epoch(),
+                "the reported close must be in the past"
+            );
+        }
+        other => panic!("Expected SeriesExpired after the window closes, got: {other:?}"),
+    }
+}
+
+/// Redeeming a complete set stays available after expiry.
+///
+/// This is the load-bearing half of the `SeriesAccess` split: redemption is the
+/// only way to release reserved margin before settlement runs, and withdrawals
+/// are refused while equity sits below reserved margin. Settlement is
+/// oracle-triggered, so the post-expiry gap is unbounded; gating redemption
+/// would strand collateral for as long as it lasted.
+///
+/// The call still fails (the fixture is a binary series and redemption is
+/// categorical-only), but it fails *inside* `redeem_complete_set_logic` rather
+/// than at the window gate. Asserting the specific `InvalidInput` rather than
+/// merely "not `SeriesExpired`" is deliberate: it proves the request reached the
+/// redemption body, so the test would catch the path being closed earlier.
+#[test]
+fn expired_series_still_allows_complete_set_redemption() {
+    let env = TestSetup::with_icp();
+    let user = test_user(79);
+
+    let series_id = env.add_expired_binary_series(
+        "EXPIRED-REDEEM",
+        1_000_000,
+        BalanceDomain::Settlement,
+        3_600_000_000_000,
+    );
+
+    let res: Result<bool, TradeError> = env
+        .clearing
+        .update(user, "redeem_complete_set", (series_id, 1_i128))
+        .unwrap();
+
+    assert!(
+        matches!(res, Err(TradeError::Common(CommonError::InvalidInput(_)))),
+        "redemption must reach the redemption logic rather than the expiry gate, got: {res:?}"
+    );
 }

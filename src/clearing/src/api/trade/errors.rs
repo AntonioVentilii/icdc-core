@@ -2,7 +2,10 @@ use candid::CandidType;
 use serde::{Deserialize, Serialize};
 use shared::types::SeriesId;
 
-use crate::types::{errors::CommonError, trade::OrderId, user::User};
+use crate::{
+    account::reassignment::ReassignmentConflict,
+    types::{errors::CommonError, trade::OrderId, user::User},
+};
 
 /// Errors occurring during trade submission or matching.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -35,4 +38,72 @@ pub enum TradeError {
     },
     /// A user tried to trade with themselves.
     SelfTradingNotAllowed,
+    /// The caller is not authorized to trade on this restricted series.
+    ///
+    /// Returned when a series carries `TradingAccess::Restricted` policies
+    /// and the caller is not a member of any of the referenced groups.
+    /// The caller should check `is_trading_authorized` on the registry
+    /// or contact the group creator to be added as a member.
+    NotAuthorizedToTrade,
+    /// The series has an active or finalised settlement plan, so no new
+    /// trades, orders, or transfers can be initiated on it.
+    ///
+    /// Returned whenever a trade-initiating path sees an entry in
+    /// `SETTLEMENT_PLANS` for the series. Once a series is settled it is
+    /// economically closed: positions are gone, winners' cash is booked,
+    /// and opening a new position could only create unbacked exposure.
+    SeriesAlreadySettled(SeriesId),
+    /// A `Linear` (forward/NDF/future) order price exceeds the series
+    /// settlement cap. The agreed forward rate must stay within `[0, cap]` so
+    /// the short leg is fully collateralized under the bounded-linear model.
+    PriceExceedsSettlementCap {
+        /// The submitted order price, scaled to USD base units.
+        price_usd: u128,
+        /// The series settlement cap, scaled to USD base units.
+        cap_usd: u128,
+    },
+    /// The series is scheduled and its trading window has not opened yet, so no
+    /// trades, orders, or transfers can be initiated on it.
+    ///
+    /// Returned whenever a trade-initiating path sees a series whose `start_ns`
+    /// is still in the future. Carries the open so the caller can render a
+    /// countdown or retry at the right moment instead of polling blindly.
+    SeriesNotStarted {
+        /// The series that is not yet open.
+        series_id: SeriesId,
+        /// The timestamp (nanoseconds since the UNIX epoch) at which it opens.
+        start_ns: u64,
+    },
+    /// The account this call would mutate is being, or has just been, reassigned
+    /// to another principal.
+    ///
+    /// Returned when a call that was suspended at an await straddles an
+    /// `admin_reassign_account`: resuming it would recreate state under a
+    /// principal whose account has moved. The caller should retry with the
+    /// principal that now owns the account.
+    AccountUnderReassignment {
+        /// The principal whose account is being, or has just been, reassigned.
+        user: User,
+    },
+    /// The series' trading window has closed, so no new exposure can be opened
+    /// on it.
+    ///
+    /// Returned to exposure-opening paths only. Redeeming a complete set and
+    /// accepting a transferred position stay available after expiry, because they
+    /// only release exposure that already exists and settlement may not run for
+    /// some time after the window closes.
+    SeriesExpired {
+        /// The series whose window has closed.
+        series_id: SeriesId,
+        /// The timestamp (nanoseconds since the UNIX epoch) at which it closed.
+        expiry_ns: u64,
+    },
+}
+
+impl From<ReassignmentConflict> for TradeError {
+    fn from(conflict: ReassignmentConflict) -> Self {
+        Self::AccountUnderReassignment {
+            user: conflict.user,
+        }
+    }
 }

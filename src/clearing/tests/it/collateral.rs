@@ -27,25 +27,25 @@ use crate::utils::{
 };
 
 #[test]
-fn get_collateral_assets_empty() {
-    let env = TestSetup::default();
+fn list_collateral_assets_empty() {
+    let env = TestSetup::with_all_ledgers();
     let user = test_user(50);
 
     let assets: Vec<CollateralAssetInfo> = assert_ok_value(
         env.clearing
-            .query::<Vec<CollateralAssetInfo>, _>(user, "get_collateral_assets", ()),
+            .query::<Vec<CollateralAssetInfo>, _>(user, "list_collateral_assets", ()),
     );
 
     assert_eq!(
         assets.len(),
         2,
-        "ICP and ckUSDC should be registered by default"
+        "ICP and ckUSDC should be registered via with_all_ledgers()"
     );
 }
 
 #[test]
-fn get_collateral_assets_after_registration() {
-    let env = TestSetup::default();
+fn list_collateral_assets_after_registration() {
+    let env = TestSetup::with_all_ledgers();
     let user = test_user(51);
 
     let params = UpdateCollateralAssetParams {
@@ -71,7 +71,7 @@ fn get_collateral_assets_after_registration() {
 
     let assets: Vec<CollateralAssetInfo> = assert_ok_value(
         env.clearing
-            .query::<Vec<CollateralAssetInfo>, _>(user, "get_collateral_assets", ()),
+            .query::<Vec<CollateralAssetInfo>, _>(user, "list_collateral_assets", ()),
     );
 
     assert_eq!(assets.len(), 3);
@@ -79,15 +79,15 @@ fn get_collateral_assets_after_registration() {
 }
 
 #[test]
-fn get_collateral_assets_with_metrics() {
-    let env = TestSetup::default();
+fn list_collateral_assets_with_metrics() {
+    let env = TestSetup::with_all_ledgers();
     let user = test_user(52);
 
     env.setup_evm_asset("ETH", "ETH", 18, 3_000_000_000, 6, 500);
 
     let assets: Vec<CollateralAssetInfo> = assert_ok_value(
         env.clearing
-            .query::<Vec<CollateralAssetInfo>, _>(user, "get_collateral_assets", ()),
+            .query::<Vec<CollateralAssetInfo>, _>(user, "list_collateral_assets", ()),
     );
 
     assert_eq!(assets.len(), 3);
@@ -123,7 +123,7 @@ fn deposit_collateral_unsupported_asset() {
 
 #[test]
 fn deposit_collateral_rejects_disallowed_domain() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_icp();
     let user = test_user(54);
 
     let domains_upd: UpdateCollateralAllowedDomainsResult = env
@@ -191,7 +191,7 @@ fn deposit_collateral_rejects_disallowed_domain() {
 
 #[test]
 fn deposit_and_domain_isolation() {
-    let env = TestSetup::default();
+    let env = TestSetup::with_all_ledgers();
     let user = test_user(54);
 
     let icp_ledger = Principal::from_text(ICP_LEDGER).unwrap();
@@ -286,7 +286,7 @@ fn deposit_and_domain_isolation() {
     // 5. Verify Isolation
     let assets: Vec<CollateralAssetInfo> = assert_ok_value(
         env.clearing
-            .query::<Vec<CollateralAssetInfo>, _>(user, "get_collateral_assets", ()),
+            .query::<Vec<CollateralAssetInfo>, _>(user, "list_collateral_assets", ()),
     );
     assert!(!assets.is_empty());
 

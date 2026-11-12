@@ -9,21 +9,25 @@ use shared::types::{
 };
 
 use crate::{
+    account::reassignment::ReassignmentMark,
+    migrations::{into_current, LegacyStableState},
     types::{
-        event::Event,
+        event::{Event, EventType, SeriesTradePoint, SeriesVolumeAggregate},
+        leaderboard::{LeaderboardWindow, PnlAggregate},
         margin::{AccountState, Position, PositionsMap},
         plans::{
-            DepositPlan, FundWithdrawalPlan, MigrationKey, MigrationPlan, SettlementPlan,
-            WithdrawalPlan,
+            DepositPlan, FundWithdrawalPlan, MigrationKey, MigrationPlan, PlanStatus,
+            ReassignmentKey, ReassignmentPlan, SettlementPlan, WithdrawalPlan,
         },
         state::{Config, StableState},
         trade::{LimitOrder, OrderId, TradeId, TransferId},
         user::{DepositKey, User, WithdrawalKey},
     },
+    utils::system::now_ns,
     PositionProof,
 };
 
-fn default_config() -> Config {
+pub(crate) fn default_config() -> Config {
     Config {
         insurance_fund_fee_ratio: 10,
         protocol_fee_ratio: 5,
@@ -49,6 +53,31 @@ thread_local! {
     pub static SERIES: RefCell<BTreeMap<SeriesId, Series>> = const { RefCell::new(BTreeMap::new()) };
     pub static EVENTS: RefCell<Vec<Event>> = const { RefCell::new(Vec::new()) };
     pub static NEXT_EVENT_ID: RefCell<u64> = const { RefCell::new(0) };
+    /// Per-series price-history index: one [`SeriesTradePoint`] per executed
+    /// trade, in execution order (ascending `event_id`). Derived entirely from
+    /// the executed rows in `EVENTS`, so it is **not** persisted; it is rebuilt
+    /// from `EVENTS` in `post_upgrade` via [`rebuild_series_trade_history`] and
+    /// maintained incrementally on each trade. Lets `list_series_trade_history`
+    /// serve a market's price history in O(log series + page) instead of
+    /// scanning the whole event log per call.
+    pub static SERIES_TRADE_HISTORY: RefCell<BTreeMap<SeriesId, Vec<SeriesTradePoint>>> = const { RefCell::new(BTreeMap::new()) };
+    /// Per-series cumulative traded-volume totals (notional + trade count),
+    /// maintained alongside [`SERIES_TRADE_HISTORY`] so `list_series_traded_volumes`
+    /// reads `O(#series_ids)` instead of summing each series' tape per call. Same
+    /// lifecycle as the trade index: a non-persisted projection of the executed
+    /// rows in `EVENTS`, rebuilt in `post_upgrade` via
+    /// [`rebuild_series_trade_history`] and folded incrementally on each trade.
+    pub static SERIES_TRADED_VOLUME: RefCell<BTreeMap<SeriesId, SeriesVolumeAggregate>> = const { RefCell::new(BTreeMap::new()) };
+    /// Per-window leaderboard index: realized settlement `PnL` aggregated per
+    /// principal, keyed by `(window, period_id)` (see [`LeaderboardWindow`]).
+    /// Each settled position folds its signed `cashflow_usd` into the current
+    /// week, month, and all-time buckets. Like [`SERIES_TRADE_HISTORY`] this is
+    /// a pure projection of the `Settled` rows in `EVENTS`, so it is **not**
+    /// persisted; it is rebuilt from `EVENTS` in `post_upgrade` via
+    /// [`rebuild_leaderboard`] and maintained incrementally as settlements emit
+    /// events. Lets `list_leaderboard` rank a window without scanning the whole
+    /// event log per call.
+    pub static SETTLEMENT_LEADERBOARD: RefCell<BTreeMap<(LeaderboardWindow, u64), BTreeMap<User, PnlAggregate>>> = const { RefCell::new(BTreeMap::new()) };
     pub static REGISTRY_CANISTER: RefCell<Principal> = const { RefCell::new(Principal::anonymous()) };
     pub static DEPOSIT_PLANS: RefCell<BTreeMap<DepositKey, DepositPlan>> = const { RefCell::new(BTreeMap::new()) };
     pub static WITHDRAWAL_PLANS: RefCell<BTreeMap<WithdrawalKey, WithdrawalPlan>> = const { RefCell::new(BTreeMap::new()) };
@@ -65,6 +94,47 @@ thread_local! {
     pub static ASSET_METRICS: RefCell<BTreeMap<AssetId, AssetMetrics>> = const { RefCell::new(BTreeMap::new()) };
     pub static DOMAIN_POLICIES: RefCell<BTreeMap<BalanceDomain, DomainPolicy>> = const { RefCell::new(BTreeMap::new()) };
     pub static MIGRATION_PLANS: RefCell<BTreeMap<MigrationKey, MigrationPlan>> = const { RefCell::new(BTreeMap::new()) };
+    /// Account reassignment plans, keyed by the principal the account is moved
+    /// away from plus the controller-provided reassignment id.
+    pub static REASSIGNMENT_PLANS: RefCell<BTreeMap<ReassignmentKey, ReassignmentPlan>> = const { RefCell::new(BTreeMap::new()) };
+    /// Per-principal reassignment bookkeeping, read by every user-facing
+    /// mutation that can be suspended at an await (see
+    /// [`ReassignmentGuard`](crate::account::reassignment::ReassignmentGuard)).
+    /// Derived from [`REASSIGNMENT_PLANS`], so it is **not** persisted: the lock
+    /// flags are rebuilt in `post_upgrade` via [`rebuild_reassignment_marks`],
+    /// and generations restart from zero because no suspended call survives an
+    /// upgrade to revalidate against them.
+    pub static REASSIGNMENT_MARKS: RefCell<BTreeMap<User, ReassignmentMark>> = const { RefCell::new(BTreeMap::new()) };
+}
+
+/// Returns the cached transfer fee for `asset_id`, if one has been recorded.
+///
+/// This is the fee the clearing canister believes the ledger currently charges
+/// ([`AssetMetrics::latest_transfer_fee`]). It is populated by
+/// `refresh_icrc_asset_metadata` and self-healed by the ICRC transfer handler on
+/// `BadFee` (see [`crate::assets::icrc::IcrcHandler::transfer`]).
+#[must_use]
+pub fn cached_transfer_fee(asset_id: &AssetId) -> Option<u128> {
+    ASSET_METRICS.with(|m| {
+        m.borrow()
+            .get(asset_id)
+            .and_then(|metrics| metrics.latest_transfer_fee)
+    })
+}
+
+/// Records the ledger's authoritative transfer fee for `asset_id` after a
+/// `BadFee` rejection, so the next transfer sends the corrected value.
+///
+/// No-op when the asset has no metrics entry: the cache is a best-effort
+/// optimisation and an absent entry simply means the next transfer falls back to
+/// letting the ledger apply its own fee.
+pub fn update_cached_transfer_fee(asset_id: &AssetId, fee: u128) {
+    ASSET_METRICS.with(|m| {
+        if let Some(metrics) = m.borrow_mut().get_mut(asset_id) {
+            metrics.latest_transfer_fee = Some(fee);
+            metrics.last_updated_ns = Some(now_ns());
+        }
+    });
 }
 
 pub fn save_state() {
@@ -99,6 +169,8 @@ pub fn save_state() {
         DOMAIN_POLICIES.with(|f| f.borrow().clone());
     let migration_plans: BTreeMap<MigrationKey, MigrationPlan> =
         MIGRATION_PLANS.with(|f| f.borrow().clone());
+    let reassignment_plans: BTreeMap<ReassignmentKey, ReassignmentPlan> =
+        REASSIGNMENT_PLANS.with(|f| f.borrow().clone());
     let state = StableState {
         config,
         positions,
@@ -122,19 +194,31 @@ pub fn save_state() {
         asset_metrics,
         domain_policies,
         migration_plans,
+        reassignment_plans: Some(reassignment_plans),
     };
 
+    #[expect(
+        clippy::expect_used,
+        reason = "baseline of the quality gate: trapping in an upgrade hook rolls the upgrade back, which is the intended failure"
+    )]
     storage::stable_save((state,)).expect("Save failed");
 }
 
 pub fn restore_state() {
-    let result: Result<(StableState,), String> = storage::stable_restore();
-
-    let state = match result {
+    // Try the current schema first. On failure, fall back to the pre-resolution
+    // schema and backfill `Series::resolution` (see `crate::migrations`).
+    let state = match storage::stable_restore::<(StableState,)>() {
         Ok((s,)) => s,
-        Err(e) => {
-            trap(&format!("Failed to restore stable state: {e:?}"));
-        }
+        Err(current_err) => match storage::stable_restore::<(LegacyStableState,)>() {
+            Ok((legacy,)) => into_current(legacy),
+            // Surface BOTH decode errors: which schema was expected to win
+            // depends on the deployed version, so keeping both makes a failed
+            // post_upgrade decode debuggable.
+            Err(legacy_err) => trap(format!(
+                "Failed to restore stable state: current-schema decode failed \
+                 ({current_err:?}); legacy-schema decode failed ({legacy_err:?})"
+            )),
+        },
     };
 
     let StableState {
@@ -160,6 +244,7 @@ pub fn restore_state() {
         asset_metrics,
         domain_policies,
         migration_plans,
+        reassignment_plans,
     } = state;
 
     POSITIONS.with(|p: &RefCell<PositionsMap>| {
@@ -177,6 +262,8 @@ pub fn restore_state() {
     SERIES.with(|s| *s.borrow_mut() = series);
     EVENTS.with(|e| *e.borrow_mut() = events);
     NEXT_EVENT_ID.with(|id| *id.borrow_mut() = next_id);
+    rebuild_series_trade_history();
+    rebuild_leaderboard();
     REGISTRY_CANISTER.with(|r| *r.borrow_mut() = registry);
     DEPOSIT_PLANS.with(|d| *d.borrow_mut() = deposit_plans);
     WITHDRAWAL_PLANS.with(|w| *w.borrow_mut() = withdrawal_plans);
@@ -193,4 +280,159 @@ pub fn restore_state() {
     ASSET_METRICS.with(|f| *f.borrow_mut() = asset_metrics);
     DOMAIN_POLICIES.with(|f| *f.borrow_mut() = domain_policies);
     MIGRATION_PLANS.with(|f| *f.borrow_mut() = migration_plans);
+    REASSIGNMENT_PLANS.with(|f| *f.borrow_mut() = reassignment_plans.unwrap_or_default());
+    rebuild_reassignment_marks();
+}
+
+/// Re-locks the principals of every reassignment that had not finalised when
+/// the canister was upgraded, so a resumed custody sweep still runs against a
+/// source account nobody can feed.
+///
+/// [`REASSIGNMENT_MARKS`] is a projection of [`REASSIGNMENT_PLANS`] and is not
+/// persisted; `restore_state` reconstructs it once the plans are loaded.
+pub(crate) fn rebuild_reassignment_marks() {
+    REASSIGNMENT_MARKS.with(|marks| {
+        let mut marks = marks.borrow_mut();
+        marks.clear();
+
+        REASSIGNMENT_PLANS.with(|plans| {
+            for plan in plans.borrow().values() {
+                if plan.status == PlanStatus::Finalised {
+                    continue;
+                }
+                for user in [plan.old_owner, plan.new_owner] {
+                    marks.entry(user).or_default().locked = true;
+                }
+            }
+        });
+    });
+}
+
+/// Records an executed trade in the per-series price-history index
+/// ([`SERIES_TRADE_HISTORY`]). Called once per trade from the execution path.
+///
+/// Trades execute in monotonically increasing `event_id` order, so appending
+/// keeps each series' vector sorted without a re-sort.
+pub(crate) fn index_executed_trade(series_id: &SeriesId, point: SeriesTradePoint) {
+    // Fold this trade's notional into the per-series aggregate before the point
+    // is moved into the history vector, so the volume totals stay in lockstep
+    // with the index they accompany.
+    let notional = point.notional_usd_base();
+
+    SERIES_TRADED_VOLUME.with(|agg| {
+        agg.borrow_mut()
+            .entry(series_id.clone())
+            .or_default()
+            .record(notional);
+    });
+
+    SERIES_TRADE_HISTORY.with(|idx| {
+        idx.borrow_mut()
+            .entry(series_id.clone())
+            .or_default()
+            .push(point);
+    });
+}
+
+/// Rebuilds [`SERIES_TRADE_HISTORY`] from the executed rows in `EVENTS`.
+///
+/// The index is a pure projection of `EVENTS`, so it is not part of the
+/// persisted [`StableState`]; `restore_state` reconstructs it after `EVENTS` is
+/// loaded. Each executed trade has two rows sharing one `event_id` (buyer with
+/// `qty > 0`, seller with `qty < 0`); selecting the `qty > 0` row collapses the
+/// pair to a single point per trade. Vectors are sorted by `event_id` to stay
+/// robust to any future change in `EVENTS` ordering.
+pub(crate) fn rebuild_series_trade_history() {
+    SERIES_TRADE_HISTORY.with(|idx| {
+        SERIES_TRADED_VOLUME.with(|agg| {
+            let mut idx = idx.borrow_mut();
+            let mut agg = agg.borrow_mut();
+            idx.clear();
+            agg.clear();
+
+            EVENTS.with(|events| {
+                for e in events.borrow().iter() {
+                    if matches!(e.event_type, EventType::Executed) && e.qty > 0 {
+                        let point = SeriesTradePoint {
+                            event_id: e.event_id,
+                            price: e.price.clone(),
+                            qty: e.qty,
+                            timestamp: e.timestamp,
+                        };
+
+                        // The notional sum is order-independent, so folding here
+                        // (before the per-series sort below) is fine.
+                        agg.entry(e.series_id.clone())
+                            .or_default()
+                            .record(point.notional_usd_base());
+
+                        idx.entry(e.series_id.clone()).or_default().push(point);
+                    }
+                }
+            });
+
+            for points in idx.values_mut() {
+                points.sort_by_key(|p| p.event_id);
+            }
+        });
+    });
+}
+
+/// Folds a single settled position into the leaderboard index, adding its
+/// signed `cashflow_usd` to the user's current week, month, and all-time
+/// aggregates. The period is derived from `timestamp`, so the buckets a
+/// settlement lands in are fixed at settlement time and independent of when the
+/// leaderboard is later queried.
+fn record_settled_pnl(
+    idx: &mut BTreeMap<(LeaderboardWindow, u64), BTreeMap<User, PnlAggregate>>,
+    user: User,
+    cashflow_usd: i128,
+    timestamp: u64,
+) {
+    for window in LeaderboardWindow::ALL {
+        let period = window.period_id(timestamp);
+        idx.entry((window, period))
+            .or_default()
+            .entry(user)
+            .or_default()
+            .record(cashflow_usd);
+    }
+}
+
+/// Indexes the `Settled` rows in a freshly emitted batch of events into
+/// [`SETTLEMENT_LEADERBOARD`]. Called at each site that appends settlement
+/// events to `EVENTS` (live settlement and the one-shot backfill), so the
+/// leaderboard stays current between upgrades. Non-`Settled` events are
+/// ignored. A `Settled` event's `qty` is the position's signed `cashflow_usd`.
+pub(crate) fn index_settled_events(events: &[Event]) {
+    SETTLEMENT_LEADERBOARD.with(|idx| {
+        let mut idx = idx.borrow_mut();
+        for e in events {
+            if matches!(e.event_type, EventType::Settled) {
+                record_settled_pnl(&mut idx, e.user, e.qty, e.timestamp);
+            }
+        }
+    });
+}
+
+/// Rebuilds [`SETTLEMENT_LEADERBOARD`] from the `Settled` rows in `EVENTS`.
+///
+/// The index is a pure projection of `EVENTS`, so it is not part of the
+/// persisted [`StableState`]; `restore_state` reconstructs it after `EVENTS` is
+/// loaded. Period bucketing is a deterministic function of each event's
+/// `timestamp`, so the rebuild reproduces exactly the buckets the incremental
+/// maintenance produced.
+pub(crate) fn rebuild_leaderboard() {
+    SETTLEMENT_LEADERBOARD.with(|idx| {
+        let mut idx = idx.borrow_mut();
+        idx.clear();
+
+        EVENTS.with(|events| {
+            for e in events.borrow().iter() {
+                if matches!(e.event_type, EventType::Settled) {
+                    record_settled_pnl(&mut idx, e.user, e.qty, e.timestamp);
+                }
+            }
+        });
+    });
 }

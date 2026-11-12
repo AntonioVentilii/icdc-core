@@ -27,11 +27,14 @@
 			"type": "rust",
 			"package": "minter",
 			"candid": "src/minter/minter.did",
+			"dependencies": ["ledger"],
 			"metadata": [
 				{
 					"name": "candid:service"
 				}
-			]
+			],
+			"init_arg_file": "out/build.minter.args.did",
+			"pre_install": "scripts/build.minter.args.sh"
 		},
 		"ledger": {
 			"type": "custom",

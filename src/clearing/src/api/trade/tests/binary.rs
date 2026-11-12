@@ -1,6 +1,7 @@
 use candid::Principal;
 use shared::types::{
-    BalanceDomain, Description, PayoffType, PayoutUnit, Price, Series, SeriesId, SettlementInput,
+    BalanceDomain, Description, PayoffType, PayoutUnit, Price, Resolution, Series, SeriesId,
+    SettlementInput,
 };
 
 use crate::{api::trade::tests::utils::*, trade::types::ExecuteTradeParams, types::trade::TradeId};
@@ -12,11 +13,14 @@ fn binary_lifecycle_scenario() {
     let series_id = SeriesId::from("binary_test".to_owned());
 
     let series = Series {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         series_id: series_id.clone(),
         underlying: "BITCOIN_UP_50K".to_owned(),
         expiry_ns: 2_000_000_000,
+        start_ns: None,
         payoff_type: PayoffType::Binary,
         strike: Some(Price::new(50_000, 0)),
+        settlement_cap: None,
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
         outcomes: None,
@@ -28,6 +32,10 @@ fn binary_lifecycle_scenario() {
         icon_url: None,
         banner_url: None,
         balance_domain: BalanceDomain::Settlement,
+        trading_access: vec![],
+        engine_id: None,
+        forked_from: None,
+        locale: None,
     };
 
     setup_test_state(vec![
@@ -54,10 +62,10 @@ fn binary_lifecycle_scenario() {
     );
 
     // Verify State after Trade
-    // Long (Buyer) cost: 10 * 0.30 = $3.00
-    // Short (Seller) cost: 10 * (1.00 - 0.30) = $7.00
-    verify_cash_balance(buyer, 70_000); // 10 - 3 = 7
-    verify_cash_balance(seller, 130_000); // 20 - 7 = 13
+    // In the new model, cash balance DOES NOT change on trade (only PnL is realized).
+    // The margin is tracked in the reserved_margin field.
+    verify_cash_balance(buyer, 100_000); // Original: 100_000, unchanged
+    verify_cash_balance(seller, 200_000); // Original: 200_000, unchanged
     verify_position_qty(buyer, &series_id, None, 10);
     verify_position_qty(seller, &series_id, None, -10);
 
@@ -66,8 +74,8 @@ fn binary_lifecycle_scenario() {
     settle_series_checked(&series, &SettlementInput::Price(Price::new(100_000_000, 8)));
 
     // Final Balances:
-    // Buyer: $7 (cash) + 10 * $1.00 (payoff) = $17.00 = 17,000,000
-    // Seller: $13 (cash) + 10 * $0 (payoff) = $13.00 = 13,000,000
+    // Buyer: 100k initial + (100k payoff - 30k margin) = 170k
+    // Seller: 200k initial + (0k payoff - 70k margin) = 130k
     verify_cash_balance(buyer, 170_000);
     verify_cash_balance(seller, 130_000);
 }
@@ -79,11 +87,14 @@ fn binary_settle_no() {
     let series_id = SeriesId::from("binary_test_no".to_owned());
 
     let series = Series {
+        resolution: Resolution::new("Resolved per oracle at expiry"),
         series_id: series_id.clone(),
         underlying: "BITCOIN_UP_50K".to_owned(),
         expiry_ns: 2_000_000_000,
+        start_ns: None,
         payoff_type: PayoffType::Binary,
         strike: Some(Price::new(50_000, 0)),
+        settlement_cap: None,
         price_precision: 8,
         payout_unit: PayoutUnit::usd(),
         outcomes: None,
@@ -95,6 +106,10 @@ fn binary_settle_no() {
         icon_url: None,
         banner_url: None,
         balance_domain: BalanceDomain::Settlement,
+        trading_access: vec![],
+        engine_id: None,
+        forked_from: None,
+        locale: None,
     };
 
     setup_test_state(vec![(seller, 200_000), (buyer, 100_000)]);
@@ -121,8 +136,8 @@ fn binary_settle_no() {
     settle_series_checked(&series, &SettlementInput::Price(Price::new(0, 8)));
 
     // Final Balances:
-    // Buyer: $7 (cash) + 10 * $0 (payoff) = $7.00 = 7,000,000
-    // Seller: $13 (cash) + 10 * $1.00 (payoff for short on loss) = $23.00 = 23,000,000
+    // Buyer: 100k initial + (0 payoff - 30k margin) = 70k
+    // Seller: 200k initial + (100k payoff - 70k margin) = 230k
     verify_cash_balance(buyer, 70_000);
     verify_cash_balance(seller, 230_000);
 }

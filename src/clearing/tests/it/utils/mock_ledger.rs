@@ -1,4 +1,5 @@
 use candid::{CandidType, Deserialize, Nat, Principal};
+use ic_cdk::api::msg_caller;
 use ic_cdk_macros::{query, update};
 use icrc_ledger_types::icrc1::account::Account;
 use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
@@ -19,7 +20,7 @@ pub fn icrc1_transfer(args: TransferArg) -> Result<Nat, TransferError> {
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         let from = Account {
-            owner: caller(),
+            owner: msg_caller(),
             subaccount: args.from_subaccount,
         };
         let from_bal = s.balances.get(&from).cloned().unwrap_or(0);

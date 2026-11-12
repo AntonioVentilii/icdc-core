@@ -6,41 +6,58 @@ use std::collections::BTreeMap;
 use candid::Principal;
 use ic_cdk::export_candid;
 use ic_cdk_macros::{init, post_upgrade, pre_upgrade};
-use shared::types::{
-    AssetId, AssetMetrics, BalanceDomain, CollateralAssetConfig, CollateralAssetInfo, DomainPolicy,
-    Series, SeriesId,
-};
+use shared::types::{BalanceDomain, CollateralAssetInfo, DomainPolicy, Series, SeriesId};
 
 use crate::{
     api::{
         account::{
-            params::{GetAccountStateParams, GetPositionParams},
-            results::GetAccountStateResult,
+            params::{AggregateLeanParams, GetAccountStateParams, GetPositionParams},
+            results::{AggregateLean, GetAccountStateResult},
         },
         admin::{
             params::{
-                CancelFundWithdrawalParams, RegisterIcrcAssetParams, UpdateAssetMetricsParams,
-                UpdateAssetPriceParams, UpdateCollateralAllowedDomainsParams,
-                UpdateCollateralAssetParams, UpdateDomainPolicyParams, WithdrawFundParams,
+                CancelFundWithdrawalParams, ReassignAccountParams, RefreshIcrcAssetMetadataParams,
+                RegisterIcrcAssetParams, UpdateAssetMetricsParams, UpdateAssetPriceParams,
+                UpdateCollateralAllowedDomainsParams, UpdateCollateralAssetParams,
+                UpdateDomainPolicyParams, WithdrawFundParams,
             },
             results::{
-                CancelFundWithdrawalResult, GetFundsResult, RegisterIcrcAssetResult,
-                UpdateAssetPriceResult, UpdateCollateralAllowedDomainsResult, WithdrawFundResult,
+                CancelFundWithdrawalResult, GetFundsResult, ReassignAccountResult,
+                RefreshIcrcAssetMetadataResult, RegisterIcrcAssetResult, UpdateAssetPriceResult,
+                UpdateCollateralAllowedDomainsResult, WithdrawFundResult,
             },
         },
         collateral::{
             params::{DepositCollateralParams, WithdrawCollateralParams},
             results::{DepositCollateralResult, WithdrawCollateralResult},
         },
+        leaderboard::{
+            params::{AggregateSettlementAccuracyParams, ListLeaderboardParams},
+            results::{LeaderboardPage, SettlementAccuracyEntry},
+        },
         migration::{params::MigrateDomainParams, results::MigrateDomainResult},
-        settlement::{params::SettleSeriesParams, results::SettleSeriesResult},
+        settlement::{
+            params::{
+                BackfillSettlementEventsParams, ListSeriesSettlementStatusesParams,
+                ListSettledSeriesParams, SettleSeriesParams,
+            },
+            results::{
+                BackfillSettlementEventsResult, SeriesSettlementStatus, SettleSeriesResult,
+                SettledSeriesPage,
+            },
+        },
         trade::{
             errors::TradeError,
             params::{
-                CancelLimitOrderParams, FreezePositionForTransferParams, ListOrdersParams,
-                SubmitLimitOrderParams, SubmitMarketOrderParams, SubmitMatchedTradeParams,
+                CancelLimitOrderParams, FreezePositionForTransferParams,
+                GetSeriesPriceHistoryParams, ListOrdersParams, ListSeriesTradeHistoryParams,
+                ListSeriesTradedVolumesParams, SubmitLimitOrderParams, SubmitMarketOrderParams,
+                SubmitMatchedTradeParams,
             },
-            results::{AcceptPositionTransferResult, SubmitMatchedTradeResult},
+            results::{
+                AcceptPositionTransferResult, SeriesPriceHistory, SeriesTradeHistoryPage,
+                SeriesTradedVolume, SubmitMatchedTradeResult,
+            },
         },
     },
     memory::CONFIG,
@@ -60,6 +77,7 @@ pub mod api;
 pub mod assets;
 pub mod guards;
 pub mod memory;
+pub mod migrations;
 pub mod payoffs;
 pub mod trade;
 pub mod traits;
@@ -71,6 +89,7 @@ fn init(config: Config) {
     CONFIG.with(|c: &RefCell<Config>| {
         *c.borrow_mut() = config;
     });
+    api::settlement::api::start_settlement_heartbeat();
 }
 
 #[pre_upgrade]
@@ -81,6 +100,13 @@ fn pre_upgrade() {
 #[post_upgrade]
 fn post_upgrade() {
     memory::restore_state();
+    // IC timers do not survive an upgrade, so any settlement that was still in
+    // flight would otherwise stall until a manual `resume_settlement`. Re-drive
+    // them here so they catch up on their own.
+    api::settlement::api::resume_pending_settlements();
+    // Interval timers also do not survive an upgrade, so re-arm the heartbeat
+    // that recovers any settlement whose self-resumption chain later breaks.
+    api::settlement::api::start_settlement_heartbeat();
 }
 
 export_candid!();

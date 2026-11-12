@@ -1,6 +1,6 @@
 use candid::{CandidType, Nat, Principal};
 use hex::encode;
-use ic_cdk::call;
+use ic_cdk::call::{Call, CallFailed};
 use serde::{Deserialize, Serialize};
 
 #[derive(CandidType, Serialize, Deserialize, Debug)]
@@ -14,6 +14,17 @@ pub struct SignTransactionArgs {
     pub principal: Principal,
 }
 
+fn format_call_failed(err: CallFailed) -> String {
+    match err {
+        CallFailed::CallRejected(r) => format!(
+            "Call error: {}: {}",
+            r.raw_reject_code(),
+            r.reject_message()
+        ),
+        e => format!("Call error: {e}"),
+    }
+}
+
 pub struct ChainFusionSignerClient {
     pub canister_id: Principal,
 }
@@ -25,9 +36,14 @@ impl ChainFusionSignerClient {
 
     pub async fn eth_address(&self, principal: Principal) -> Result<String, String> {
         let args = EthAddressArgs { principal };
-        let (res,): (Result<String, String>,) = call(self.canister_id, "eth_address", (args,))
+        let response = Call::bounded_wait(self.canister_id, "eth_address")
+            .with_args(&(args,))
             .await
-            .map_err(|(code, msg)| format!("Call error: {}: {}", code as i32, msg))?;
+            .map_err(format_call_failed)?;
+
+        let (res,) = response
+            .candid_tuple::<(Result<String, String>,)>()
+            .map_err(|e| e.to_string())?;
         res
     }
 
@@ -41,10 +57,14 @@ impl ChainFusionSignerClient {
             transaction,
             principal,
         };
-        let (res,): (Result<Vec<u8>, String>,) =
-            call(self.canister_id, "eth_sign_transaction", (args,))
-                .await
-                .map_err(|(code, msg)| format!("Call error: {}: {}", code as i32, msg))?;
+        let response = Call::bounded_wait(self.canister_id, "eth_sign_transaction")
+            .with_args(&(args,))
+            .await
+            .map_err(format_call_failed)?;
+
+        let (res,) = response
+            .candid_tuple::<(Result<Vec<u8>, String>,)>()
+            .map_err(|e| e.to_string())?;
         res
     }
 }
@@ -91,10 +111,14 @@ impl EvmRpcClient {
         block: String,
         config: RpcConfig,
     ) -> Result<Nat, String> {
-        let (res,): (JsonRpcResult<Nat>,) =
-            call(self.canister_id, "eth_getBalance", (address, block, config))
-                .await
-                .map_err(|(code, msg)| format!("Call error: {}: {}", code as i32, msg))?;
+        let response = Call::bounded_wait(self.canister_id, "eth_getBalance")
+            .with_args(&(address, block, config))
+            .await
+            .map_err(format_call_failed)?;
+
+        let (res,) = response
+            .candid_tuple::<(JsonRpcResult<Nat>,)>()
+            .map_err(|e| e.to_string())?;
         match res {
             JsonRpcResult::Ok(val) => Ok(val),
             JsonRpcResult::Err(e) => Err(e),
@@ -108,10 +132,14 @@ impl EvmRpcClient {
         config: RpcConfig,
     ) -> Result<String, String> {
         let hex_tx = format!("0x{}", encode(raw_tx));
-        let (res,): (JsonRpcResult<String>,) =
-            call(self.canister_id, "eth_sendRawTransaction", (hex_tx, config))
-                .await
-                .map_err(|(code, msg)| format!("Call error: {}: {}", code as i32, msg))?;
+        let response = Call::bounded_wait(self.canister_id, "eth_sendRawTransaction")
+            .with_args(&(hex_tx, config))
+            .await
+            .map_err(format_call_failed)?;
+
+        let (res,) = response
+            .candid_tuple::<(JsonRpcResult<String>,)>()
+            .map_err(|e| e.to_string())?;
         match res {
             JsonRpcResult::Ok(val) => Ok(val),
             JsonRpcResult::Err(e) => Err(e),
@@ -129,10 +157,14 @@ impl EvmRpcClient {
             to,
             data: Some(data),
         };
-        let (res,): (JsonRpcResult<String>,) =
-            call(self.canister_id, "eth_call", (call_args, block, config))
-                .await
-                .map_err(|(code, msg)| format!("Call error: {}: {}", code as i32, msg))?;
+        let response = Call::bounded_wait(self.canister_id, "eth_call")
+            .with_args(&(call_args, block, config))
+            .await
+            .map_err(format_call_failed)?;
+
+        let (res,) = response
+            .candid_tuple::<(JsonRpcResult<String>,)>()
+            .map_err(|e| e.to_string())?;
         match res {
             JsonRpcResult::Ok(val) => Ok(val),
             JsonRpcResult::Err(e) => Err(e),
