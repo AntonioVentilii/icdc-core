@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use candid::{CandidType, Nat};
 use serde::{Deserialize, Serialize};
-use shared::types::AssetId;
+use shared::{impl_from_result, types::AssetId};
 
 use super::errors::{
     CancelFundWithdrawalError, ReassignAccountError, RefreshIcrcAssetMetadataError,
@@ -21,97 +21,54 @@ pub enum WithdrawFundResult {
     Ok(Nat),
     Err(WithdrawFundError),
 }
-impl From<Result<Nat, WithdrawFundError>> for WithdrawFundResult {
-    fn from(res: Result<Nat, WithdrawFundError>) -> Self {
-        match res {
-            Ok(v) => Self::Ok(v),
-            Err(e) => Self::Err(e),
-        }
-    }
-}
+impl_from_result!(WithdrawFundResult, Nat, WithdrawFundError);
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum CancelFundWithdrawalResult {
     Ok,
     Err(CancelFundWithdrawalError),
 }
-impl From<Result<(), CancelFundWithdrawalError>> for CancelFundWithdrawalResult {
-    fn from(res: Result<(), CancelFundWithdrawalError>) -> Self {
-        match res {
-            Ok(()) => Self::Ok,
-            Err(e) => Self::Err(e),
-        }
-    }
-}
+impl_from_result!(CancelFundWithdrawalResult, (), CancelFundWithdrawalError);
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum UpdateAssetPriceResult {
     Ok,
     Err(UpdateAssetPriceError),
 }
-impl From<Result<(), UpdateAssetPriceError>> for UpdateAssetPriceResult {
-    fn from(res: Result<(), UpdateAssetPriceError>) -> Self {
-        match res {
-            Ok(()) => Self::Ok,
-            Err(e) => Self::Err(e),
-        }
-    }
-}
+impl_from_result!(UpdateAssetPriceResult, (), UpdateAssetPriceError);
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum RegisterIcrcAssetResult {
     Ok,
     Err(RegisterIcrcAssetError),
 }
-impl From<Result<(), RegisterIcrcAssetError>> for RegisterIcrcAssetResult {
-    fn from(res: Result<(), RegisterIcrcAssetError>) -> Self {
-        match res {
-            Ok(()) => Self::Ok,
-            Err(e) => Self::Err(e),
-        }
-    }
-}
+impl_from_result!(RegisterIcrcAssetResult, (), RegisterIcrcAssetError);
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum UpdateCollateralAllowedDomainsResult {
     Ok,
     Err(UpdateCollateralAllowedDomainsError),
 }
-impl From<Result<(), UpdateCollateralAllowedDomainsError>>
-    for UpdateCollateralAllowedDomainsResult
-{
-    fn from(res: Result<(), UpdateCollateralAllowedDomainsError>) -> Self {
-        match res {
-            Ok(()) => Self::Ok,
-            Err(e) => Self::Err(e),
-        }
-    }
-}
+impl_from_result!(
+    UpdateCollateralAllowedDomainsResult,
+    (),
+    UpdateCollateralAllowedDomainsError
+);
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum RefreshIcrcAssetMetadataResult {
     Ok,
     Err(RefreshIcrcAssetMetadataError),
 }
-impl From<Result<(), RefreshIcrcAssetMetadataError>> for RefreshIcrcAssetMetadataResult {
-    fn from(res: Result<(), RefreshIcrcAssetMetadataError>) -> Self {
-        match res {
-            Ok(()) => Self::Ok,
-            Err(e) => Self::Err(e),
-        }
-    }
-}
+impl_from_result!(
+    RefreshIcrcAssetMetadataResult,
+    (),
+    RefreshIcrcAssetMetadataError
+);
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum ReassignAccountResult {
     Ok,
     Err(ReassignAccountError),
 }
-impl From<Result<(), ReassignAccountError>> for ReassignAccountResult {
-    fn from(res: Result<(), ReassignAccountError>) -> Self {
-        match res {
-            Ok(()) => Self::Ok,
-            Err(e) => Self::Err(e),
-        }
-    }
-}
+impl_from_result!(ReassignAccountResult, (), ReassignAccountError);

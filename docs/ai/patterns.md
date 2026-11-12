@@ -18,7 +18,7 @@ Name the core `<endpoint>_impl` (or `<endpoint>_logic` where the file already do
 
 Each endpoint has its own types in the domain folder: `<Action>Params` in `params.rs`, `<Action>Result` in `results.rs`, `<Domain>Error` in `errors.rs`. Every one derives `CandidType, Serialize, Deserialize, Clone, Debug`.
 
-A result is a Candid-friendly `Ok`/`Err` enum built from a Rust `Result` through `From`, so the endpoint body works with `?` and ends with `result.into()`: `SubmitMatchedTradeResult` in `src/clearing/src/api/trade/results.rs:9`, used at `src/clearing/src/api/trade/api.rs:193`.
+A result is a Candid-friendly `Ok`/`Err` enum built from a Rust `Result` through `From`, so the endpoint body works with `?` and ends with `result.into()`. The `From` impl is one line, `impl_from_result!(<Result>, <Ok type or ()>, <Error>)` (`src/shared/src/types/result.rs`); write it by hand only when the value has to be transformed on the way, as `UpdateSeriesResult` boxes its series: `SubmitMatchedTradeResult` in `src/clearing/src/api/trade/results.rs:12`, used at `src/clearing/src/api/trade/api.rs:193`.
 
 ### Guards
 
@@ -85,8 +85,6 @@ Do not copy these; fix one only in its own PR.
 - **God type file.** `src/shared/src/types/series.rs` (about 975 lines before its tests) holds the `Series` type, ids, params, results, errors, pagination and filters. New series-related types get their own module under `src/shared/src/types/`.
 - **Guards copied per canister.** `caller_is_not_anonymous` and `caller_is_controller` are the same code in `src/clearing/src/guards.rs:5`, `src/registry/src/guards.rs:8` and `src/minter/src/guards.rs:7`, including a hand-written "Update call error. RejectionCode..." string. `has_engine_role` and `has_engine_role_on` (`src/registry/src/guards.rs:30`, `:45`) repeat the same predicate.
 - **Registry call boilerplate.** `is_oracle_authorized` and `is_trading_authorized` (`src/clearing/src/utils/registry.rs:13`, `:48`) repeat the call-and-decode body, and `ensure_series_registered` inlines a third copy with a different error type (`src/clearing/src/utils/series.rs:81`).
-- **Hand-written `From<Result>` for every result enum** (25 of them, such as `src/clearing/src/api/trade/results.rs:15`).
 - **Panics in production paths.** `unwrap()` at `src/registry/src/api/engines.rs:107`, `src/clearing/src/api/trade/api.rs:336`, `src/clearing/src/api/admin/api.rs:207`, `src/clearing/src/api/collateral/api.rs:332`; `expect` at `src/clearing/src/types/leaderboard.rs:135`; `unreachable!()` at `src/clearing/src/payoffs/mod.rs:124`; `trap` on bad input in `canonical_id_part` (`src/registry/src/utils.rs:14`). The `expect` on `stable_save` and `stable_restore` in `pre_upgrade`/`post_upgrade` (`src/clearing/src/memory.rs:200`, `src/minter/src/lib.rs:30`) is the one accepted case: trapping there is the intended rollback.
 - **Dead code kept alive** with `#[expect(dead_code)]`: `get_internal_ledger_id` (which also panics, `src/clearing/src/utils/vusd.rs:20`), `src/clearing/src/types/account.rs:39`, `src/clearing/src/assets/evm/client.rs:50` and `:128`.
-- **Placeholder files.** `src/clearing/src/api/general/{errors,params,results}.rs` and `src/clearing/src/api/metrics/{errors,params,results}.rs` hold a single comment. Do not add more; a domain folder gets the file when it has the type.
 - **Lower layers importing `api/`.** See [`structure.md`](structure.md#dependency-direction).
