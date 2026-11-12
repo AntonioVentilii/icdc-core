@@ -199,16 +199,16 @@ scripts/pic-install
 
 Defined under [`.github/workflows/`](../../.github/workflows/):
 
-| Workflow      | Job(s)                      | What it runs                                                                                                                                                               |
-| ------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `checks.yml`  | `format`                    | `npm run format`. Fails the job whenever it produces a diff: run `npm run format` locally and push.                                                                        |
-| `checks.yml`  | `lint`                      | `npm run lint`: `prettier --check` + `scripts/lint.sh` (no em or en dashes, workspace dependencies, no generic `Result` names in `.did`, GitHub workflows, clippy, shell). |
-| `checks.yml`  | `did`                       | `npm run did`, then fails on any diff in the committed `.did` files: run `npm run did` locally and commit the result.                                                      |
-| `checks.yml`  | `checks-pass`               | Aggregator gate via `.github/actions/needs_success`.                                                                                                                       |
-| `tests.yml`   | `unit`                      | `npm run build` then `npm run test:unit` (`cargo test --lib --bins`).                                                                                                      |
-| `tests.yml`   | `integration`               | `npm run build` then `npm run test:integration`.                                                                                                                           |
-| `tests.yml`   | `tests-pass`                | Aggregator gate via `.github/actions/needs_success`.                                                                                                                       |
-| `release.yml` | `wasm`, `candid`, `release` | Triggered by `push: tags: v*`, GitHub `release` events, or `workflow_dispatch`. Builds + uploads WASM/`*.did` artifacts and (for tags) cuts a GitHub Release.              |
+| Workflow      | Job(s)                      | What it runs                                                                                                                                                                                      |
+| ------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `checks.yml`  | `format`                    | `npm run format`. Fails the job whenever it produces a diff: run `npm run format` locally and push.                                                                                               |
+| `checks.yml`  | `lint`                      | `npm run lint`: `prettier --check` + `scripts/lint.sh` (no em dash and no en dash used as a break, workspace dependencies, no generic `Result` names in `.did`, GitHub workflows, clippy, shell). |
+| `checks.yml`  | `did`                       | `npm run did`, then fails on any diff in the committed `.did` files: run `npm run did` locally and commit the result.                                                                             |
+| `checks.yml`  | `checks-pass`               | Aggregator gate via `.github/actions/needs_success`.                                                                                                                                              |
+| `tests.yml`   | `unit`                      | `npm run build` then `npm run test:unit` (`cargo test --lib --bins`).                                                                                                                             |
+| `tests.yml`   | `integration`               | `npm run build` then `npm run test:integration`.                                                                                                                                                  |
+| `tests.yml`   | `tests-pass`                | Aggregator gate via `.github/actions/needs_success`.                                                                                                                                              |
+| `release.yml` | `wasm`, `candid`, `release` | Triggered by `push: tags: v*`, GitHub `release` events, or `workflow_dispatch`. Builds + uploads WASM/`*.did` artifacts and (for tags) cuts a GitHub Release.                                     |
 
 The `Prepare` composite action (`.github/actions/prepare`) installs
 the rust toolchain (`rust-toolchain.toml`), npm deps, `cargo-binstall`,
