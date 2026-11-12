@@ -1,6 +1,6 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
-use shared::types::SeriesId;
+use shared::{impl_from_result, types::SeriesId};
 
 use super::errors::SettlementError;
 use crate::types::plans::SettlementStatusView;
@@ -29,14 +29,7 @@ impl SettleSeriesResult {
     }
 }
 
-impl From<Result<(), SettlementError>> for SettleSeriesResult {
-    fn from(value: Result<(), SettlementError>) -> Self {
-        match value {
-            Ok(()) => SettleSeriesResult::Ok,
-            Err(e) => SettleSeriesResult::Err(e),
-        }
-    }
-}
+impl_from_result!(SettleSeriesResult, (), SettlementError);
 
 /// Outcome of one chunk of the settlement-event backfill.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, Default)]
