@@ -28,7 +28,7 @@ const NANOS_PER_DAY: u64 = 86_400_000_000_000;
     CandidType, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
 pub enum LeaderboardWindow {
-    /// Current ISO week (Monday–Sunday, UTC).
+    /// Current ISO week (Monday to Sunday, UTC).
     Week,
     /// Current calendar month (UTC).
     Month,
@@ -132,7 +132,7 @@ fn civil_from_days(days: u64) -> (u64, u32) {
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
     let mp = (5 * doy + 2) / 153; // [0, 11], months shifted so March = 0
     let month = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
-                                                       // March–December belong to `year`; January/February roll into the next.
+                                                       // March to December belong to `year`; January/February roll into the next.
     let year = if month <= 2 { year + 1 } else { year };
     (
         year,
@@ -152,7 +152,7 @@ mod tests {
     #[test]
     fn week_buckets_align_to_monday() {
         // 1970-01-01 is a Thursday (epoch day 0). The ISO week containing it
-        // starts Monday 1969-12-29, so days 0..=3 (Thu–Sun) share week 0, and
+        // starts Monday 1969-12-29, so days 0..=3 (Thu to Sun) share week 0, and
         // 1970-01-05 (Monday, day 4) opens week 1.
         for day in 0..=3 {
             assert_eq!(LeaderboardWindow::Week.period_id(ns_for(day)), 0);

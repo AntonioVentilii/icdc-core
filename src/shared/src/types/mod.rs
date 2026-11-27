@@ -10,6 +10,7 @@ pub mod oracle;
 pub mod payout;
 pub mod price;
 pub mod resolution;
+mod result;
 pub mod series;
 pub mod status;
 
