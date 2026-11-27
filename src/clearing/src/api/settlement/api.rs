@@ -22,10 +22,11 @@ use crate::{
     guards::{caller_is_controller, caller_is_not_anonymous},
     memory::{
         index_settled_events, ACCOUNT_STATES, ASSET_METRICS, COLLATERAL_ASSETS, CONFIG, EVENTS,
-        INSURANCE_FUND, LIMIT_ORDERS, NEXT_EVENT_ID, POSITIONS, REGISTRY_CANISTER, SERIES,
-        SETTLEMENT_PLANS, TREASURY,
+        INSURANCE_FUND, NEXT_EVENT_ID, POSITIONS, REGISTRY_CANISTER, SERIES, SETTLEMENT_PLANS,
+        TREASURY,
     },
     payoffs::{fees::calculate_settlement_fee, get_settlement_value},
+    trade::orders::cancel_resting_orders,
     types::{
         errors::CommonError,
         event::{Event, EventType},
@@ -517,7 +518,7 @@ pub(crate) fn prepare_settlement_impl(
     // blocked margin back to their account. Leaving orders in the book after
     // settlement would let takers match them against a series that no longer
     // trades, and would leave collateral reserved forever.
-    cancel_open_limit_orders(series_id);
+    cancel_resting_orders(|o| &o.series_id == series_id);
 
     Ok(SettlementPlan::get_or_create(SettlementPlanParams {
         series_id: series_id.clone(),
@@ -528,56 +529,6 @@ pub(crate) fn prepare_settlement_impl(
         positions: positions_to_settle,
         balance_domain: ser.balance_domain,
     }))
-}
-
-/// Removes every open limit order on `series_id` and releases each order's
-/// `blocked_margin_usd` from the maker's `reserved_margin_usd` (freeing that
-/// collateral for other trades or withdrawals), mirroring the bookkeeping
-/// done by [`cancel_limit_order`].
-///
-/// Called synchronously from [`prepare_settlement_impl`] right after positions
-/// are removed so that the canister-level invariant "no open orders for a
-/// settled series" holds before the plan is persisted. Idempotent: safe to
-/// call on a series that has no open orders.
-fn cancel_open_limit_orders(series_id: &SeriesId) {
-    let cancelled: Vec<(User, BalanceDomain, u128)> = LIMIT_ORDERS.with(|orders| {
-        let mut orders = orders.borrow_mut();
-        let matching: Vec<_> = orders
-            .iter()
-            .filter(|(_, o)| &o.series_id == series_id)
-            .map(|(id, o)| {
-                (
-                    id.clone(),
-                    o.creator,
-                    o.balance_domain,
-                    o.blocked_margin_usd,
-                )
-            })
-            .collect();
-
-        for (id, _, _, _) in &matching {
-            orders.remove(id);
-        }
-
-        matching
-            .into_iter()
-            .map(|(_, creator, domain, margin)| (creator, domain, margin))
-            .collect()
-    });
-
-    if cancelled.is_empty() {
-        return;
-    }
-
-    ACCOUNT_STATES.with(|accounts| {
-        let mut accounts = accounts.borrow_mut();
-        for (user, domain, blocked_margin_usd) in cancelled {
-            if let Some(acc) = accounts.get_mut(&user) {
-                let current = acc.get_reserved_margin_usd(domain);
-                acc.set_reserved_margin_usd(domain, current.saturating_sub(blocked_margin_usd));
-            }
-        }
-    });
 }
 
 /// Validates aggregate solvency for a settlement batch.

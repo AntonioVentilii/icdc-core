@@ -10,23 +10,24 @@ use shared::types::{
 
 use super::{
     errors::{
-        CancelFundWithdrawalError, RefreshIcrcAssetMetadataError, RegisterIcrcAssetError,
-        UpdateAssetPriceError, UpdateCollateralAllowedDomainsError, WithdrawFundError,
+        AdminCancelLimitOrdersError, CancelFundWithdrawalError, RefreshIcrcAssetMetadataError,
+        RegisterIcrcAssetError, UpdateAssetPriceError, UpdateCollateralAllowedDomainsError,
+        WithdrawFundError,
     },
     params::{
-        CancelFundWithdrawalParams, FundType, ReassignAccountParams,
+        AdminCancelLimitOrdersParams, CancelFundWithdrawalParams, FundType, ReassignAccountParams,
         RefreshIcrcAssetMetadataParams, RegisterIcrcAssetParams, UpdateAssetMetricsParams,
         UpdateAssetPriceParams, UpdateCollateralAllowedDomainsParams, UpdateCollateralAssetParams,
         UpdateDomainPolicyParams, WithdrawFundParams,
     },
     results::{
-        CancelFundWithdrawalResult, GetFundsResult, ReassignAccountResult,
-        RefreshIcrcAssetMetadataResult, RegisterIcrcAssetResult, UpdateAssetPriceResult,
-        UpdateCollateralAllowedDomainsResult, WithdrawFundResult,
+        AdminCancelLimitOrdersResult, CancelFundWithdrawalResult, GetFundsResult,
+        ReassignAccountResult, RefreshIcrcAssetMetadataResult, RegisterIcrcAssetResult,
+        UpdateAssetPriceResult, UpdateCollateralAllowedDomainsResult, WithdrawFundResult,
     },
 };
 use crate::{
-    account::reassignment::reassign_account,
+    account::reassignment::{reassign_account, ReassignmentGuard},
     assets::{
         asset::{
             handler::{get_handler, AssetHandler},
@@ -39,12 +40,14 @@ use crate::{
         ASSET_METRICS, COLLATERAL_ASSETS, CONFIG, DOMAIN_POLICIES, FUND_WITHDRAWAL_PLANS,
         INSURANCE_FUND, REGISTRY_CANISTER, TREASURY,
     },
+    trade::orders::cancel_resting_orders,
     types::{
         account::AssetAccount,
         errors::CommonError,
         payment::PaymentReceipt,
         plans::{FundWithdrawalPlan, FundWithdrawalPlanParams, PlanStatus},
         state::Config,
+        user::User,
     },
     utils::{
         registry,
@@ -561,6 +564,54 @@ pub async fn admin_reassign_account(params: ReassignAccountParams) -> ReassignAc
     reassign_account(reassignment_id, old_owner.into(), new_owner.into())
         .await
         .into()
+}
+
+/// Cancels the resting limit orders of `owner`, on one series or on all of
+/// them, and releases the margin they reserved.
+///
+/// The owner cancels its own orders with `cancel_limit_order`; this is the
+/// path for when it cannot, for example an account being moved away from a
+/// key nobody holds any more, whose orders would otherwise block
+/// `admin_reassign_account` forever. It touches only the order book and the
+/// reserved margin: balances and positions stay as they are.
+///
+/// Returns the number of orders cancelled. Running it again cancels nothing
+/// and returns `0`.
+///
+/// # Errors
+///
+/// - `AnonymousOwner`: `owner` is the anonymous principal.
+/// - `AccountUnderReassignment`: a reassignment touching `owner` has not finalised.
+///
+/// This method is gated to canister controllers.
+#[update(guard = "caller_is_controller")]
+#[must_use]
+pub fn admin_cancel_limit_orders(
+    params: AdminCancelLimitOrdersParams,
+) -> AdminCancelLimitOrdersResult {
+    admin_cancel_limit_orders_impl(params).into()
+}
+
+fn admin_cancel_limit_orders_impl(
+    params: AdminCancelLimitOrdersParams,
+) -> Result<u64, AdminCancelLimitOrdersError> {
+    let AdminCancelLimitOrdersParams { owner, series_id } = params;
+
+    if owner == Principal::anonymous() {
+        return Err(AdminCancelLimitOrdersError::AnonymousOwner);
+    }
+
+    let owner: User = owner.into();
+    ReassignmentGuard::acquire(owner)?;
+
+    let cancelled = cancel_resting_orders(|order| {
+        order.creator == owner
+            && series_id
+                .as_ref()
+                .is_none_or(|series_id| &order.series_id == series_id)
+    });
+
+    Ok(cancelled.len() as u64)
 }
 
 /// Only the Treasury can be withdrawn; the Insurance Fund is drawn exclusively

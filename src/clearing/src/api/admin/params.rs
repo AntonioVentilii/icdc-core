@@ -1,7 +1,7 @@
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 use shared::types::{
-    AssetId, AssetMetrics, BalanceDomain, CollateralAssetConfig, DomainPolicy, Price,
+    AssetId, AssetMetrics, BalanceDomain, CollateralAssetConfig, DomainPolicy, Price, SeriesId,
 };
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,4 +79,13 @@ pub struct ReassignAccountParams {
     pub old_owner: Principal,
     /// The principal the account is moved to.
     pub new_owner: Principal,
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct AdminCancelLimitOrdersParams {
+    /// The principal whose resting limit orders are cancelled.
+    pub owner: Principal,
+    /// Restricts the cancellation to one series; `None` cancels the owner's
+    /// orders on every series.
+    pub series_id: Option<SeriesId>,
 }
