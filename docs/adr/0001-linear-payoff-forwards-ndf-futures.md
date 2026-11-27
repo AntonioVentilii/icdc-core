@@ -26,7 +26,7 @@ know about them.
 ### What "linear" means here
 
 A forward / NDF / dated future all share **one** payoff, and it is
-**model-free** (no Black-Scholes, no discounting required for settlement):
+**model-free** (no Black–Scholes, no discounting required for settlement):
 
 ```
 per-unit PnL, long  =  S_T − K
