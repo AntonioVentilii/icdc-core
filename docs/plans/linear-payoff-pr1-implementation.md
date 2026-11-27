@@ -16,7 +16,7 @@ Title: `feat(clearing,registry,shared): add Linear payoff (bounded forwards/NDF)
 
 - **Reuse existing math**: route Linear through `get_unit_payoff`,
   `get_settlement_value`, `get_required_margin`, `scale_price`, `Price`. No new
-  pricing model. No Black–Scholes in-core.
+  pricing model. No Black-Scholes in-core.
 - **Solvency first** ([economic safety first](../../AGENTS.md#the-standard)):
   both legs pre-reserve max loss within the band; long+short PnL nets to zero.
 - **Additive state**: new `Series.settlement_cap` is an `opt` field ⇒ no

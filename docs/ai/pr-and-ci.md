@@ -199,16 +199,16 @@ scripts/pic-install
 
 Defined under [`.github/workflows/`](../../.github/workflows/):
 
-| Workflow      | Job(s)                      | What it runs                                                                                                                                                         |
-| ------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `checks.yml`  | `format`                    | `npm run format`. Fails the job whenever it produces a diff: run `npm run format` locally and push.                                                                  |
-| `checks.yml`  | `lint`                      | `npm run lint`: `prettier --check` + `scripts/lint.sh` (no em dashes, workspace dependencies, no generic `Result` names in `.did`, GitHub workflows, clippy, shell). |
-| `checks.yml`  | `did`                       | `npm run did`, then fails on any diff in the committed `.did` files: run `npm run did` locally and commit the result.                                                |
-| `checks.yml`  | `checks-pass`               | Aggregator gate via `.github/actions/needs_success`.                                                                                                                 |
-| `tests.yml`   | `unit`                      | `npm run build` then `npm run test:unit` (`cargo test --lib --bins`).                                                                                                |
-| `tests.yml`   | `integration`               | `npm run build` then `npm run test:integration`.                                                                                                                     |
-| `tests.yml`   | `tests-pass`                | Aggregator gate via `.github/actions/needs_success`.                                                                                                                 |
-| `release.yml` | `wasm`, `candid`, `release` | Triggered by `push: tags: v*`, GitHub `release` events, or `workflow_dispatch`. Builds + uploads WASM/`*.did` artifacts and (for tags) cuts a GitHub Release.        |
+| Workflow      | Job(s)                      | What it runs                                                                                                                                                               |
+| ------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `checks.yml`  | `format`                    | `npm run format`. Fails the job whenever it produces a diff: run `npm run format` locally and push.                                                                        |
+| `checks.yml`  | `lint`                      | `npm run lint`: `prettier --check` + `scripts/lint.sh` (no em or en dashes, workspace dependencies, no generic `Result` names in `.did`, GitHub workflows, clippy, shell). |
+| `checks.yml`  | `did`                       | `npm run did`, then fails on any diff in the committed `.did` files: run `npm run did` locally and commit the result.                                                      |
+| `checks.yml`  | `checks-pass`               | Aggregator gate via `.github/actions/needs_success`.                                                                                                                       |
+| `tests.yml`   | `unit`                      | `npm run build` then `npm run test:unit` (`cargo test --lib --bins`).                                                                                                      |
+| `tests.yml`   | `integration`               | `npm run build` then `npm run test:integration`.                                                                                                                           |
+| `tests.yml`   | `tests-pass`                | Aggregator gate via `.github/actions/needs_success`.                                                                                                                       |
+| `release.yml` | `wasm`, `candid`, `release` | Triggered by `push: tags: v*`, GitHub `release` events, or `workflow_dispatch`. Builds + uploads WASM/`*.did` artifacts and (for tags) cuts a GitHub Release.              |
 
 The `Prepare` composite action (`.github/actions/prepare`) installs
 the rust toolchain (`rust-toolchain.toml`), npm deps, `cargo-binstall`,
@@ -230,13 +230,13 @@ baseline measured when they were added. They pass today and may only
 get stricter: lower a threshold (or shrink a baseline list) in the PR
 that improves the code, never raise it.
 
-| Gate                                                          | Where                                                                                                          | Baseline                                                                                                                       |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| No `unwrap`, `expect`, `panic!`, `unreachable!` outside tests | `[workspace.lints.clippy]` in `Cargo.toml`; tests allowed by `clippy.toml` and `src/clearing/tests/it/main.rs` | 10 existing sites marked `#[expect(..., reason = "baseline of the quality gate: ...")]`; remove the attribute when you fix one |
-| Function length (`too_many_lines`)                            | `too-many-lines-threshold` in `clippy.toml`                                                                    | 238 lines (`execute_trade_impl`)                                                                                               |
-| Cognitive complexity (`cognitive_complexity`)                 | `cognitive-complexity-threshold` in `clippy.toml`                                                              | 21 (`add_series_impl`)                                                                                                         |
-| Duplicated Rust code (`jscpd`)                                | `.jscpd.json`, run by `scripts/lint.duplication.sh`                                                            | 7.2% of lines (7.11% measured); list the clones with `npx jscpd --reporters console`                                           |
-| Lower layers of the clearing importing `api/`                 | `scripts/lint.layering.sh`                                                                                     | 5 files in its `BASELINE`; the script fails when one is clean and still listed                                                 |
+| Gate                                                          | Where                                                                                                          | Baseline                                                                                                                      |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| No `unwrap`, `expect`, `panic!`, `unreachable!` outside tests | `[workspace.lints.clippy]` in `Cargo.toml`; tests allowed by `clippy.toml` and `src/clearing/tests/it/main.rs` | 9 existing sites marked `#[expect(..., reason = "baseline of the quality gate: ...")]`; remove the attribute when you fix one |
+| Function length (`too_many_lines`)                            | `too-many-lines-threshold` in `clippy.toml`                                                                    | 238 lines (`execute_trade_impl`)                                                                                              |
+| Cognitive complexity (`cognitive_complexity`)                 | `cognitive-complexity-threshold` in `clippy.toml`                                                              | 21 (`add_series_impl`)                                                                                                        |
+| Duplicated Rust code (`jscpd`)                                | `.jscpd.json`, run by `scripts/lint.duplication.sh`                                                            | 7.0% of lines (6.99% measured); list the clones with `npx jscpd --reporters console`                                          |
+| Lower layers of the clearing importing `api/`                 | `scripts/lint.layering.sh`                                                                                     | 5 files in its `BASELINE`; the script fails when one is clean and still listed                                                |
 
 ## 7. After CI fails
 

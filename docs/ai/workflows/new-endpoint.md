@@ -7,7 +7,7 @@ The most common change in the history (`feat(clearing): add list_series_traded_v
 1. **Pick the domain folder** under `src/clearing/src/api/` (`trade`, `settlement`, `account`, `collateral`, `admin`, `leaderboard`, ...). A new domain folder needs the owner's approval.
 2. **Define the types** in that folder:
    - `params.rs`: `<Action>Params`.
-   - `results.rs`: `<Action>Result` as an `Ok`/`Err` enum with `impl From<Result<T, <Domain>Error>>`, or a plain record for a query that cannot fail.
+   - `results.rs`: `<Action>Result` as an `Ok`/`Err` enum with `impl_from_result!(<Action>Result, T, <Domain>Error)`, or a plain record for a query that cannot fail.
    - `errors.rs`: new variants on the existing `<Domain>Error`, wrapping `CommonError` for the generic cases.
    - Every type derives `CandidType, Serialize, Deserialize, Clone, Debug` and has doc comments. Before adding a type, check [`../reusability.md`](../reusability.md) (pagination, ids, prices, domains already exist).
 3. **Write the pure core** as `<action>_impl` next to the endpoint, or in the domain module (`trade/`, `account/`, `payoffs/`) if another endpoint needs it. It takes the state, the caller and `now` as arguments, validates everything first, then mutates. Unit tests go in the file's `#[cfg(test)] mod tests` (for trade, in `api/trade/tests/`), covering every error variant.

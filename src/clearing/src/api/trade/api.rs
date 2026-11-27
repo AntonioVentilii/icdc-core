@@ -31,6 +31,7 @@ use crate::{
     },
     payoffs::{get_required_margin, scale_price, RoundingMode},
     trade::{
+        orders::cancel_resting_orders,
         service::{execute_trade_impl, internal_execute_trade},
         types::ExecuteTradeParams,
     },
@@ -326,35 +327,14 @@ pub async fn cancel_limit_order(params: CancelLimitOrderParams) -> SubmitMatched
 
         let order_id = params.order_id;
 
-        let order = LIMIT_ORDERS.with(|m| {
-            let mut m = m.borrow_mut();
+        let creator = LIMIT_ORDERS.with(|m| m.borrow().get(&order_id).map(|o| o.creator));
+        match creator {
+            None => return Err(TradeError::OrderNotFound(order_id)),
+            Some(creator) if creator != caller => return Err(TradeError::NotOrderCreator),
+            Some(_) => {}
+        }
 
-            if let Some(o) = m.get(&order_id) {
-                if o.creator != caller {
-                    return Err(TradeError::NotOrderCreator);
-                }
-                #[expect(
-                    clippy::unwrap_used,
-                    reason = "baseline of the quality gate: return an error instead, see docs/ai/patterns.md"
-                )]
-                let order = m.remove(&order_id).unwrap();
-                Ok(order)
-            } else {
-                Err(TradeError::OrderNotFound(order_id))
-            }
-        })?;
-
-        ACCOUNT_STATES.with(|accounts| {
-            let mut accounts = accounts.borrow_mut();
-            if let Some(acc) = accounts.get_mut(&caller) {
-                let domain = order.balance_domain;
-                let current = acc.get_reserved_margin_usd(domain);
-                acc.set_reserved_margin_usd(
-                    domain,
-                    current.saturating_sub(order.blocked_margin_usd),
-                );
-            }
-        });
+        cancel_resting_orders(|o| o.order_id == order_id);
 
         Ok(true)
     })

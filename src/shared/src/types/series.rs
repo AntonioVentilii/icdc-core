@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     constants::{DEFAULT_SOCIAL_MAX_PER_HOUR, DEFAULT_SOCIAL_MAX_PER_USER, MAX_LOCALE_LEN},
+    impl_from_result,
     types::{
         description::Description, domain::BalanceDomain, engine::EngineId, groups::TradingAccess,
         payout::PayoutUnit, price::Price, resolution::Resolution,
@@ -883,14 +884,7 @@ pub enum AddSeriesResult {
     Err(SeriesError),
 }
 
-impl From<Result<SeriesId, SeriesError>> for AddSeriesResult {
-    fn from(value: Result<SeriesId, SeriesError>) -> Self {
-        match value {
-            Ok(v) => AddSeriesResult::Ok(v),
-            Err(e) => AddSeriesResult::Err(e),
-        }
-    }
-}
+impl_from_result!(AddSeriesResult, SeriesId, SeriesError);
 
 /// Input parameters for [`update_series_metadata`](../../registry/index.html).
 ///

@@ -1,7 +1,7 @@
 {
 	"path": ["src"],
 	"format": ["rust"],
-	"threshold": 7.2,
+	"threshold": 7.0,
 	"reporters": ["threshold"],
 	"gitignore": true
 }

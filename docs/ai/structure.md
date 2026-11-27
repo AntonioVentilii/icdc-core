@@ -34,7 +34,7 @@ api/            one folder per domain: account, admin, collateral, general, lead
     errors.rs   <Domain>Error
     tests/      (trade only) in-crate unit tests split by scenario
 account/        AccountService (account-state response) and reassignment (re-keying a user)
-trade/          execute_trade_impl and its params: the core trade mutation
+trade/          execute_trade_impl and its params: the core trade mutation; order cancellation
 payoffs/        payoff, settlement value and required margin per PayoffType; fees
 risk/           margin-model risk engine: fixed point, price history, volatility, calendar,
                 parameters with bounds, roles and the timelock (docs/risk/margin-model.md)

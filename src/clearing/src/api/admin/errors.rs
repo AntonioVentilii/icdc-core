@@ -2,7 +2,10 @@ use candid::CandidType;
 use serde::{Deserialize, Serialize};
 use shared::types::{asset::errors::AssetError, AssetId};
 
-use crate::types::errors::CommonError;
+use crate::{
+    account::reassignment::ReassignmentConflict,
+    types::{errors::CommonError, user::User},
+};
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 pub enum WithdrawFundError {
@@ -61,7 +64,9 @@ pub enum ReassignAccountError {
     /// `new_owner` already has clearing state; this primitive reassigns, it never merges.
     TargetAccountNotEmpty,
     /// `old_owner` has resting limit orders; they must be cancelled first so the
-    /// book's ownership assumptions are never mutated behind its back.
+    /// book's ownership assumptions are never mutated behind its back. A
+    /// controller can cancel them with `admin_cancel_limit_orders` when the old
+    /// principal can no longer sign.
     OpenOrdersExist,
     /// `old_owner` or `new_owner` has non-finalised deposit, withdrawal, settlement,
     /// or domain-migration plans that would act on the wrong owner mid-flight.
@@ -90,4 +95,25 @@ pub enum ReassignAccountError {
         asset_id: AssetId,
         error: AssetError,
     },
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub enum AdminCancelLimitOrdersError {
+    Common(CommonError),
+    /// `owner` is the anonymous principal, which can never hold orders.
+    AnonymousOwner,
+    /// A reassignment touching `owner` has not finalised; cancelling under a
+    /// locked principal would act on an account that is mid-move.
+    AccountUnderReassignment {
+        /// The principal whose account is being reassigned.
+        user: User,
+    },
+}
+
+impl From<ReassignmentConflict> for AdminCancelLimitOrdersError {
+    fn from(conflict: ReassignmentConflict) -> Self {
+        Self::AccountUnderReassignment {
+            user: conflict.user,
+        }
+    }
 }

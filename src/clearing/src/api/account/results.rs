@@ -1,6 +1,9 @@
 use candid::{CandidType, Deserialize};
 use serde::Serialize;
-use shared::types::{AssetId, OutcomeId, SeriesId};
+use shared::{
+    impl_from_result,
+    types::{AssetId, OutcomeId, SeriesId},
+};
 
 use super::errors::AccountStateError;
 use crate::types::margin::AccountState;
@@ -41,14 +44,11 @@ pub enum GetAccountStateResult {
     /// Failed to retrieve the account state.
     Err(AccountStateError),
 }
-impl From<Result<AccountStateResponse, AccountStateError>> for GetAccountStateResult {
-    fn from(value: Result<AccountStateResponse, AccountStateError>) -> Self {
-        match value {
-            Ok(v) => GetAccountStateResult::Ok(v),
-            Err(e) => GetAccountStateResult::Err(e),
-        }
-    }
-}
+impl_from_result!(
+    GetAccountStateResult,
+    AccountStateResponse,
+    AccountStateError
+);
 
 /// Aggregate lean of the supplied principal set on a single outcome of a
 /// series.

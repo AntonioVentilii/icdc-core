@@ -17,6 +17,7 @@ What already exists in `icdc-core`. Search here and in the code before writing a
 
 - `series.rs`: `Series` (with `generate_id`, `status`, `is_tradeable_at`, `has_resolvable_payoff`), `SeriesId`, `OutcomeId`, `Outcome`, `PayoffType`, `SettlementInput`, `SeriesStatus`, `SeriesError`, `AddSeriesParams`, `ForkSeriesParams`, `UpdateSeriesMetadataParams`, `AddSeriesResult`, `UpdateSeriesResult`, `SeriesPage`, `SocialLimits`, `is_valid_locale`.
 - `series.rs`: `PaginationParams::apply` (cursor pagination over any series iterator) and `ListSeriesParams` with `matches`, `matches_expiry`, `matches_tradeable_now`, `matches_due`, `matches_time`. Reuse them for every list endpoint.
+- `result.rs`: `impl_from_result!` (exported as `shared::impl_from_result`), the `From<Result<T, E>>` impl of an `Ok`/`Err` result enum.
 - `price.rs`: `Price` (value plus decimals). `decimal.rs`: `DecimalValue`.
 - `payout.rs`: `PayoutUnit` (`usd()`, `to_asset`), `FiatUnit`, `NonMonetaryUnit`, `SocialReward` (`validate`).
 - `domain.rs`: `BalanceDomain`, `AllowedBalanceDomains` (validated, non-empty), `DomainPolicy`.
@@ -46,7 +47,7 @@ What already exists in `icdc-core`. Search here and in the code before writing a
 
 ### Domain logic
 
-- `trade/service.rs`: `internal_execute_trade`, `execute_trade_impl` (the trade mutation); `trade/types.rs`: `ExecuteTradeParams`.
+- `trade/service.rs`: `internal_execute_trade`, `execute_trade_impl` (the trade mutation); `trade/orders.rs`: `cancel_resting_orders` (takes matching limit orders off the book and releases their reserved margin; every cancellation path uses it); `trade/types.rs`: `ExecuteTradeParams`.
 - `account/service.rs`: `AccountService::build_account_state_response`.
 - `account/reassignment.rs`: `ReassignmentGuard` (`acquire`, `revalidate`), `ReassignmentMark`, `ReassignmentConflict`, `reassign_account`.
 - `payoffs/mod.rs`: `get_unit_payoff`, `get_settlement_value`, `get_required_margin`, `PayoffError`; `payoffs/fees.rs`: `calculate_settlement_fee`; `payoffs/utils.rs`: `scale_price`; `payoffs/types.rs`: `RoundingMode`.

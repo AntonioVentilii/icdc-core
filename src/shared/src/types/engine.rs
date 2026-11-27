@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use candid::{CandidType, Principal};
 use serde::{Deserialize, Serialize};
 
-use crate::types::series::SocialLimits;
+use crate::{impl_from_result, types::series::SocialLimits};
 
 /// A unique, opaque identifier for an Engine.
 ///
@@ -214,14 +214,7 @@ pub enum RegisterEngineResult {
     Err(EngineError),
 }
 
-impl From<Result<EngineId, EngineError>> for RegisterEngineResult {
-    fn from(value: Result<EngineId, EngineError>) -> Self {
-        match value {
-            Ok(v) => RegisterEngineResult::Ok(v),
-            Err(e) => RegisterEngineResult::Err(e),
-        }
-    }
-}
+impl_from_result!(RegisterEngineResult, EngineId, EngineError);
 
 /// The result of an Engine mutation operation.
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -230,11 +223,4 @@ pub enum EngineResult {
     Err(EngineError),
 }
 
-impl From<Result<(), EngineError>> for EngineResult {
-    fn from(value: Result<(), EngineError>) -> Self {
-        match value {
-            Ok(()) => EngineResult::Ok,
-            Err(e) => EngineResult::Err(e),
-        }
-    }
-}
+impl_from_result!(EngineResult, (), EngineError);

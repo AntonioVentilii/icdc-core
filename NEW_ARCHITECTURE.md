@@ -297,8 +297,8 @@ Haircuts are static for phase two.
 Example:
 
 - USDC: 100%
-- BTC-like: 80–90%
-- ETH-like: 75–85%
+- BTC-like: 80 to 90%
+- ETH-like: 75 to 85%
 - ICP-like: lower and conservative
 
 No correlation matrix, beta model, or portfolio VaR is required initially.
