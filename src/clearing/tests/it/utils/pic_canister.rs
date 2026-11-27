@@ -130,19 +130,6 @@ pub trait PicCanisterTrait {
             .unwrap()
             .to_owned()
     }
-
-    /// The path to the wasm after `dfx deploy`.  Expects the Wasm to be gzipped.
-    ///
-    /// If not already gzipped, please add this to the canister declaration in `dfx.json`: `"gzip":
-    /// true`
-    #[expect(dead_code)]
-    fn dfx_wasm_path(name: &str) -> String {
-        Self::workspace_dir()
-            .join(format!(".dfx/local/canisters/{name}/{name}.wasm.gz"))
-            .to_str()
-            .unwrap()
-            .to_owned()
-    }
 }
 
 /// A typical canister running on `PocketIC`.

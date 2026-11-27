@@ -16,16 +16,6 @@ pub fn is_internal_asset(asset_id: &AssetId) -> bool {
     CONFIG.with(|c| &c.borrow().internal_ledger.asset_id == asset_id)
 }
 
-/// Returns the configured internal ledger ID (vUSD).
-#[expect(dead_code)]
-pub fn get_internal_ledger_id() -> Principal {
-    CONFIG.with(|c| match c.borrow().internal_ledger.asset {
-        Asset::Icrc(p) => p,
-        #[expect(clippy::panic, reason = "baseline of the quality gate: return an error instead, see docs/ai/patterns.md")]
-        _ => panic!("Internal ledger must be an ICRC asset"),
-    })
-}
-
 /// Returns the configured internal asset ID.
 pub fn get_internal_asset_id() -> AssetId {
     CONFIG.with(|c| c.borrow().internal_ledger.asset_id.clone())
