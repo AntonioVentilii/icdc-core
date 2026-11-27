@@ -12,17 +12,17 @@ An endpoint reads the caller and the global state, does the awaits it needs, the
 - `add_series` reads caller and time, then calls `add_series_impl`: `src/registry/src/api/series.rs:56`, core at `:82`.
 - `internal_execute_trade` awaits the series, then calls the synchronous `execute_trade_impl(&series, params)`: `src/clearing/src/trade/service.rs:25`, core at `:39`.
 
-Name the core `<endpoint>_impl` (or `<endpoint>_logic` where the file already does, as `mint_complete_set_logic` in `src/clearing/src/api/trade/api.rs:1016`). A core used by more than one endpoint moves to the domain module (`trade/`, `account/`, `payoffs/`); a domain service struct (`AccountService` in `src/clearing/src/account/service.rs:14`) exists only where it already does.
+Name the core `<endpoint>_impl` (or `<endpoint>_logic` where the file already does, as `mint_complete_set_logic` in `src/clearing/src/api/trade/api.rs:1001`). A core used by more than one endpoint moves to the domain module (`trade/`, `account/`, `payoffs/`); a domain service struct (`AccountService` in `src/clearing/src/account/service.rs:14`) exists only where it already does.
 
 ### Params, Result and Error types
 
 Each endpoint has its own types in the domain folder: `<Action>Params` in `params.rs`, `<Action>Result` in `results.rs`, `<Domain>Error` in `errors.rs`. Every one derives `CandidType, Serialize, Deserialize, Clone, Debug`.
 
-A result is a Candid-friendly `Ok`/`Err` enum built from a Rust `Result` through `From`, so the endpoint body works with `?` and ends with `result.into()`. The `From` impl is one line, `impl_from_result!(<Result>, <Ok type or ()>, <Error>)` (`src/shared/src/types/result.rs`); write it by hand only when the value has to be transformed on the way, as `UpdateSeriesResult` boxes its series: `SubmitMatchedTradeResult` in `src/clearing/src/api/trade/results.rs:12`, used at `src/clearing/src/api/trade/api.rs:193`.
+A result is a Candid-friendly `Ok`/`Err` enum built from a Rust `Result` through `From`, so the endpoint body works with `?` and ends with `result.into()`. The `From` impl is one line, `impl_from_result!(<Result>, <Ok type or ()>, <Error>)` (`src/shared/src/types/result.rs`); write it by hand only when the value has to be transformed on the way, as `UpdateSeriesResult` boxes its series: `SubmitMatchedTradeResult` in `src/clearing/src/api/trade/results.rs:12`, used at `src/clearing/src/api/trade/api.rs:194`.
 
 ### Guards
 
-Authorization is declared on the endpoint, never checked ad hoc inside it (public discovery queries such as `list_series`, `src/clearing/src/api/general/api.rs:9`, carry no guard on purpose): `#[update(guard = "caller_is_not_anonymous")]` (`src/clearing/src/api/trade/api.rs:160`) or `guard = "caller_is_controller"` (`:365`). The guards live in each canister's `guards.rs` (`src/clearing/src/guards.rs:5`). Role checks that need arguments (engine roles, group membership) are functions such as `has_engine_role_on` in the registry's `guards.rs`, called first thing in the endpoint.
+Authorization is declared on the endpoint, never checked ad hoc inside it (public discovery queries such as `list_series`, `src/clearing/src/api/general/api.rs:9`, carry no guard on purpose): `#[update(guard = "caller_is_not_anonymous")]` (`src/clearing/src/api/trade/api.rs:161`) or `guard = "caller_is_controller"` (`:350`). The guards live in each canister's `guards.rs` (`src/clearing/src/guards.rs:5`). Role checks that need arguments (engine roles, group membership) are functions such as `has_engine_role_on` in the registry's `guards.rs`, called first thing in the endpoint.
 
 ## Errors
 
@@ -42,7 +42,7 @@ Authorization is declared on the endpoint, never checked ad hoc inside it (publi
 
 ### Validate, then mutate
 
-Do every await first (registry lookups, authorization), then validate and compute, then mutate, with no await in between. `submit_market_order` (`src/clearing/src/api/trade/api.rs:161`) awaits the series and the trading access, then calls the synchronous `submit_market_order_impl` (`:196`), which validates and mutates in one message.
+Do every await first (registry lookups, authorization), then validate and compute, then mutate, with no await in between. `submit_market_order` (`src/clearing/src/api/trade/api.rs:162`) awaits the series and the trading access, then calls the synchronous `submit_market_order_impl` (`:197`), which validates and mutates in one message.
 
 ### Plan, Execute, Finalise
 
@@ -62,7 +62,7 @@ Use `Call::bounded_wait(canister, "method").with_args(...)`, map transport and d
 
 Anything that re-keys a user's state (today account reassignment, `src/clearing/src/account/reassignment.rs`) survives two hazards that durable plans alone do not cover:
 
-- **In-flight user calls.** A call that passed its guard and is suspended at an await resumes after the re-key and would recreate state under the old principal. Every post-await mutation is guarded by a `ReassignmentGuard`: acquire it before the first await, revalidate it right before the mutation (`ReassignmentGuard::acquire`, `src/clearing/src/account/reassignment.rs:87`; `revalidate`, `:102`; in use at `src/clearing/src/api/trade/api.rs:181` and `:187`). It rejects a principal locked by a pending move, and one whose generation changed while the call was suspended.
+- **In-flight user calls.** A call that passed its guard and is suspended at an await resumes after the re-key and would recreate state under the old principal. Every post-await mutation is guarded by a `ReassignmentGuard`: acquire it before the first await, revalidate it right before the mutation (`ReassignmentGuard::acquire`, `src/clearing/src/account/reassignment.rs:87`; `revalidate`, `:102`; in use at `src/clearing/src/api/trade/api.rs:182` and `:188`). It rejects a principal locked by a pending move, and one whose generation changed while the call was suspended.
 - **On-ledger custody.** Internal balances are only half the account: collateral lives in a subaccount derived from the principal, so a re-key that does not drain it strands the funds. Re-key first, synchronously, in the same message prefix as the validation, then sweep each asset by re-reading the ledger balance and moving `balance - fee`. Deriving the amount from the ledger, never from internal accounting, is what makes a retry idempotent.
 
 ## Assets and networks
@@ -85,6 +85,6 @@ Do not copy these; fix one only in its own PR.
 - **God type file.** `src/shared/src/types/series.rs` (about 975 lines before its tests) holds the `Series` type, ids, params, results, errors, pagination and filters. New series-related types get their own module under `src/shared/src/types/`.
 - **Guards copied per canister.** `caller_is_not_anonymous` and `caller_is_controller` are the same code in `src/clearing/src/guards.rs:5`, `src/registry/src/guards.rs:8` and `src/minter/src/guards.rs:7`, including a hand-written "Update call error. RejectionCode..." string. `has_engine_role` and `has_engine_role_on` (`src/registry/src/guards.rs:30`, `:45`) repeat the same predicate.
 - **Registry call boilerplate.** `is_oracle_authorized` and `is_trading_authorized` (`src/clearing/src/utils/registry.rs:13`, `:48`) repeat the call-and-decode body, and `ensure_series_registered` inlines a third copy with a different error type (`src/clearing/src/utils/series.rs:81`).
-- **Panics in production paths.** `unwrap()` at `src/registry/src/api/engines.rs:107`, `src/clearing/src/api/trade/api.rs:336`, `src/clearing/src/api/admin/api.rs:207`, `src/clearing/src/api/collateral/api.rs:332`; `expect` at `src/clearing/src/types/leaderboard.rs:135`; `unreachable!()` at `src/clearing/src/payoffs/mod.rs:124`; `trap` on bad input in `canonical_id_part` (`src/registry/src/utils.rs:14`). The `expect` on `stable_save` and `stable_restore` in `pre_upgrade`/`post_upgrade` (`src/clearing/src/memory.rs:200`, `src/minter/src/lib.rs:30`) is the one accepted case: trapping there is the intended rollback.
+- **Panics in production paths.** `unwrap()` at `src/registry/src/api/engines.rs:107`, `src/clearing/src/api/admin/api.rs:210`, `src/clearing/src/api/collateral/api.rs:332`; `expect` at `src/clearing/src/types/leaderboard.rs:135`; `unreachable!()` at `src/clearing/src/payoffs/mod.rs:124`; `trap` on bad input in `canonical_id_part` (`src/registry/src/utils.rs:14`). The `expect` on `stable_save` and `stable_restore` in `pre_upgrade`/`post_upgrade` (`src/clearing/src/memory.rs:200`, `src/minter/src/lib.rs:30`) is the one accepted case: trapping there is the intended rollback.
 - **Dead code kept alive** with `#[expect(dead_code)]`: the EVM pieces nothing calls yet, `external_evm` (`src/clearing/src/types/account.rs:39`), `eth_sign_transaction` and `send_raw_transaction` (`src/clearing/src/assets/evm/client.rs:50`, `:128`).
 - **Lower layers importing `api/`.** See [`structure.md`](structure.md#dependency-direction).
