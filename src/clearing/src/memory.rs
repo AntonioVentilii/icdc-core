@@ -11,6 +11,7 @@ use shared::types::{
 use crate::{
     account::reassignment::ReassignmentMark,
     migrations::{into_current, LegacyStableState},
+    risk::state::RiskState,
     types::{
         event::{Event, EventType, SeriesTradePoint, SeriesVolumeAggregate},
         leaderboard::{LeaderboardWindow, PnlAggregate},
@@ -105,6 +106,8 @@ thread_local! {
     /// and generations restart from zero because no suspended call survives an
     /// upgrade to revalidate against them.
     pub static REASSIGNMENT_MARKS: RefCell<BTreeMap<User, ReassignmentMark>> = const { RefCell::new(BTreeMap::new()) };
+    /// Risk engine state (`docs/risk/margin-model.md`, phase 1): roles, parameters, timelock, price history.
+    pub static RISK_STATE: RefCell<RiskState> = RefCell::new(RiskState::default());
 }
 
 /// Returns the cached transfer fee for `asset_id`, if one has been recorded.
@@ -171,6 +174,7 @@ pub fn save_state() {
         MIGRATION_PLANS.with(|f| f.borrow().clone());
     let reassignment_plans: BTreeMap<ReassignmentKey, ReassignmentPlan> =
         REASSIGNMENT_PLANS.with(|f| f.borrow().clone());
+    let risk: RiskState = RISK_STATE.with(|f| f.borrow().clone());
     let state = StableState {
         config,
         positions,
@@ -195,6 +199,7 @@ pub fn save_state() {
         domain_policies,
         migration_plans,
         reassignment_plans: Some(reassignment_plans),
+        risk: Some(risk),
     };
 
     #[expect(
@@ -245,6 +250,7 @@ pub fn restore_state() {
         domain_policies,
         migration_plans,
         reassignment_plans,
+        risk,
     } = state;
 
     POSITIONS.with(|p: &RefCell<PositionsMap>| {
@@ -281,6 +287,7 @@ pub fn restore_state() {
     DOMAIN_POLICIES.with(|f| *f.borrow_mut() = domain_policies);
     MIGRATION_PLANS.with(|f| *f.borrow_mut() = migration_plans);
     REASSIGNMENT_PLANS.with(|f| *f.borrow_mut() = reassignment_plans.unwrap_or_default());
+    RISK_STATE.with(|f| *f.borrow_mut() = risk.unwrap_or_default());
     rebuild_reassignment_marks();
 }
 

@@ -100,6 +100,7 @@ pub fn into_current(legacy: LegacyStableState) -> StableState {
         domain_policies: legacy.domain_policies,
         migration_plans: legacy.migration_plans,
         reassignment_plans: None,
+        risk: None,
     }
 }
 
@@ -112,7 +113,69 @@ mod tests {
     };
 
     use super::*;
-    use crate::memory::default_config;
+    use crate::{
+        memory::default_config,
+        risk::state::RiskState,
+        types::plans::{ReassignmentKey, ReassignmentPlan},
+    };
+
+    /// The shape of [`StableState`] just before the risk engine: every field except `risk`.
+    #[derive(CandidType, Deserialize, Clone, Debug)]
+    struct PreRiskStableState {
+        config: Config,
+        positions: Vec<Position>,
+        accounts: BTreeMap<User, AccountState>,
+        series: BTreeMap<SeriesId, Series>,
+        events: Vec<Event>,
+        next_id: u64,
+        registry: Principal,
+        deposit_plans: BTreeMap<DepositKey, DepositPlan>,
+        withdrawal_plans: BTreeMap<WithdrawalKey, WithdrawalPlan>,
+        fund_withdrawal_plans: BTreeMap<String, FundWithdrawalPlan>,
+        executed_trades: BTreeMap<TradeId, u64>,
+        frozen_transfers: BTreeMap<TransferId, PositionProof>,
+        accepted_transfers: BTreeMap<TransferId, bool>,
+        settlement_plans: BTreeMap<SeriesId, SettlementPlan>,
+        limit_orders: BTreeMap<OrderId, LimitOrder>,
+        insurance_fund: BTreeMap<AssetId, u128>,
+        treasury: BTreeMap<AssetId, u128>,
+        collateral_assets: BTreeMap<AssetId, CollateralAssetConfig>,
+        evm_addresses: BTreeMap<Principal, String>,
+        asset_metrics: BTreeMap<AssetId, AssetMetrics>,
+        domain_policies: BTreeMap<BalanceDomain, DomainPolicy>,
+        migration_plans: BTreeMap<MigrationKey, MigrationPlan>,
+        reassignment_plans: Option<BTreeMap<ReassignmentKey, ReassignmentPlan>>,
+    }
+
+    impl From<StableState> for PreRiskStableState {
+        fn from(s: StableState) -> Self {
+            Self {
+                config: s.config,
+                positions: s.positions,
+                accounts: s.accounts,
+                series: s.series,
+                events: s.events,
+                next_id: s.next_id,
+                registry: s.registry,
+                deposit_plans: s.deposit_plans,
+                withdrawal_plans: s.withdrawal_plans,
+                fund_withdrawal_plans: s.fund_withdrawal_plans,
+                executed_trades: s.executed_trades,
+                frozen_transfers: s.frozen_transfers,
+                accepted_transfers: s.accepted_transfers,
+                settlement_plans: s.settlement_plans,
+                limit_orders: s.limit_orders,
+                insurance_fund: s.insurance_fund,
+                treasury: s.treasury,
+                collateral_assets: s.collateral_assets,
+                evm_addresses: s.evm_addresses,
+                asset_metrics: s.asset_metrics,
+                domain_policies: s.domain_policies,
+                migration_plans: s.migration_plans,
+                reassignment_plans: s.reassignment_plans,
+            }
+        }
+    }
 
     fn legacy_series(id: &str, description: Description) -> LegacySeries {
         LegacySeries {
@@ -203,5 +266,48 @@ mod tests {
                 .clause,
             NO_RESOLUTION_PLACEHOLDER
         );
+    }
+
+    /// The risk state is an optional field: state written before the risk engine existed restores
+    /// the default `RiskState`, and a populated one survives a save and restore.
+    #[test]
+    fn risk_state_is_optional_and_round_trips() {
+        let mut state = into_current(legacy_state(BTreeMap::new()));
+        assert!(state.risk.is_none());
+        let decoded: StableState = decode_one(&encode_one(state.clone()).unwrap()).unwrap();
+        assert_eq!(decoded.risk.unwrap_or_default(), RiskState::default());
+
+        let mut risk = RiskState::default();
+        risk.risk_admins.insert(Principal::from_slice(&[7]));
+        state.risk = Some(risk.clone());
+        let decoded: StableState = decode_one(&encode_one(state).unwrap()).unwrap();
+        assert_eq!(decoded.risk, Some(risk));
+    }
+
+    /// A blob written by the release before the risk engine has no `risk` field at all (not an
+    /// encoded `null`). It must decode into the current [`StableState`] with `risk` absent and
+    /// every other field intact.
+    #[test]
+    fn a_pre_risk_blob_decodes_without_the_risk_field() {
+        let mut series = BTreeMap::new();
+        series.insert(
+            SeriesId::from("s".to_owned()),
+            legacy_series("s", Description::plain("Settles at expiry")),
+        );
+        let mut current = into_current(legacy_state(series));
+        current.reassignment_plans = Some(BTreeMap::new());
+        let expected = encode_one(current.clone()).unwrap();
+
+        let bytes = encode_one(PreRiskStableState::from(current)).unwrap();
+        let decoded: StableState = decode_one(&bytes).unwrap();
+
+        assert!(decoded.risk.is_none());
+        assert_eq!(decoded.next_id, 42);
+        assert!(decoded
+            .reassignment_plans
+            .as_ref()
+            .is_some_and(BTreeMap::is_empty));
+        // Re-encoding gives the bytes of the original state: no other field was lost or changed.
+        assert_eq!(encode_one(decoded).unwrap(), expected);
     }
 }
