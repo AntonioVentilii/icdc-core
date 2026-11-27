@@ -130,6 +130,59 @@ fn rest_orders_on_two_series(env: &TestSetup, owner: Principal, prefix: &str) ->
     })
 }
 
+/// Funds `bystander` and rests one unmatched buy on `series_id` under the
+/// order id `reassign_resume_bystander`.
+fn rest_bystander_order(env: &TestSetup, bystander: Principal, series_id: SeriesId) {
+    env.deposit_collateral(bystander, "ICP", Nat::from(10_000_000_000_u128), None);
+    env.pic.tick();
+
+    let res = env.submit_limit_order(
+        bystander,
+        "reassign_resume_bystander",
+        series_id,
+        Side::Buy,
+        1,
+        500_000,
+    );
+    assert!(
+        matches!(res, SubmitMatchedTradeResult::Ok(_)),
+        "got {res:?}"
+    );
+}
+
+/// Asserts that `admin_cancel_limit_orders` refuses every principal in `locked`
+/// with `AccountUnderReassignment` and leaves the bystander's order and
+/// reserved margin as they were.
+fn assert_admin_cancel_rejected_while_locked(
+    env: &TestSetup,
+    locked: [Principal; 2],
+    bystander: Principal,
+) {
+    let bystander_reserved = settlement_reserved_margin(env, bystander);
+
+    for principal in locked {
+        let res = cancel_orders(env, env.controller, principal, None).unwrap();
+        assert!(
+            matches!(
+                res,
+                AdminCancelLimitOrdersResult::Err(
+                    AdminCancelLimitOrdersError::AccountUnderReassignment { user }
+                ) if user == User::from(principal)
+            ),
+            "got {res:?}"
+        );
+    }
+
+    assert_eq!(
+        resting_order_ids(env),
+        vec![OrderId::from("reassign_resume_bystander".to_owned())]
+    );
+    assert_eq!(
+        settlement_reserved_margin(env, bystander),
+        bystander_reserved
+    );
+}
+
 fn settlement_equity(env: &TestSetup, caller: Principal) -> GetAccountStateResult {
     env.clearing
         .update(
@@ -550,6 +603,13 @@ fn admin_reassign_account_resumes_after_a_failed_custody_sweep() {
     env.pic.tick();
 
     let series_id = env.add_binary_series("REASSIGN-RESUME", 1_000_000, BalanceDomain::Settlement);
+
+    // A locked principal can never hold resting orders (the reassignment
+    // refuses them), so a bystander's order is what shows the rejected admin
+    // cancellation below leaves the book alone.
+    let bystander = test_user(55);
+    rest_bystander_order(&env, bystander, series_id.clone());
+
     let icp_ledger = env
         .ledgers
         .get("ICP")
@@ -611,6 +671,9 @@ fn admin_reassign_account_resumes_after_a_failed_custody_sweep() {
         ),
         "got {res:?}"
     );
+
+    // Nor can a controller cancel orders under either locked principal.
+    assert_admin_cancel_rejected_while_locked(&env, [user_a, new_owner], bystander);
 
     env.pic
         .start_canister(icp_ledger, Some(env.controller))
