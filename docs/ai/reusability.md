@@ -47,7 +47,7 @@ What already exists in `icdc-core`. Search here and in the code before writing a
 
 ### Domain logic
 
-- `trade/service.rs`: `internal_execute_trade`, `execute_trade_impl` (the trade mutation); `trade/types.rs`: `ExecuteTradeParams`.
+- `trade/service.rs`: `internal_execute_trade`, `execute_trade_impl` (the trade mutation); `trade/orders.rs`: `cancel_resting_orders` (takes matching limit orders off the book and releases their reserved margin; every cancellation path uses it); `trade/types.rs`: `ExecuteTradeParams`.
 - `account/service.rs`: `AccountService::build_account_state_response`.
 - `account/reassignment.rs`: `ReassignmentGuard` (`acquire`, `revalidate`), `ReassignmentMark`, `ReassignmentConflict`, `reassign_account`.
 - `payoffs/mod.rs`: `get_unit_payoff`, `get_settlement_value`, `get_required_margin`, `PayoffError`; `payoffs/fees.rs`: `calculate_settlement_fee`; `payoffs/utils.rs`: `scale_price`; `payoffs/types.rs`: `RoundingMode`.

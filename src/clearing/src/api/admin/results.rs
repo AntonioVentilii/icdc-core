@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use shared::{impl_from_result, types::AssetId};
 
 use super::errors::{
-    CancelFundWithdrawalError, ReassignAccountError, RefreshIcrcAssetMetadataError,
-    RegisterIcrcAssetError, UpdateAssetPriceError, UpdateCollateralAllowedDomainsError,
-    WithdrawFundError,
+    AdminCancelLimitOrdersError, CancelFundWithdrawalError, ReassignAccountError,
+    RefreshIcrcAssetMetadataError, RegisterIcrcAssetError, UpdateAssetPriceError,
+    UpdateCollateralAllowedDomainsError, WithdrawFundError,
 };
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -72,3 +72,15 @@ pub enum ReassignAccountResult {
     Err(ReassignAccountError),
 }
 impl_from_result!(ReassignAccountResult, (), ReassignAccountError);
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub enum AdminCancelLimitOrdersResult {
+    /// The number of orders cancelled; `0` when the owner had none to cancel.
+    Ok(u64),
+    Err(AdminCancelLimitOrdersError),
+}
+impl_from_result!(
+    AdminCancelLimitOrdersResult,
+    u64,
+    AdminCancelLimitOrdersError
+);

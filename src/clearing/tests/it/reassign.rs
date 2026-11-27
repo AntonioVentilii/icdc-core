@@ -7,8 +7,9 @@ use clearing::{
             results::GetAccountStateResult,
         },
         admin::{
-            errors::ReassignAccountError, params::ReassignAccountParams,
-            results::ReassignAccountResult,
+            errors::{AdminCancelLimitOrdersError, ReassignAccountError},
+            params::{AdminCancelLimitOrdersParams, ReassignAccountParams},
+            results::{AdminCancelLimitOrdersResult, ReassignAccountResult},
         },
         collateral::{
             errors::DepositCollateralError,
@@ -17,14 +18,14 @@ use clearing::{
         },
         trade::{
             errors::TradeError,
-            params::{FreezePositionForTransferParams, SubmitMarketOrderParams},
+            params::{FreezePositionForTransferParams, ListOrdersParams, SubmitMarketOrderParams},
             results::SubmitMatchedTradeResult,
         },
     },
     types::{
         margin::Position,
         state::PositionProof,
-        trade::{OrderId, Side, TradeId, TransferId},
+        trade::{LimitOrder, OrderId, Side, TradeId, TransferId},
         user::{DepositId, User, WithdrawalId},
     },
     utils::account::derive_user_subaccount_for_canister,
@@ -64,6 +65,69 @@ fn reassign(
             new_owner,
         },),
     )
+}
+
+fn cancel_orders(
+    env: &TestSetup,
+    caller: Principal,
+    owner: Principal,
+    series_id: Option<SeriesId>,
+) -> Result<AdminCancelLimitOrdersResult, String> {
+    env.clearing.update(
+        caller,
+        "admin_cancel_limit_orders",
+        (AdminCancelLimitOrdersParams { owner, series_id },),
+    )
+}
+
+fn resting_order_ids(env: &TestSetup) -> Vec<OrderId> {
+    let orders: Vec<LimitOrder> = env
+        .clearing
+        .query(
+            env.controller,
+            "list_orders",
+            (ListOrdersParams { series_id: None },),
+        )
+        .unwrap();
+
+    orders.into_iter().map(|o| o.order_id).collect()
+}
+
+fn settlement_reserved_margin(env: &TestSetup, caller: Principal) -> u128 {
+    match settlement_equity(env, caller) {
+        GetAccountStateResult::Ok(resp) => resp
+            .state
+            .get_reserved_margin_usd(BalanceDomain::Settlement),
+        GetAccountStateResult::Err(e) => panic!("account state read failed: {e:?}"),
+    }
+}
+
+/// Funds `owner` and rests one unmatched buy on each of two fresh series,
+/// returning the two series ids.
+fn rest_orders_on_two_series(env: &TestSetup, owner: Principal, prefix: &str) -> [SeriesId; 2] {
+    env.deposit_collateral(owner, "ICP", Nat::from(10_000_000_000_u128), None);
+    env.pic.tick();
+
+    [1, 2].map(|n| {
+        let series_id = env.add_binary_series(
+            &format!("{prefix}-{n}"),
+            1_000_000,
+            BalanceDomain::Settlement,
+        );
+        let res = env.submit_limit_order(
+            owner,
+            &format!("{prefix}_rest_{n}"),
+            series_id.clone(),
+            Side::Buy,
+            1,
+            500_000,
+        );
+        assert!(
+            matches!(res, SubmitMatchedTradeResult::Ok(_)),
+            "got {res:?}"
+        );
+        series_id
+    })
 }
 
 fn settlement_equity(env: &TestSetup, caller: Principal) -> GetAccountStateResult {
@@ -587,4 +651,119 @@ fn admin_reassign_account_resumes_after_a_failed_custody_sweep() {
         matches!(res, SubmitMatchedTradeResult::Ok(_)),
         "got {res:?}"
     );
+}
+
+#[test]
+fn admin_cancel_limit_orders_rejects_non_controller() {
+    let env = TestSetup::default();
+
+    let res = cancel_orders(&env, env.user, test_user(54), None);
+
+    assert_unauthorized(&res);
+}
+
+#[test]
+fn admin_cancel_limit_orders_rejects_anonymous_owner() {
+    let env = TestSetup::default();
+
+    let res = cancel_orders(&env, env.controller, Principal::anonymous(), None).unwrap();
+
+    assert!(
+        matches!(
+            res,
+            AdminCancelLimitOrdersResult::Err(AdminCancelLimitOrdersError::AnonymousOwner)
+        ),
+        "got {res:?}"
+    );
+}
+
+#[test]
+fn admin_cancel_limit_orders_cancels_every_order_of_the_owner() {
+    let env = TestSetup::with_icp();
+    let owner = test_user(54);
+    let other = test_user(55);
+
+    let [series_id, _] = rest_orders_on_two_series(&env, owner, "ADMIN-CANCEL");
+    env.deposit_collateral(other, "ICP", Nat::from(10_000_000_000_u128), None);
+    env.pic.tick();
+    let res = env.submit_limit_order(other, "other_rest", series_id, Side::Buy, 1, 500_000);
+    assert!(
+        matches!(res, SubmitMatchedTradeResult::Ok(_)),
+        "got {res:?}"
+    );
+
+    assert!(settlement_reserved_margin(&env, owner) > 0);
+    let other_reserved = settlement_reserved_margin(&env, other);
+
+    let res = cancel_orders(&env, env.controller, owner, None).unwrap();
+    assert!(
+        matches!(res, AdminCancelLimitOrdersResult::Ok(2)),
+        "got {res:?}"
+    );
+
+    assert_eq!(settlement_reserved_margin(&env, owner), 0);
+    assert_eq!(settlement_reserved_margin(&env, other), other_reserved);
+    assert_eq!(
+        resting_order_ids(&env),
+        vec![OrderId::from("other_rest".to_owned())]
+    );
+
+    let res = cancel_orders(&env, env.controller, owner, None).unwrap();
+    assert!(
+        matches!(res, AdminCancelLimitOrdersResult::Ok(0)),
+        "got {res:?}"
+    );
+}
+
+#[test]
+fn admin_cancel_limit_orders_filters_by_series() {
+    let env = TestSetup::with_icp();
+    let owner = test_user(54);
+
+    let [first, _] = rest_orders_on_two_series(&env, owner, "ADMIN-FILTER");
+    let reserved_before = settlement_reserved_margin(&env, owner);
+
+    let res = cancel_orders(&env, env.controller, owner, Some(first)).unwrap();
+    assert!(
+        matches!(res, AdminCancelLimitOrdersResult::Ok(1)),
+        "got {res:?}"
+    );
+
+    assert_eq!(
+        resting_order_ids(&env),
+        vec![OrderId::from("ADMIN-FILTER_rest_2".to_owned())]
+    );
+    let reserved_after = settlement_reserved_margin(&env, owner);
+    assert!(
+        reserved_after > 0 && reserved_after < reserved_before,
+        "reserved margin went from {reserved_before} to {reserved_after}"
+    );
+}
+
+#[test]
+fn admin_cancel_limit_orders_unblocks_reassignment() {
+    let env = TestSetup::with_icp();
+    let owner = test_user(54);
+    let new_owner = fresh_owner(97);
+
+    rest_orders_on_two_series(&env, owner, "ADMIN-UNBLOCK");
+
+    let res = reassign(&env, env.controller, "reassign_unblock", owner, new_owner).unwrap();
+    assert!(
+        matches!(
+            res,
+            ReassignAccountResult::Err(ReassignAccountError::OpenOrdersExist)
+        ),
+        "got {res:?}"
+    );
+
+    let res = cancel_orders(&env, env.controller, owner, None).unwrap();
+    assert!(
+        matches!(res, AdminCancelLimitOrdersResult::Ok(2)),
+        "got {res:?}"
+    );
+
+    let res = reassign(&env, env.controller, "reassign_unblock", owner, new_owner).unwrap();
+    assert!(matches!(res, ReassignAccountResult::Ok), "got {res:?}");
+    assert!(settlement_balance(&env, new_owner, "ICP") > 0);
 }
