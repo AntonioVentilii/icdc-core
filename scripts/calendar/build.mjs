@@ -56,7 +56,7 @@ function decodeEntities(text) {
 		.replace(/&mdash;|&#8212;/g, '-')
 		.replace(/&amp;/g, '&')
 		.replace(/&#65279;/g, '')
-		.replace(/–/g, '-');
+		.replace(/\u2013/g, '-');
 }
 
 // Strips tags into one item per line, so parsers work on visible text.
