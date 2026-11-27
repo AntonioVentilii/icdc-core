@@ -150,10 +150,13 @@ One logical change per PR. If you catch yourself writing
 | "Refactor 5 modules into shared `Foo`"      | PR 1: introduce `Foo` + migrate 1 caller. PR 2..N: migrate the others. |
 | "Speed up tests via CI cache + lazy WASMs"  | One PR per layer (CI infra; in-process fixture cache).                 |
 
-This is rule 2 of the
+This is rule 2 (scoped) of the
 [universal standard](https://github.com/AntonioVentilii/officina/blob/main/standards/code.md)
 and part of the review step in
-[`governance.md`](governance.md#plan-implement-review).
+[`governance.md`](governance.md#plan-implement-review). Rule 3 of the
+same standard (parallel, not stacked) is why every PR starts from
+`main` ([§3](#3-base-branch--draft-state)): a PR waits for another only
+when it needs the other's code.
 
 When a wave of dependent PRs is genuinely needed, follow the base
 branch + draft rule in [§3](#3-base-branch--draft-state); atomicity
