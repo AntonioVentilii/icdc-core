@@ -45,7 +45,7 @@ guards.rs       endpoint guards
 traits.rs       ClearingAccountExt (subaccount and ICRC account of a User)
 ```
 
-The registry is flatter: `api/{access,engines,groups,oracles,series}.rs` hold endpoints and logic, `guards.rs`, `memory.rs`, `migrations/`, `utils.rs`. Its request and response types live in `src/shared/src/types/` because the clearing decodes them too. The minter is `lib.rs`, `guards.rs`, `state/`, `utils.rs`.
+The registry is flatter: `api/{access,engines,groups,oracles,series}.rs` hold endpoints and logic (the unit tests of `series.rs` are in `api/series/tests.rs`), `guards.rs`, `memory.rs`, `migrations/`, `utils.rs`. Its request and response types live in `src/shared/src/types/` because the clearing decodes them too. The minter is `lib.rs`, `guards.rs`, `state/`, `utils.rs`.
 
 ## Where new code goes
 
